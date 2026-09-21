@@ -669,3 +669,132 @@
 - **未修改** `C:\AI\ComfyUI_PIC`；未下载模型 / 依赖；Python 侧零新依赖。
 - 参考：`D:\devlop\klein启动器`（`aimdo_init.py` / `config.json` 的显存管理）。
 - 环境：Windows 10、PowerShell 7、ComfyUI 便携版 v0.37.0、.NET SDK 10.0.401。
+
+---
+
+## [Step 4] - 2026-09-22
+
+### 目标
+
+实现后端自愈（`HeartbeatLost` → 自动重启）、App 层装配通路、pipeline 优化钩子预留，
+并完成 512² 编辑基线性能实测。范围外：具体 LoRA / MagCache 加载、PE-I2I 重写器、
+`RerunAsync` / `GetTaskAsync`、UI 展示（Step 9）。
+
+### 做了什么
+
+- **C# 契约**（`ZivAiEditor.Contracts/Inference/`）：
+  - 新增 `LoraOptions`、`OptimizationOptions`；`InpaintRequest` 追加可选 `Lora` /
+    `Optimizations`（`init`，默认 `null`）——走 `FROZEN.md` Step 4 修订说明。
+- **自动重启**（`src/ZivAiEditor.Backend/`）：
+  - `PythonProcessManager`：新增 `PythonBackendState` 与配置 `AutoRestartEnabled` /
+    `MaxRestartAttempts` / `RestartBackoffMs`；新增 `AttachInferenceClient` /
+    `DetachInferenceClient`（订阅 `HeartbeatLost`）、`RequestRestartAsync`、`NotifyTaskSucceeded`；
+    事件 `Restarting` / `Restarted` / `RestartFailed`。重启用**新管道名**
+    `zivai.infer.{C#PID}.{seq}`（`PipePath` 改为动态）；指数退避 2/4/8s；超限标记 `Failed`。
+  - `IpcInferenceClient`：构造时 `AttachInferenceClient`；接收循环结束/管道断开时把在飞任务与
+    pending ping 以 `InferenceBackendException(code="BACKEND_RESTARTED")` 结束；提交写管道遇
+    `IOException` / `ObjectDisposedException` 归一为同 code；新接收流启动时重置
+    `LastHeartbeatAt` 与失联锁存；成功 `submit` 后 `NotifyTaskSucceeded()` 清零重启计数；
+    `Dispose` 先 `DetachInferenceClient` 再取消接收循环。`SubmitPayload` 增加
+    `Lora` / `Optimizations` 字段。
+- **Python 侧**（`python/server/`）：
+  - 新增 `pipeline_hooks.py`（注册 / 应用 pre-sampling hook，签名
+    `(model, clip, params) -> (model, clip)`）。
+  - `pipeline.py` 阶段化：`apply_pre_sampling_hooks`（模型加载后、**encode 之前**）
+    → `encode_prompt` → `sample` → `vae_decode` → `save_png`；行为不变。
+    （收尾修正：hook 由「encode 之后」前移到「encode 之前」，使 LoRA 对 `clip` 的修改
+    能影响文本条件编码；见下方「修正记录」。）
+  - `handlers.py`：每次 `submit` 先清空再按 payload 的 `lora` / `optimizations` 注册占位 hook
+    （仅记录 intent，不加载）；`config.py` `PROTOCOL_VERSION 0.4 → 0.5`、`BACKEND_VERSION 0.4.0`。
+- **App 装配**（`src/ZivAiEditor.App/`）：新增 `SettingsLoader`（读程序目录 `settings.ini`，
+  缺省回退仓库根模板 / 内置默认）、`AppContext`（装配 `PythonProcessManager` +
+  `IpcInferenceClient`，`AutoRestart = true`）；`App.axaml.cs` 构造 `AppContext` 并把
+  `IInferenceClient` 注入 `MainWindow`（构造参数）；退出时释放。
+- **测试**：新增 `IpcAutoRestartTests`（2 用例，入 `GpuSerialCollection`）；`IpcIdleUnloadTests`
+  的 `HeartbeatLost` 用例显式关闭自动重启（避免与 Step 3 断言相互干扰）。
+- **基线**：新增 `_test_step2/baseline_bench.py`；结果写入 `DOC/OPTIMIZATION.md` §6。
+- **契约 / 文档**：`contracts/ipc-protocol.md` `0.4 → 0.5`（新增可选字段 + §7 变更点）；
+  `FROZEN.md` Step 4 段；本记录；`ACCEPTANCE.MD` Step 4 段。
+
+### 实测
+
+- **Python 钩子（无 GPU）**：注册空 hook → `applied_hook_count == 1`、被调用；
+  `payload={}` / `{"lora":null,"optimizations":null}` → 0 hook；有 `lora`+`magcache` → 2 hook。
+- **自动重启（C# 端到端，GPU）**：
+  - 正常路径：推理成功 → Kill Python → `HeartbeatLost` → 自动重启（新 PID、`Restarted`）→
+    新任务成功、输出 512×512。
+  - 超限路径：连续 3 次 Kill 各触发一次成功重启（计数不因重启清零）→ 第 4 次 Kill →
+    `RestartFailed`、状态 `Failed`、不再拉起进程（等待 3s 仍 `Failed`）。
+- **基线**（512²/20 步，smart memory 关闭）：加载 **6.09 s**；稳态 `moving_to_gpu` **2.31 s**、
+  采样 **1.64 s**、VAE decode **0.99 s**、总 **7.53 s**；峰值 torch alloc **10995 MB**；
+  进程退出后 `nvidia-smi` 回落 **~871 MB**。
+- **构建 / 测试**：`dotnet build ZIV.AI.sln` **0 错误 0 警告**；
+  `dotnet test ZIV.AI.sln` **14 通过 / 0 失败**（约 4m23s），含新增 2 个重启用例；
+  无残留 Python 进程，显存回基线。
+
+### 遇到的问题与解决
+
+1. **重启计数何时清零**
+   - 问题：若每次重启成功即清零，则"连续 Kill 超限"永远测不出。
+   - 解决：计数仅在**一次成功 `submit`** 后清零；单纯重启成功不清零。这样连续失联累计，
+     超过 `MaxRestartAttempts` 才 `Failed`，与验收标准"连续 Kill 4 次 → RestartFailed"一致。
+2. **重启与在飞任务**
+   - 问题：管道断开后原 `SubmitInpaintAsync` 的等待 TCS 无人完成，会挂到 180s 超时。
+   - 解决：接收循环退出时统一 `FailInFlight(BACKEND_RESTARTED)`；提交侧写管道异常也归一为该 code。
+3. **重启与旧接收循环竞态**
+   - 问题：旧接收循环的收尾 `FailInFlight` 可能误伤重启后新注册的任务。
+   - 解决：收尾时校验 `_receiveStream` 仍是本流才失败在飞任务；新流启动时重置心跳时间戳与失联锁存。
+4. **`AppContext` 与 `System.AppContext` 重名（CS0117）**
+   - 现象：`SettingsLoader` 里 `AppContext.BaseDirectory` 解析到本项目的 `AppContext` 类。
+   - 解决：显式写 `System.AppContext.BaseDirectory`。
+5. **Step 3 心跳测试被自动重启干扰**
+   - 问题：`HeartbeatLost_Fires_When_Heartbeats_Stop`（heartbeat 关闭）在默认自动重启下会不断重拉后端。
+   - 解决：该测试类 options 显式 `AutoRestartEnabled = false`。
+
+### 遗留项
+
+- **LoRA / MagCache 未实现**：`handlers` 只解析并注册占位 hook；具体加载（`load_lora_for_models` /
+  MagCache patch）留待优化步骤（`DOC/OPTIMIZATION.md` 候选 1.2 / 1.4）。
+- ~~钩子位置在 `encode` 之后~~ — **已修正**：hook 现于 `encode` 之前应用（见「Step 4 修正记录」）。
+- **UI 层（`ZivAiEditor.UI`）无改动**：当前无 `MainWindow`（窗口在 `App`），故 B3「UI 注入
+  `IInferenceClient`」以 App 层 `MainWindow` 构造注入落地。
+- `RerunAsync` / `GetTaskAsync` / `loading_model` 阶段取消 / PE-I2I 均未实现（范围外）。
+- **基线口径澄清（非矛盾）**：本步基线 ~11.0 GB 为**「采样期间 torch 分配器峰值」**
+  （`max_memory_allocated`，运行前 reset）；Step 3 记录的 0.7 GB 为**「推理完成后稳态」**
+  （`memory_allocated`，采样后测量）。两者口径不同、**不可直接对比**；本步退出前稳态
+  ~9.3 GB（`disable_smart_memory` 下权重采样后驻留）。**后续优化对比统一用 peak 口径**。
+  详见 `DOC/OPTIMIZATION.md` §6 口径澄清。
+
+### Step 4 修正记录（2026-09-22 收尾）
+
+1. **钩子位置前移**（`python/server/pipeline.py`）：`apply_pre_sampling_hooks` 从
+   `encode_prompt` **之后**移到**之前**，使 LoRA 对 `clip` 的修改（`strength_clip`）能作用于
+   文本条件编码。签名与 handlers 的注册时机不变。
+   - 验证：注册测试 hook → `call_order == ['hook', 'encode']`，且 hook 返回的 patched `clip`
+     流向 `encode_prompt`；`IpcInferenceTests` 2/2 通过（无回归）。
+2. **基线显存口径澄清**（`DOC/OPTIMIZATION.md` §6 + 本文件）：~11.0 GB 为采样期间 torch
+   **峰值**口径，Step 3 的 0.7 GB 为推理完成后**稳态**口径；两者不同口径、不可直接对比，
+   后续优化对比统一用 **peak** 口径。
+3. **TE/DiT 不匹配 → 噪声根因修复**（见 `_test_step2/diagnose/DIAGNOSIS.md`）：文本编码器
+   由 Qwen3.5-9B 换为 Qwen3-VL-8B（`config.TEXT_ENCODER_PATH`），端到端恢复出图。
+4. **采样配置修正为 AuraFlow shift=3.1**（`pipeline.py`）：`ModelSamplingAuraFlow().patch_aura(model, 3.1)`
+   + 官方 `comfy.sample.sample()`（`euler` / `simple` / `cfg=1.0`），替换原先的
+   `comfy_extras.nodes_flux.get_schedule`（Flux 经验 mu）。经 1024 实测验证。
+   `config.py` 新增 `AURAFLOW_SHIFT=3.1` / `SAMPLER_NAME=euler` / `SCHEDULER_NAME=simple`；
+   `DEFAULT_STEPS` 20 → 40。
+5. **分辨率与 OOM 降级**：`config.MAX_RESOLUTION`（默认 1024，面积口径）为目标分辨率；
+   `RESOLUTION_FALLBACK=[1024,768,640]`。`pipeline.run` 捕获 CUDA OOM 后逐级降分辨率重试并释放缓存。
+   **显存触顶风险**：1024 编辑峰值 `nvidia-smi` **16004 / 16376 MiB**（余量仅 ~370 MiB），
+   更高分辨率需依赖降级。`denoise` 参数改为经 `comfy.sample.sample(denoise=...)` 生效
+   （此前被忽略）。
+6. **测试断言增强**：新增 `ImageQuality`（8×8 块均值方差占比 `blockRatio` + lag-1 自相关）
+   与 `ImageQualityTests`（合成噪声/结构图，无 GPU）；`IpcInferenceTests` 全部输出断言
+   "非纯噪声"，并新增 1024 用例；`baseline_bench.py` 增加 `block_ratio` 检查。
+   说明：任务建议的"方差 0.3–0.8"阈值在本模型上**不成立**（正常图方差 0.007–0.075，
+   噪声 0.007–0.037，重叠），故改用实测可分的 `blockRatio`（正常 0.85–0.97 vs 噪声 0.30–0.74）。
+
+### 备注
+
+- **未修改** `DOC/*.md` 的 Step 0/1/2/3 冻结行（仅追加 Step 4 段与 `InpaintRequest` 修订说明）。
+- **未修改** `C:\AI\ComfyUI_PIC`；未下载模型 / 依赖；Python 侧零新依赖。
+- 环境：Windows 10、PowerShell 7、ComfyUI 便携版 v0.37.0、.NET SDK 10.0.401、RTX 4080 16GB。

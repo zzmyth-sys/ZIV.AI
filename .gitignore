@@ -17,6 +17,10 @@ _test_step2/input_test_*.png
 _test_step2/pipe_*
 _test_step2/shm_*
 
+# Step 4 验收/诊断图片（大文件，不入库；保留脚本与 *.md/*.txt）
+_test_step2/*.png
+_test_step2/diagnose/*.png
+
 # 运行时生成
 settings.ini
 *.log

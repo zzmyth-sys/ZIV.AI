@@ -7,6 +7,14 @@ using System.Text;
 
 namespace ZivAiEditor.Backend;
 
+public enum PythonBackendState
+{
+    Stopped,
+    Running,
+    Restarting,
+    Failed,
+}
+
 public sealed class PythonBackendOptions
 {
     public string PipeName { get; init; } = "zivai.infer.v1";
@@ -37,6 +45,25 @@ public sealed class PythonBackendOptions
     /// </summary>
     public int HeartbeatLostAfterMs { get; init; } = 30_000;
 
+    /// <summary>
+    /// Restart the backend automatically when <see cref="IpcInferenceClient.HeartbeatLost"/>
+    /// fires (Step 4). Defaults to on.
+    /// </summary>
+    public bool AutoRestartEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Consecutive lost-heartbeat restarts allowed before the backend is marked
+    /// <see cref="PythonBackendState.Failed"/> and no further restart is tried.
+    /// The counter resets after a successful submit.
+    /// </summary>
+    public int MaxRestartAttempts { get; init; } = 3;
+
+    /// <summary>
+    /// Base backoff between restart attempts; grows exponentially
+    /// (2s / 4s / 8s with the default).
+    /// </summary>
+    public int RestartBackoffMs { get; init; } = 2_000;
+
     public int BufferSize { get; init; } = 1 << 20;
 
     /// <summary>
@@ -61,6 +88,12 @@ public sealed class PythonProcessManager : IDisposable, IAsyncDisposable
     private NamedPipeServerStream? _pipe;
     private Process? _process;
     private bool _disposed;
+    private string _pipeName;
+    private int _restartSeq;
+    private int _restartAttempts;
+    private int _restarting;
+    private PythonBackendState _state = PythonBackendState.Stopped;
+    private IpcInferenceClient? _client;
 
     public PythonProcessManager(PythonBackendOptions options)
     {
@@ -79,11 +112,174 @@ public sealed class PythonProcessManager : IDisposable, IAsyncDisposable
         {
             throw new ArgumentException("Script is required.", nameof(options));
         }
+
+        _pipeName = options.PipeName;
     }
 
     public PythonBackendOptions Options { get; }
 
-    public string PipePath => Options.PipePath;
+    public string PipePath => @"\\.\pipe\" + _pipeName;
+
+    public PythonBackendState State
+    {
+        get
+        {
+            lock (_outputLock)
+            {
+                return _state;
+            }
+        }
+    }
+
+    /// <summary>Raised just before the manager tears the old backend down.</summary>
+    public event Action? Restarting;
+
+    /// <summary>Raised after a restart reaches a healthy (ping-able) backend.</summary>
+    public event Action? Restarted;
+
+    /// <summary>Raised once the restart budget is exhausted; no further restart is tried.</summary>
+    public event Action<Exception>? RestartFailed;
+
+    /// <summary>
+    /// Wire an <see cref="IpcInferenceClient"/> so this manager can react to
+    /// <see cref="IpcInferenceClient.HeartbeatLost"/> with an auto restart
+    /// (Step 4). No-op when <see cref="PythonBackendOptions.AutoRestartEnabled"/>
+    /// is false.
+    /// </summary>
+    public void AttachInferenceClient(IpcInferenceClient client)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        if (!Options.AutoRestartEnabled)
+        {
+            return;
+        }
+
+        _client = client;
+        client.HeartbeatLost += OnHeartbeatLost;
+    }
+
+    public void DetachInferenceClient(IpcInferenceClient client)
+    {
+        if (ReferenceEquals(_client, client))
+        {
+            client.HeartbeatLost -= OnHeartbeatLost;
+            _client = null;
+        }
+    }
+
+    /// <summary>
+    /// Called by the client after a submit completes successfully; clears the
+    /// consecutive-restart counter so an occasional crash does not accumulate
+    /// toward <see cref="PythonBackendOptions.MaxRestartAttempts"/>.
+    /// </summary>
+    public void NotifyTaskSucceeded()
+    {
+        lock (_outputLock)
+        {
+            if (_state != PythonBackendState.Failed)
+            {
+                _restartAttempts = 0;
+            }
+        }
+    }
+
+    private void OnHeartbeatLost() => _ = RequestRestartAsync();
+
+    /// <summary>
+    /// Restart the backend once: stop the old process tree, use a fresh pipe
+    /// name, back off, spawn again and verify with a ping. Serialized and
+    /// single-flight; returns false when disabled, already failed, or racing.
+    /// </summary>
+    public async Task<bool> RequestRestartAsync()
+    {
+        if (!Options.AutoRestartEnabled || _disposed)
+        {
+            return false;
+        }
+
+        if (Interlocked.CompareExchange(ref _restarting, 1, 0) != 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            while (true)
+            {
+                int attempt;
+                bool exhausted;
+                lock (_outputLock)
+                {
+                    if (_state == PythonBackendState.Failed)
+                    {
+                        return false;
+                    }
+
+                    attempt = ++_restartAttempts;
+                    exhausted = attempt > Options.MaxRestartAttempts;
+                    _state = exhausted ? PythonBackendState.Failed : PythonBackendState.Restarting;
+                }
+
+                if (exhausted)
+                {
+                    RestartFailed?.Invoke(new InvalidOperationException(
+                        $"Backend restart budget exhausted ({Options.MaxRestartAttempts} attempts)."));
+                    return false;
+                }
+
+                Restarting?.Invoke();
+                await StopAsync().ConfigureAwait(false);
+
+                _pipeName = $"zivai.infer.{Environment.ProcessId}.{++_restartSeq}";
+
+                var backoff = Options.RestartBackoffMs * (1 << (attempt - 1));
+                if (backoff > 0)
+                {
+                    await Task.Delay(backoff).ConfigureAwait(false);
+                }
+
+                try
+                {
+                    await EnsureStartedAsync().ConfigureAwait(false);
+                    var client = _client;
+                    if (client is not null)
+                    {
+                        await client.CheckHealthAsync().ConfigureAwait(false);
+                    }
+
+                    lock (_outputLock)
+                    {
+                        _state = PythonBackendState.Running;
+                    }
+
+                    Restarted?.Invoke();
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    if (attempt >= Options.MaxRestartAttempts)
+                    {
+                        lock (_outputLock)
+                        {
+                            _state = PythonBackendState.Failed;
+                        }
+
+                        RestartFailed?.Invoke(ex);
+                        return false;
+                    }
+
+                    lock (_outputLock)
+                    {
+                        _state = PythonBackendState.Stopped;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _restarting, 0);
+        }
+    }
 
     public bool IsPipeConnected => _pipe is { IsConnected: true };
 
@@ -130,12 +326,17 @@ public sealed class PythonProcessManager : IDisposable, IAsyncDisposable
 
             if (_pipe is { IsConnected: true })
             {
+                lock (_outputLock)
+                {
+                    _state = PythonBackendState.Running;
+                }
+
                 return _pipe;
             }
 
             await StopCoreAsync().ConfigureAwait(false);
 
-            var pipe = CreateSecurePipeServer(Options.PipeName, Options.BufferSize);
+            var pipe = CreateSecurePipeServer(_pipeName, Options.BufferSize);
             _pipe = pipe;
 
             var process = new Process
@@ -175,6 +376,11 @@ public sealed class PythonProcessManager : IDisposable, IAsyncDisposable
             {
                 await StopCoreAsync().ConfigureAwait(false);
                 throw;
+            }
+
+            lock (_outputLock)
+            {
+                _state = PythonBackendState.Running;
             }
 
             return pipe;
@@ -218,6 +424,14 @@ public sealed class PythonProcessManager : IDisposable, IAsyncDisposable
         var process = _process;
         _pipe = null;
         _process = null;
+
+        lock (_outputLock)
+        {
+            if (_state is not (PythonBackendState.Restarting or PythonBackendState.Failed))
+            {
+                _state = PythonBackendState.Stopped;
+            }
+        }
 
         if (pipe is { IsConnected: true })
         {

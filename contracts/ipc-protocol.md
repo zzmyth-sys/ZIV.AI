@@ -1,7 +1,7 @@
 # ZIV.AI IPC 传输契约（IPC Protocol）
 
-- 文档状态：**Step 2 冻结**（2026-09-21）；**修订至 ipc_version 0.4**（Step 3 修订后）
-- **ipc_version：`0.4`**
+- 文档状态：**Step 2 冻结**（2026-09-21）；**修订至 ipc_version 0.5**（Step 4 修订后）
+- **ipc_version：`0.5`**
 - 用途：定义 C# 前端（`ZivAiEditor.App` / `ZivAiEditor.Backend`）与 Python 推理进程之间的
   **跨进程传输契约**。取代 Step 1 的「OpenAPI 作为跨进程唯一契约」定位（见 `FROZEN.md` Step 2）。
 - 依据：`_test_step2/REPORT.md`（11 项实测）。
@@ -37,6 +37,15 @@
 > - **`pong` 不变**：`ping` / `pong` 仍为按需健康探测；`heartbeat` 为其周期性补充。
 > - 依据：Step 3 重定义（原 ACCEPTANCE 的「SGLang 服务」随 D-7 废弃）——
 >   本步实现**空闲卸载（Z21）+ heartbeat**；详见 `FROZEN.md` Step 3 段。
+
+> **修订记录（ipc_version 0.4 → 0.5，2026-09-22 · Step 4 修订后）**
+>
+> - **`submit.payload` 新增两个可选字段**（§3.4）：
+>   - `lora`：`{ path, strength_model, strength_clip }`，缺省 / `null` 表示不加载。
+>   - `optimizations`：`{ magcache, magcache_thresh }`，缺省 / `null` 表示不启用。
+>   均为 **Python 进程内部变换**的开关，**不改变 IPC 消息结构与传输语义**；旧端忽略即可。
+> - 属**向后兼容的协议扩展**：新字段可选，缺省行为与 0.4 完全一致。
+> - 本步仅**预留钩子**（LoRA / MagCache 的具体实现不入 Step 4 范围）。
 
 ---
 
@@ -128,7 +137,9 @@
   "steps": 20,
   "seed": -1,
   "denoise": 1.0,
-  "output_path": null
+  "output_path": null,
+  "lora": null,
+  "optimizations": null
 }
 ```
 
@@ -136,6 +147,19 @@
   （对应 `openapi.yaml` 的端点；`openapi.yaml` 现为 Schema 参考）。
 - `mask_path` 为二值 PNG（只含 0 / 255，Z19）；缺省表示整图。
 - 模型路径由**后端配置**提供（绝对路径直传），**不**在 payload 内（见 §6）。
+
+**可选字段（Step 4 / ipc_version 0.5）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `lora` | object \| null | LoRA 配置；缺省 / `null` = 不加载。`{ "path": <绝对路径>, "strength_model": <float, 默认 1.0>, "strength_clip": <float, 默认 1.0> }`。 |
+| `optimizations` | object \| null | 优化开关；缺省 / `null` = 不启用。`{ "magcache": <bool, 默认 false>, "magcache_thresh": <float, 默认 0.24> }`。 |
+
+- 两者均为 **Python 进程内部变换**（LoRA 修改 model / clip；MagCache 修改采样），
+  **不改变 IPC 消息结构**：C# 只声明「要做什么」，Python 决定「怎么做」。
+- 缺省（字段缺失或 `null`）时行为与 **0.4 完全一致**（不加载 LoRA、不启用 MagCache）。
+- **Step 4 只实现解析与注册接缝**（`python/server/pipeline_hooks.py`）；LoRA / MagCache 的
+  具体加载逻辑留待后续优化步骤（`DOC/OPTIMIZATION.md`）。
 
 ### 3.5 `preview` 二进制帧（`0x02`）
 
@@ -199,7 +223,7 @@ C#(server)                                              Python(client)
 
 ## 7. 版本与兼容
 
-- **`ipc_version`：`0.4`**（管道名 `\\.\pipe\zivai.infer.v1` 为**通道版本**，与协议版本独立）。
+- **`ipc_version`：`0.5`**（管道名 `\\.\pipe\zivai.infer.v1` 为**通道版本**，与协议版本独立）。
   `ipc_version 0.1` 为**追溯设定**（原文档无版本字段）。
 - **0.1 → 0.2 变更点**：
   1. **管道方向**：`Python=server / C#=client` → `C#=Server / Python=Client`（C# 掌控 Python 生命周期，启动无竞态）。
@@ -214,6 +238,10 @@ C#(server)                                              Python(client)
 - **0.3 → 0.4 变更点**（Step 3）：
   1. **新增 `heartbeat` 消息**（Python → C#，§3.2）：周期上报 `vram_used_mb` /
      `current_task_id`；C# 侧超时未收触发 `HeartbeatLost`。**向后兼容**（旧端忽略）。
+- **0.4 → 0.5 变更点**（Step 4）：
+  1. **`submit.payload` 新增可选字段** `lora` / `optimizations`（§3.4）：Python 进程内部
+     优化的开关（LoRA / MagCache）。**向后兼容**：字段可选，缺省行为与 0.4 完全一致；
+     本步只实现解析与钩子接缝，具体加载留待后续优化步骤。
 - 协议变更时升 `ipc_version`（必要时同时升管道名 `v2`），旧前端可并存。
 - `openapi.yaml` 保留为 **Schema 参考**（`ImageEditRequest` / `TaskAccepted` /
   `TaskStatusResponse` 等结构即本协议 payload 的形状来源）。

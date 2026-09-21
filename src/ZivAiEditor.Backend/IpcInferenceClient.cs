@@ -121,6 +121,7 @@ public sealed class IpcInferenceClient : IInferenceClient
     {
         Process = process ?? throw new ArgumentNullException(nameof(process));
         _ownsProcess = ownsProcess;
+        Process.AttachInferenceClient(this);
     }
 
     public PythonProcessManager Process { get; }
@@ -262,14 +263,29 @@ public sealed class IpcInferenceClient : IInferenceClient
                         Steps: request.Steps,
                         Seed: request.Seed,
                         Denoise: request.Denoise,
-                        OutputPath: request.OutputPath));
+                        OutputPath: request.OutputPath,
+                        Lora: request.Lora,
+                        Optimizations: request.Optimizations));
 
                 var json = JsonSerializer.Serialize(submit, IpcJsonContext.Default.SubmitRequest);
-                await WriteJsonAsync(stream, json, token).ConfigureAwait(false);
+                try
+                {
+                    await WriteJsonAsync(stream, json, token).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+                {
+                    throw BackendRestarted();
+                }
 
                 try
                 {
-                    return await pending.Completion.Task.WaitAsync(token).ConfigureAwait(false);
+                    var handle = await pending.Completion.Task.WaitAsync(token).ConfigureAwait(false);
+                    if (handle.Status == TaskStatus.Succeeded)
+                    {
+                        Process.NotifyTaskSucceeded();
+                    }
+
+                    return handle;
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
@@ -334,6 +350,7 @@ public sealed class IpcInferenceClient : IInferenceClient
         }
 
         _disposed = true;
+        Process.DetachInferenceClient(this);
         _lifetime.Cancel();
         _lifetime.Dispose();
         _writeGate.Dispose();
@@ -343,6 +360,11 @@ public sealed class IpcInferenceClient : IInferenceClient
             Process.Dispose();
         }
     }
+
+    private static InferenceBackendException BackendRestarted()
+        => new(
+            "BACKEND_RESTARTED",
+            "The inference backend connection was lost; the backend is being restarted.");
 
     private void EnsureReceiveStarted(Stream stream)
     {
@@ -355,16 +377,56 @@ public sealed class IpcInferenceClient : IInferenceClient
 
             _receiveStream = stream;
             _receiveLoop = Task.Run(() => ReceiveLoopAsync(stream, _lifetime.Token));
+            _lastHeartbeatAt = DateTimeOffset.UtcNow;
+            Interlocked.Exchange(ref _heartbeatLostRaised, 0);
 
             if (_heartbeatLoop is null or { IsCompleted: true })
             {
-                _lastHeartbeatAt = DateTimeOffset.UtcNow;
                 _heartbeatLoop = Task.Run(() => HeartbeatWatchAsync(_lifetime.Token));
             }
         }
     }
 
     private async Task ReceiveLoopAsync(Stream stream, CancellationToken ct)
+    {
+        try
+        {
+            await ReceiveLoopCoreAsync(stream, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            bool current;
+            lock (_stateLock)
+            {
+                current = ReferenceEquals(_receiveStream, stream);
+                if (current)
+                {
+                    _receiveStream = null;
+                    _receiveLoop = null;
+                }
+            }
+
+            if (current)
+            {
+                FailInFlight(BackendRestarted());
+            }
+        }
+    }
+
+    private void FailInFlight(Exception error)
+    {
+        foreach (var pair in _tasks)
+        {
+            pair.Value.Completion.TrySetException(error);
+        }
+
+        foreach (var pair in _pings)
+        {
+            pair.Value.TrySetException(error);
+        }
+    }
+
+    private async Task ReceiveLoopCoreAsync(Stream stream, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
@@ -747,7 +809,9 @@ internal sealed record SubmitPayload(
     int Steps,
     long Seed,
     double Denoise,
-    string? OutputPath);
+    string? OutputPath,
+    LoraOptions? Lora,
+    OptimizationOptions? Optimizations);
 
 internal sealed record SubmitRequest(
     string Type,
@@ -764,6 +828,8 @@ internal sealed record CancelRequest(string Type, string TaskId);
 [JsonSerializable(typeof(PingRequest))]
 [JsonSerializable(typeof(SubmitRequest))]
 [JsonSerializable(typeof(CancelRequest))]
+[JsonSerializable(typeof(LoraOptions))]
+[JsonSerializable(typeof(OptimizationOptions))]
 internal partial class IpcJsonContext : JsonSerializerContext
 {
 }

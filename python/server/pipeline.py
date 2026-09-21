@@ -1,15 +1,20 @@
-"""Inference pipeline for the ZIV.AI backend (Step 2.3).
+"""Inference pipeline for the ZIV.AI backend.
 
-Mirrors the verified script `_test_step2/t5_e2e_inpaint.py`: Qwen-Image-2.1
-text encoding -> ``CFGGuider(cfg=1.0)`` -> ``euler`` sampler with the Flux
-schedule -> VAE decode -> PNG. An optional binary mask (Z19) is applied as the
-sampler ``denoise_mask`` and reference latents inject the source image for
-image editing. Output is always a new file (Z24); the source is never written.
+Qwen-Image-2.1 text encoding -> ModelSamplingAuraFlow(shift=3.1) ->
+``comfy.sample.sample`` (euler / simple / cfg=1.0) -> VAE decode -> PNG.
+An optional binary mask (Z19) is applied as the sampler noise mask and
+reference latents inject the source image for image editing. Output is always
+a new file (Z24); the source is never written.
+
+OOM fallback (Step 4): the request is retried at MAX_RESOLUTION, then down the
+RESOLUTION_FALLBACK list, freeing caches between attempts.
 
 Heavy imports (torch / comfy) stay inside the functions so a cold ``ping``
 never touches the heavy stack.
 """
 
+import gc
+import logging
 import os
 import random
 import time
@@ -17,7 +22,10 @@ from datetime import datetime
 
 import config
 import model_loader
+import pipeline_hooks
 import preview as preview_module
+
+_LOG = logging.getLogger("zivai.server")
 
 
 def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cancel=None):
@@ -27,14 +35,12 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
     ``on_preview(step, total, jpeg_bytes)`` are optional callbacks invoked from
     the sampler callback (same thread). ``poll_cancel`` is drained once per step
     so a `cancel` frame can raise the interrupt flag mid-sampling (Step 2.4).
+
+    Retries at lower resolutions on CUDA OOM (Step 4).
     """
     model_loader.prepare_environment()
 
-    import comfy.model_management as mm
-    import comfy.sample
-    import comfy.samplers
     import torch
-    from comfy_extras.nodes_flux import get_schedule
 
     started = time.time()
     steps = max(1, int(request.get("steps") or config.DEFAULT_STEPS))
@@ -42,29 +48,61 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
     prompt = request.get("prompt") or ""
     image_path = request.get("image_path")
     mask_path = request.get("mask_path")
+    denoise = _resolve_denoise(request.get("denoise"))
     output_path = _resolve_output_path(request.get("output_path"), image_path)
 
-    positive, negative, latent_image, mask = _encode(
-        clip, vae, prompt, image_path, mask_path
+    # Stage 1: Python-internal transforms (LoRA / MagCache seam) right after the
+    # model triple is loaded and BEFORE text encoding, so a LoRA that patches
+    # `clip` (strength_clip) takes effect on the conditioning.
+    model, clip = pipeline_hooks.apply_pre_sampling_hooks(model, clip, request)
+
+    candidates = _resolution_candidates()
+    oom_types = _oom_types()
+    last_error = None
+    for index, resolution in enumerate(candidates):
+        try:
+            if config.FORCE_OOM and index == 0:
+                raise torch.cuda.OutOfMemoryError("forced OOM (ZIV_AI_FORCE_OOM)")
+            return _run_once(
+                model, clip, vae, prompt, image_path, mask_path, output_path,
+                resolution, steps, seed, denoise, started,
+                on_progress, on_preview, poll_cancel,
+            )
+        except oom_types as exc:
+            last_error = exc
+            _LOG.warning(
+                "OOM at resolution %d (attempt %d/%d); falling back: %s",
+                resolution, index + 1, len(candidates), exc,
+            )
+            _emit(on_progress, 0, 0, 0.0, "sampling", "oom_fallback:%d" % resolution)
+            _free_vram()
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("no resolution candidate produced output")
+
+
+def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
+              resolution, steps, seed, denoise, started,
+              on_progress, on_preview, poll_cancel):
+    import comfy.model_management as mm
+    import comfy.sample
+    from comfy_extras.nodes_model_advanced import ModelSamplingAuraFlow
+
+    # Qwen-Image-2.1 uses the AuraFlow flow schedule (shift=3.1); patch a clone
+    # so the engine's resident model is never mutated.
+    model = ModelSamplingAuraFlow().patch_aura(model, config.AURAFLOW_SHIFT)[0]
+
+    # Stage 2: encode the prompt + optional reference image (clip is patched).
+    positive, negative, latent_image, mask = encode_prompt(
+        clip, vae, prompt, image_path, mask_path, resolution
     )
-
-    samples_latent = latent_image
-    latent_h = samples_latent.shape[2]
-    latent_w = samples_latent.shape[3]
-    seq_len = (latent_h * 16 * latent_w * 16) // 256
-    sigmas = get_schedule(steps, seq_len).to(dtype=torch.float32)
-
-    guider = comfy.samplers.CFGGuider(model)
-    guider.set_conds(positive, negative)
-    guider.set_cfg(1.0)
-    sampler = comfy.samplers.sampler_object("euler")
-    noise = comfy.sample.prepare_noise(samples_latent, seed)
 
     previewer = preview_module.get_previewer(model)
     preview_every = max(1, int(config.PREVIEW_EVERY))
 
     # First inference triggers ComfyUI's lazy `load_models_gpu()`; announce the
-    # sampling stage before `guider.sample` so that cost shows up client-side.
+    # sampling stage before sampling so that cost shows up client-side.
     _emit(on_progress, 0, steps, 0.0, "sampling", "moving_to_gpu")
 
     def callback(step, x0, x, total_steps):
@@ -85,16 +123,8 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
             if jpeg:
                 on_preview(step, total, jpeg)
 
-    samples = guider.sample(
-        noise,
-        samples_latent,
-        sampler,
-        sigmas,
-        denoise_mask=mask,
-        callback=callback,
-        disable_pbar=True,
-        seed=seed,
-    )
+    noise = comfy.sample.prepare_noise(latent_image, seed)
+    samples = sample(model, positive, negative, latent_image, noise, steps, denoise, mask, seed, callback)
 
     # A cancel that lands after the last sampling step still aborts here; the
     # VAE decode itself is not interruptible (it is short, see contract §3.3).
@@ -102,22 +132,114 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
         poll_cancel()
     mm.throw_exception_if_processing_interrupted()
     _emit(on_progress, steps, steps, 1.0, "vae_decode", "vae_decode")
-    decoded = vae.decode(samples)
-    image, height, width = _to_pil(decoded[0])
+    decoded = vae_decode(vae, samples)
+    image, height, width = to_pil(decoded[0])
 
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    image.save(output_path)
+    save_png(image, output_path)
 
     return {
         "output_path": output_path,
         "seed": seed,
         "width": width,
         "height": height,
+        "resolution": resolution,
         "duration_ms": int(round((time.time() - started) * 1000)),
     }
 
 
-def _encode(clip, vae, prompt, image_path, mask_path):
+def encode_prompt(clip, vae, prompt, image_path, mask_path, resolution=None):
+    """Pipeline stage: conditioning + latents from the prompt / reference."""
+    return _encode(clip, vae, prompt, image_path, mask_path, resolution)
+
+
+def sample(model, positive, negative, latent, noise, steps, denoise, mask, seed, callback):
+    """Pipeline stage: one sampler pass via ComfyUI's official ``comfy.sample.sample``."""
+    import comfy.sample
+
+    return comfy.sample.sample(
+        model,
+        noise,
+        steps,
+        1.0,
+        config.SAMPLER_NAME,
+        config.SCHEDULER_NAME,
+        positive,
+        negative,
+        latent,
+        denoise=denoise,
+        noise_mask=mask,
+        callback=callback,
+        disable_pbar=True,
+        seed=seed,
+    )
+
+
+def vae_decode(vae, samples):
+    """Pipeline stage: decode the sampled latent back to pixels."""
+    return vae.decode(samples)
+
+
+def to_pil(tensor):
+    """Convert a decoded tensor to a PIL image plus (height, width)."""
+    return _to_pil(tensor)
+
+
+def save_png(image, output_path):
+    """Pipeline stage: write the output as a new PNG file (Z24)."""
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    image.save(output_path)
+
+
+def _resolution_candidates():
+    values = [int(config.MAX_RESOLUTION)] + [int(v) for v in config.RESOLUTION_FALLBACK]
+    seen = set()
+    ordered = []
+    for value in values:
+        if value > 0 and value <= config.MAX_RESOLUTION and value not in seen:
+            seen.add(value)
+            ordered.append(value)
+    return ordered or [int(config.MAX_RESOLUTION)]
+
+
+def _oom_types():
+    import comfy.model_management as mm
+
+    types = []
+    exc = getattr(mm, "OOM_EXCEPTION", None)
+    if isinstance(exc, tuple):
+        types.extend(exc)
+    elif isinstance(exc, type):
+        types.append(exc)
+    try:
+        import torch
+
+        types.append(torch.cuda.OutOfMemoryError)
+    except Exception:
+        pass
+    return tuple(set(types)) or (RuntimeError,)
+
+
+def _free_vram():
+    try:
+        import comfy.model_management as mm
+
+        mm.soft_empty_cache(force=True)
+    except Exception:
+        pass
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+    try:
+        gc.collect()
+    except Exception:
+        pass
+
+
+def _encode(clip, vae, prompt, image_path, mask_path, resolution):
     """Encode prompt + optional source image into conditioning / latents.
 
     Returns ``(positive, negative, latent_samples, denoise_mask)``. With a mask
@@ -134,7 +256,7 @@ def _encode(clip, vae, prompt, image_path, mask_path):
 
     references = []
     images_vl = []
-    latent_pixels = config.DEFAULT_RESOLUTION
+    latent_pixels = int(resolution or config.MAX_RESOLUTION)
     if source is not None:
         samples = source[:1].movedim(-1, 1)  # [1,3,H,W]
         ratio = samples.shape[3] / samples.shape[2]
@@ -222,6 +344,14 @@ def _to_pil(tensor):
     array = (array * 255.0).round().astype(np.uint8)
     image = Image.fromarray(array)
     return image, image.height, image.width
+
+
+def _resolve_denoise(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    return min(1.0, max(0.0, number))
 
 
 def _resolve_seed(seed):

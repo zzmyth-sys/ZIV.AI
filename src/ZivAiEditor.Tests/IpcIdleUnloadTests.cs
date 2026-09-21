@@ -135,13 +135,22 @@ public class IpcIdleUnloadTests
         int heartbeatLostAfterMs = 30_000)
     {
         var root = FindRepositoryRoot();
+        var env = new Dictionary<string, string>(environment ?? new Dictionary<string, string>())
+        {
+            // Keep these Step 3 tests at 512 (fast, low VRAM); the production
+            // default is 1024 (see IpcInferenceTests.Submit_1024_*).
+            ["ZIV_AI_MAX_RESOLUTION"] = "512",
+        };
         return new PythonBackendOptions
         {
             PipeName = "zivai.infer.test." + Guid.NewGuid().ToString("N"),
             PythonExe = Path.Combine(root, "Comfyui", "python_embeded", "python.exe"),
             Script = Path.Combine(root, "python", "server", "main.py"),
-            Environment = environment ?? new Dictionary<string, string>(),
+            Environment = env,
             HeartbeatLostAfterMs = heartbeatLostAfterMs,
+            // Step 3 tests observe HeartbeatLost directly; Step 4 auto-restart
+            // would otherwise respawn a heartbeat-disabled backend.
+            AutoRestartEnabled = false,
         };
     }
 

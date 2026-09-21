@@ -12,7 +12,7 @@ DIT_MODEL_PATH = os.path.join(
 TEXT_ENCODER_PATH = os.path.join(
     MODEL_ROOT,
     "text_encoders",
-    "qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors",
+    "qwen3vl_8b_int8_convrot.safetensors",
 )
 VAE_PATH = os.path.join(MODEL_ROOT, "vae", "qwen_image_2.1_vae_bf16.safetensors")
 
@@ -21,15 +21,31 @@ MODEL_NAME = "qwen-image-2.1"
 PIPE_NAME = "zivai.infer.v1"
 PIPE_PATH = r"\\.\pipe\zivai.infer.v1"
 
-PROTOCOL_VERSION = "0.4"
-BACKEND_VERSION = "0.3.0"
+PROTOCOL_VERSION = "0.5"
+BACKEND_VERSION = "0.4.0"
 
 CONNECT_TIMEOUT_S = 15.0
 MAX_FRAME_BYTES = 256 * 1024 * 1024
 
-# ---- 推理默认值（Step 2.3）----
-DEFAULT_RESOLUTION = 512
-DEFAULT_STEPS = 20
+# ---- 推理默认值（Step 2.3；采样配置 Step 4 修正）----
+# 目标分辨率（面积口径，保持输入纵横比）：Qwen-Image-2.1 推荐 1024。
+# 可用环境变量覆盖（测试用；见 RESOLUTION_FALLBACK）。
+MAX_RESOLUTION = int(os.environ.get("ZIV_AI_MAX_RESOLUTION", "1024"))
+# 旧字段：保留以兼容，实际采样目标分辨率改由 MAX_RESOLUTION 决定。
+DEFAULT_RESOLUTION = MAX_RESOLUTION
+DEFAULT_STEPS = int(os.environ.get("ZIV_AI_DEFAULT_STEPS", "40"))
+# OOM 降级：从 MAX_RESOLUTION 起，逐级回退到这些分辨率（面积口径）。
+RESOLUTION_FALLBACK = [
+    int(x)
+    for x in os.environ.get("ZIV_AI_RESOLUTION_FALLBACK", "1024,768,640").split(",")
+    if x.strip()
+]
+# 采样配置（社区收集 + Step 4 实测）：AuraFlow shift=3.1 / euler / simple / cfg=1.0
+AURAFLOW_SHIFT = float(os.environ.get("ZIV_AI_AURAFLOW_SHIFT", "3.1"))
+SAMPLER_NAME = os.environ.get("ZIV_AI_SAMPLER", "euler")
+SCHEDULER_NAME = os.environ.get("ZIV_AI_SCHEDULER", "simple")
+# 仅供测试：置位时把首个候选分辨率伪装成 OOM，以验证降级路径（不影响生产）。
+FORCE_OOM = os.environ.get("ZIV_AI_FORCE_OOM", "") not in ("", "0", "false", "False")
 # 预览降频：1 = 每步发送，N>1 = 每 N 步发送一帧（契约 §3.5 允许降频）
 PREVIEW_EVERY = 1
 # ComfyUI latent 预览图的最大边长（latent 分辨率天然很小）

@@ -1,4 +1,5 @@
 import ctypes
+import logging
 import subprocess
 import threading
 import uuid
@@ -8,6 +9,9 @@ import engine as engine_module
 import ipc
 import model_loader
 import pipeline
+import pipeline_hooks
+
+_LOG = logging.getLogger("zivai.server")
 
 INTERRUPT_EXCEPTION_NAME = "InterruptProcessingException"
 
@@ -144,6 +148,7 @@ def _run_submit(frame_io, task_id, payload):
         # smart-memory flag at import time (see model_loader).
         model_loader.prepare_environment()
         _clear_interrupt()
+        _configure_pre_sampling_hooks(payload)
 
         try:
             _ENGINE.ensure_loaded(_make_progress_pusher(frame_io, task_id))
@@ -197,6 +202,47 @@ def _run_submit(frame_io, task_id, payload):
             raise
         _release_caches()
         _write_canceled(frame_io, task_id)
+
+
+def _configure_pre_sampling_hooks(payload):
+    """Reset and register this request's pre-sampling hooks (Step 4).
+
+    Optional ``submit.payload`` fields (contract §3.4):
+      - ``lora``: ``{path, strength_model, strength_clip}``
+      - ``optimizations``: ``{magcache, magcache_thresh}``
+
+    Only the registration seam is implemented here; the concrete LoRA /
+    MagCache transforms are out of Step 4 scope (see DOC/OPTIMIZATION.md).
+    """
+    pipeline_hooks.clear_pre_sampling_hooks()
+    lora = payload.get("lora")
+    if isinstance(lora, dict) and lora.get("path"):
+        pipeline_hooks.register_pre_sampling_hook(_build_lora_hook(lora))
+    optimizations = payload.get("optimizations")
+    if isinstance(optimizations, dict) and optimizations.get("magcache"):
+        pipeline_hooks.register_pre_sampling_hook(_build_magcache_hook(optimizations))
+
+
+def _build_lora_hook(lora):
+    def hook(model, clip, params):
+        _LOG.info(
+            "pre-sampling LoRA hook reserved (path=%s, not implemented)",
+            lora.get("path"),
+        )
+        return model, clip
+
+    return hook
+
+
+def _build_magcache_hook(optimizations):
+    def hook(model, clip, params):
+        _LOG.info(
+            "pre-sampling MagCache hook reserved (thresh=%s, not implemented)",
+            optimizations.get("magcache_thresh"),
+        )
+        return model, clip
+
+    return hook
 
 
 def _make_sampling_progress(frame_io, task_id):

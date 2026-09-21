@@ -569,3 +569,121 @@ Step 1 冻结的 7 项目结构与依赖方向**不变**（见 1.1）。Step 2 �
 > **遗留**：Python 主循环改为轮询后，`submit` 期间仍为同步执行；heartbeat 线程与
 > 采样写入经 `FrameIO._write_lock` 串行。`unload_all_models()` 会卸载全部 ComfyUI
 > 托管模型（当前仅本模型）。
+
+---
+
+## Step 4（日期：2026-09-22）
+
+> **修订说明（Step 4 · 自动重启 + App 装配 + 优化接入预留）**
+>
+> 本段为 Step 4 追加。目标：① 后端自愈（`HeartbeatLost` → 自动重启）② App 层装配通路
+> ③ pipeline 预留优化钩子 ④ 基线性能实测。**不改动 Step 0/1/2/3 已冻结行**，唯一契约
+> 变更见下方 4.1（`InpaintRequest` 追加可选属性，走修订说明）。
+
+### 4.1 契约修订：`InpaintRequest` 追加可选属性（冻结）
+
+- `ZivAiEditor.Contracts/Inference/InpaintRequest.cs` 追加：
+  - `LoraOptions? Lora`（默认 `null`）
+  - `OptimizationOptions? Optimizations`（默认 `null`）
+- 新增契约类型：`LoraOptions { string Path; double StrengthModel = 1.0; double StrengthClip = 1.0; }`、
+  `OptimizationOptions { bool MagCache; double MagCacheThresh = 0.24; }`。
+- **非破坏性**：既有成员与默认值不变，`IInferenceClient` 签名不变；`null` 时序列化被忽略，
+  行为与 Step 3 完全一致。
+- 对应 `contracts/ipc-protocol.md` `ipc_version 0.4 → 0.5`（`submit.payload` 可选字段）。
+
+### 4.2 自动重启（冻结）
+
+- `PythonProcessManager` 新增配置：`AutoRestartEnabled`（默认 `true`）、
+  `MaxRestartAttempts`（默认 `3`）、`RestartBackoffMs`（默认 `2000`，指数退避 2s / 4s / 8s）。
+- 订阅 `IpcInferenceClient.HeartbeatLost` → 触发重启；流程：标记 `Restarting` → 停止旧 Python
+  （`shutdown` → 5s 超时 → `taskkill /T /F` 进程树）→ 关闭旧管道 → 退避 → **新管道名**
+  `zivai.infer.{C#进程PID}.{seq}` → 拉起新 Python → `ping` 成功。
+- 事件：`Restarting` / `Restarted` / `RestartFailed`；状态枚举 `PythonBackendState`
+  （`Stopped` / `Running` / `Restarting` / `Failed`）。
+- **计数语义**：每次 `HeartbeatLost` 触发的重启记 1 次；**成功 `submit` 后清零**；
+  超过 `MaxRestartAttempts` 标记 `Failed` 且不再重试。
+- 在飞 `SubmitInpaintAsync` 因管道断开以 `InferenceBackendException(code="BACKEND_RESTARTED")`
+  结束（`InferenceProgressExtensions.InferenceBackendException`）。
+- 性质：新增实现与配置，`IInferenceClient` 签名不变。
+
+### 4.3 优化接入预留（冻结）
+
+- Python 侧新增 `python/server/pipeline_hooks.py`：`register_pre_sampling_hook` /
+  `apply_pre_sampling_hooks(model, clip, params) -> (model, clip)`；`pipeline.run` 在
+  **模型加载后、`encode_prompt` 之前**调用（使 LoRA 对 `clip` 的修改影响文本条件编码）。
+  **只预留注册点，不实现任何具体 hook**。
+- `handlers.handle_submit` 每次请求先 `clear_pre_sampling_hooks()`，再按 `submit.payload`
+  的可选 `lora` / `optimizations` 注册占位 hook（仅记录 intent，不加载）。
+- 性质：**运行时策略 + 新文件**，不改动 Step 0/1/2/3 冻结行；IPC 契约按 4.1 走 0.5。
+
+### 4.4 基线性能（Step 4 实测）
+
+- 512² 编辑 / `steps=20` / smart memory 关闭 / RTX 4080 16GB：
+  模型加载 **6.09 s**；稳态 `moving_to_gpu` **2.31 s**、采样 **1.64 s**、VAE decode **0.99 s**、
+  总 **7.53 s**；峰值显存（torch alloc）**10995 MB**。
+- 明细见 `DOC/OPTIMIZATION.md` §6「基线数据」；脚本 `_test_step2/baseline_bench.py`。
+
+### 4.5 采样配置修正 + OOM 降级（Step 4 修正，2026-09-22）
+
+> 本小节为 Step 4 收尾修正的**修订说明**，不改动 Step 0/1/2/3 冻结行，也不改
+> `IInferenceClient` 签名与 IPC 消息类型（`ipc_version` 仍为 `0.5`）。
+
+- **pipeline 采样配置修正**：`pipeline.py` 由 `comfy_extras.nodes_flux.get_schedule`
+  （Flux 经验 mu）+ `CFGGuider` 手工采样，改为 **`ModelSamplingAuraFlow(shift=3.1)` +
+  官方 `comfy.sample.sample()`**（`euler` / `simple` / `cfg=1.0`）。依据 1024 端到端实测
+  （`DOC/OPTIMIZATION.md` §6.1）。`denoise` 参数改为经 `sample(denoise=...)` 生效（此前忽略）。
+- **分辨率与 OOM 降级**：`config.MAX_RESOLUTION`（默认 **1024**，面积口径）为目标分辨率，
+  `RESOLUTION_FALLBACK=[1024,768,640]`；`pipeline.run` 捕获 CUDA OOM 逐级降级重试。
+  性质：**运行时策略**，不改契约。
+- **测试断言增强**：新增画面结构断言（`src/ZivAiEditor.Tests/ImageQuality.cs`）并在
+  `IpcInferenceTests` 中启用；`baseline_bench.py` 同步。
+- **TE 修订**：`config.TEXT_ENCODER_PATH` 由 Qwen3.5-9B 改为 **Qwen3-VL-8B**
+  （`qwen3vl_8b_int8_convrot.safetensors`），修复纯噪声输出（见 `_test_step2/diagnose/DIAGNOSIS.md`）。
+
+---
+
+## Step 5（日期：2026-09-22）
+
+> **新增铁律（2026-09-22）**：
+>
+> **Z29 · 测试按影响面执行** — 每次代码改动后，只跑受影响的测试类；
+> 全量测试仅在 Step 收尾或明确需要时执行。
+>
+> **核心动机：保护硬件资产。** 端到端 GPU 测试每次加载 16GB 模型、峰值显存
+> 16004/16376 MiB（1024 分辨率下）；GPU 长期高负载会缩短寿命。RTX 4080 16GB
+> 市价约 1 万元，硬件损耗的成本远高于多跑一次测试的收益。
+>
+> **原则：出错了再修。** 测试是为了发现已发生的问题，不是为了预防所有可能性。
+>
+> 实测教训：pipeline.py 采样路径改动后仅需跑 IpcCancelTests（约 40s），
+> 无差别跑全量（约 4 分钟）会造成不必要的 GPU 高负载。
+>
+> 影响：ACCEPTANCE.MD 的通用验收清单 G1（代码能编译）与测试执行策略需同步更新。
+
+### 5.1 铁律（冻结）
+
+> 编号续接 Z28；Z17–Z28 的既有行不改（见 0.1）。
+
+| 编号 | 铁律 | 冻结于 | 备注 |
+|---|---|---|---|
+| Z29 | 测试按影响面执行：每次代码改动后，只跑**受影响的测试类**；全量测试仅在 **Step 收尾**或**明确需要**时执行 | Step 5 | **核心动机：保护硬件资产**（GPU 长期高负载缩短寿命）；原则：**出错了再修**；选择依据：改动文件的引用关系 + 测试类的覆盖范围；全量触发：Step 收尾 / 发布前验证 / 跨模块重构；**禁止**无差别的「每次改动都跑全量」 |
+
+> **理由（核心动机：保护硬件资产）**：端到端 GPU 测试每次加载 16GB 模型、跑满显存峰值
+> （1024 下 16004/16376 MiB）；GPU 长期高负载缩短寿命。RTX 4080 16GB 市价约 1 万元，
+> 硬件损耗成本远高于多跑一次测试的收益。**原则：出错了再修**——测试是为了发现已发生的
+> 问题，不是为了预防所有可能性。实测教训：pipeline.py 采样路径改动仅需 `IpcCancelTests`
+> （约 40s），全量约 4 分钟。
+>
+> **关联**：`SPEC.md` §6.2（Z29）、`ACCEPTANCE.MD`「测试执行原则（Z29 · 保护硬件资产）」。
+
+### 5.2 测试选择指引（非冻结，供参考）
+
+| 改动范围 | 建议执行 |
+|---|---|
+| `pipeline.py` 采样 / 归一化路径 | `IpcCancelTests`（必要时加 `IpcInferenceTests`） |
+| `pipeline.py` 输出 / 结果帧 | `IpcInferenceTests` |
+| `config.py` 新增配置（默认值不变） | 无测试需跑（或冒烟 `IpcSmokeTests`） |
+| `PythonProcessManager` / `IpcInferenceClient` | `IpcSmokeTests` / `IpcModelLoadTests` / `IpcAutoRestartTests` |
+| `handlers.py` / 心跳 / 空闲卸载 | `IpcIdleUnloadTests` |
+| Backend 契约变更 | `ContractsSmokeTests` + 相关 IPC 用例 |
+| Step 收尾 / 发布前 / 跨模块重构 | **全量** `dotnet test ZIV.AI.sln` |

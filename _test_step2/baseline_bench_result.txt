@@ -1,0 +1,12 @@
+ZIV.AI baseline bench: 3 x 512 edit (steps=20, seed=42)
+input = D:\devlop\ZIV.AI\_test_step2\input_test_512.png
+gpu_baseline_MB = 793.0
+model_load_s = 6.093  timings = {'dit': 0.046, 'te': 0.606, 'vae': 0.27}
+gpu_after_load_MB = 1210.0
+run 1: moving_to_gpu=5.632s sampling=1.578s vae_decode=2.285s total=15.763s peak_alloc=10993.3MB peak_reserved=11370.0MB smi_sample=11017.0MB
+run 2: moving_to_gpu=2.453s sampling=1.629s vae_decode=0.994s total=7.653s peak_alloc=10995.8MB peak_reserved=11358.0MB smi_sample=11093.0MB
+run 3: moving_to_gpu=2.176s sampling=1.650s vae_decode=0.989s total=7.413s peak_alloc=10995.0MB peak_reserved=11362.0MB smi_sample=11101.0MB
+--- summary (steady state, excluding cold load) ---
+moving_to_gpu_avg=2.314s sampling_avg=1.639s vae_decode_avg=0.992s total_avg=7.533s peak_alloc_avg=10995.4MB
+gpu_after_bench_MB = 9273.0
+RESULT=OK

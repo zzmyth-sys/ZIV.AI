@@ -40,6 +40,26 @@
 
 ---
 
+## 测试执行原则（Z29 · 保护硬件资产）
+
+> 新增于 2026-09-22（见 `FROZEN.md` Step 5 / `SPEC.md` §6.2）。约束测试执行范围，
+> 避免不必要的全量 GPU 测试。G1（代码能编译）不隐含"每次改动都跑全量测试"。
+
+- 每次改动后，只跑**受影响的测试类**；全量测试仅在 **Step 收尾**时执行。
+- **核心动机：保护硬件资产** —— 端到端测试跑满 16GB 显存峰值（1024 下
+  16004/16376 MiB），GPU 长期高负载缩短寿命；RTX 4080 市价约 1 万元，
+  硬件成本远高于测试时间成本。
+- **原则：出错了再修** —— 测试是为了发现已发生的问题，不是为了预防所有可能性。
+- 测试选择依据：改动文件的引用关系 + 测试类的覆盖范围。
+- 全量测试触发条件：Step 收尾、发布前验证、跨模块重构。
+- **禁止**无差别的「每次改动都跑全量」。
+- 示例：`pipeline.py` 采样改动 → 只跑 `IpcCancelTests`；`config.py` 加配置 → 无需跑测试。
+
+**原因**：端到端 GPU 测试每次加载 16GB 模型、峰值显存 16004/16376 MiB；全量约 4 分钟，
+针对性命中约 40 秒；频繁全量会造成显卡长时间高负载，缩短硬件寿命。
+
+---
+
 ## Step 0 验收：文档与契约冻结
 
 **目标**：六份文件齐备（五份文档 + OpenAPI 草案），定位、架构、铁律、契约定义清楚，
@@ -448,3 +468,58 @@ C# 检测异常」。不含自动重启（Step 4）、`RerunAsync` / `GetTaskAsy
 1. 追加 `DEVLOG.md` 的 Step 3 记录（本步已完成）
 2. 在「验收记录」追加“Step 3 通过，日期：____”（待签）
 3. 进入 Step 4：`HeartbeatLost` 自动重启 + `IInferenceClient` 提交入口扩展
+
+---
+
+## Step 4 验收：自动重启 + App 装配 + 优化预留 + 基线
+
+**目标**：① 后端自愈（`HeartbeatLost` 自动重启）② App 层装配通路 ③ pipeline 优化钩子预留
+④ 基线性能实测。不含具体 LoRA / MagCache 加载、PE-I2I、`RerunAsync` / `GetTaskAsync`、
+`loading_model` 取消、UI 展示。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build ZIV.AI.sln` 0 错误 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 改动在 Contracts / Backend / App / Tests / Python | ✅ 未新增项目引用 |
+| G3 | 接口与 FROZEN 一致 | `IInferenceClient` 签名未改；`InpaintRequest` 扩展走修订说明 | ✅ 见 `FROZEN.md` Step 4.1 |
+| G4 | 未授权修改检查 | Step 0/1/2/3 冻结行未改；契约变更走 Step 4 修订说明 | ✅ |
+| G5 | 文档已更新 | `FROZEN` / `DEVLOG` / `ACCEPTANCE` / `ipc-protocol` / `OPTIMIZATION` 追加 Step 4 | ✅ |
+| G6 | 便携性未破 | 模型绝对路径直传；未写 `C:\AI\ComfyUI_PIC` | ✅ |
+| G7 | AI 推理进程隔离未破 | C# 只经 Named Pipe；不加载 Python 运行时（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 后端为 ComfyUI 便携版（Z28） | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 4.1 | 崩溃恢复 | `IpcAutoRestartTests` 用例 1 | Kill Python → `HeartbeatLost` → 自动重启 → 新任务成功 | ✅ |
+| 4.2 | 重启上限 | `IpcAutoRestartTests` 用例 2 | 连续 Kill 超限 → `RestartFailed` → 不再重试 | ✅ 4 次 → `Failed` |
+| 4.3 | 重启期间在飞任务 | 代码 + 用例 | 管道断开 → `BACKEND_RESTARTED`，不悬挂 | ✅ |
+| 4.4 | 新管道名 | 重启后 `PipePath` | `zivai.infer.{PID}.{seq}` | ✅ |
+| 4.5 | 无孤儿进程 / 显存 | `nvidia-smi` / 进程表 | 重启后无孤儿；显存回基线 | ✅ 871 MiB |
+| 4.6 | settings.ini 读取 | `SettingsLoader` | `[backend]` 三键生效，缺失用默认 | ✅ |
+| 4.7 | pipeline 钩子 | 直连 Python | 注册空 hook 被调用；不实现具体 LoRA | ✅ `applied==1` |
+| 4.8 | payload 可选字段 | C# 传 `null` | Python 正常执行 | ✅ 0 hook，行为同 0.4 |
+| 4.9 | 基线实测 | `baseline_bench.py` | 数据写入 `OPTIMIZATION.md` §6 | ✅ |
+| 4.10 | 构建 / 测试 | `dotnet build` / `dotnet test ZIV.AI.sln` | 0 错误；全通过 | ✅ 14 通过 / 0 失败 |
+| 4.11 | 关闭即退出 | 测试 + 手工 | 无残留 Python 进程；显存回基线 | ✅ |
+
+### Step 4 通过标准
+
+- 通用 G1–G8 全过
+- 专属 4.1–4.11 全过
+
+### Step 4 遗留说明（非阻断）
+
+- LoRA / MagCache 仅预留钩子，具体加载留待优化步骤。
+- 钩子在 `encode` 之后应用，`strength_clip` 本次不作用于 encode。
+- `ZivAiEditor.UI` 无 `MainWindow`，B3 以 App 层 `MainWindow` 构造注入落地。
+- `RerunAsync` / `GetTaskAsync` / `loading_model` 取消 / PE-I2I 未实现。
+
+### Step 4 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 4 记录（本步已完成）
+2. 在「验收记录」追加“Step 4 通过，日期：____”（待签）
+3. 进入后续 Step（优化项按 `OPTIMIZATION.md` 逐一实测）

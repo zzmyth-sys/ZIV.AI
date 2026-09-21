@@ -10,15 +10,18 @@ using TaskStatus = ZivAiEditor.Contracts.Enums.TaskStatus;
 namespace ZivAiEditor.Tests;
 
 /// <summary>
-/// End-to-end Step 2.3 coverage over the real IPC pipe: submit -> sampling
-/// progress -> preview (<c>0x02</c>) -> result, and mask handling. These tests
-/// drive the actual GPU backend, so budgets are generous.
+/// End-to-end coverage over the real IPC pipe: submit -> sampling progress ->
+/// preview (<c>0x02</c>) -> result, mask handling, and the picture-validity
+/// assertion (Step 4). These tests drive the actual GPU backend, so budgets are
+/// generous. Most tests pin the pipeline to 512 to keep the suite fast; the
+/// 1024 test exercises the production default resolution.
 /// </summary>
 [SupportedOSPlatform("windows")]
 [Collection(GpuSerialCollection.Name)]
 public class IpcInferenceTests
 {
     private static readonly TimeSpan Budget = TimeSpan.FromSeconds(300);
+    private static readonly TimeSpan LargeBudget = TimeSpan.FromSeconds(600);
 
     [Fact]
     public async Task Submit_Emits_Sampling_Progress_Preview_And_Result()
@@ -57,9 +60,11 @@ public class IpcInferenceTests
         Assert.Equal(TaskStatus.Succeeded, handle.Status);
 
         Assert.True(File.Exists(output), $"Output PNG not found: {output}");
-        var (width, height) = ReadPngSize(File.ReadAllBytes(output));
+        var outputBytes = File.ReadAllBytes(output);
+        var (width, height) = ReadPngSize(outputBytes);
         Assert.Equal(512, width);
         Assert.Equal(512, height);
+        AssertStructured(outputBytes, "edit at 512");
 
         List<InferenceProgressDetail> progressSnapshot;
         List<PreviewFrame> previewSnapshot;
@@ -139,13 +144,59 @@ public class IpcInferenceTests
         Assert.Equal(TaskStatus.Succeeded, handle.Status);
 
         Assert.True(File.Exists(output), $"Output PNG not found: {output}");
-        var (width, height) = ReadPngSize(File.ReadAllBytes(output));
+        var outputBytes = File.ReadAllBytes(output);
+        var (width, height) = ReadPngSize(outputBytes);
         Assert.Equal(512, width);
         Assert.Equal(512, height);
+        AssertStructured(outputBytes, "masked edit at 512");
 
         // Z24: neither the source image nor the mask may be modified.
         Assert.Equal(inputHash, Sha256(input));
         Assert.Equal(maskHash, Sha256(mask));
+    }
+
+    [Fact]
+    public async Task Submit_1024_Edit_Produces_Structured_Output()
+    {
+        var input = Path.Combine(FindRepositoryRoot(), "_test_step2", "input_test_512.png");
+        Assert.True(File.Exists(input), $"Input image not found: {input}");
+
+        var output = NewTempPath("zivai_step4_1024");
+
+        // Production default resolution (MAX_RESOLUTION=1024): a square input
+        // yields a 1024x1024 output.
+        var options = CreateOptions(maxResolution: 1024);
+        await using var manager = new PythonProcessManager(options);
+        using var client = new IpcInferenceClient(manager);
+
+        using var timeout = new CancellationTokenSource(LargeBudget);
+        var handle = await client.SubmitInpaintAsync(
+            new InpaintRequest
+            {
+                ImagePath = input,
+                Prompt = "把背景替换为古代中式茶肆，保留画面主体不变",
+                Steps = 20,
+                Seed = 42,
+                Denoise = 1.0,
+                OutputPath = output,
+            },
+            progress: null,
+            timeout.Token);
+
+        Assert.Equal(TaskStatus.Succeeded, handle.Status);
+        Assert.True(File.Exists(output), $"Output PNG not found: {output}");
+
+        var outputBytes = File.ReadAllBytes(output);
+        var (width, height) = ReadPngSize(outputBytes);
+        Assert.Equal(1024, width);
+        Assert.Equal(1024, height);
+        AssertStructured(outputBytes, "edit at 1024");
+    }
+
+    private static void AssertStructured(byte[] pngBytes, string context)
+    {
+        var quality = ImageQuality.Analyze(pngBytes);
+        Assert.False(quality.IsLikelyNoise, $"{context} looks like noise: {quality.Describe()}");
     }
 
     private static void CreateBinaryMask(string path, int width, int height)
@@ -184,7 +235,7 @@ public class IpcInferenceTests
     private static string NewTempPath(string prefix)
         => Path.Combine(Path.GetTempPath(), prefix + "_" + Guid.NewGuid().ToString("N") + ".png");
 
-    private static PythonBackendOptions CreateOptions()
+    private static PythonBackendOptions CreateOptions(int maxResolution = 512)
     {
         var root = FindRepositoryRoot();
         return new PythonBackendOptions
@@ -192,6 +243,10 @@ public class IpcInferenceTests
             PipeName = "zivai.infer.test." + Guid.NewGuid().ToString("N"),
             PythonExe = Path.Combine(root, "Comfyui", "python_embeded", "python.exe"),
             Script = Path.Combine(root, "python", "server", "main.py"),
+            Environment = new Dictionary<string, string>
+            {
+                ["ZIV_AI_MAX_RESOLUTION"] = maxResolution.ToString(),
+            },
         };
     }
 

@@ -137,6 +137,10 @@ public class IpcModelLoadTests
             PipeName = "zivai.infer.test." + Guid.NewGuid().ToString("N"),
             PythonExe = Path.Combine(root, "Comfyui", "python_embeded", "python.exe"),
             Script = Path.Combine(root, "python", "server", "main.py"),
+            Environment = new Dictionary<string, string>
+            {
+                ["ZIV_AI_MAX_RESOLUTION"] = "512",
+            },
         };
     }
 
