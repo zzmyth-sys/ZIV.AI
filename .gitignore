@@ -1,0 +1,31 @@
+# ComfyUI 便携版（几十 GB，不入库）
+Comfyui/
+
+# 构建产物
+**/bin/
+**/obj/
+**/publish/
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# 测试临时目录（保留 REPORT.md 与 t*.py 脚本，排除输出）
+_test_step2/output_*.png
+_test_step2/input_test_*.png
+_test_step2/pipe_*
+_test_step2/shm_*
+
+# 运行时生成
+settings.ini
+*.log
+logs/
+
+# IDE
+.vs/
+.vscode/
+*.user
+
+# 发布目录
+publish/
