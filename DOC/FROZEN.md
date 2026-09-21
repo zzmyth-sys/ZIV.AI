@@ -1,0 +1,559 @@
+# ZIV.AI 冻结记录（FROZEN）
+
+- 状态：随项目推进追加
+- 用途：记录每个 Step 冻结的接口，防止未授权的改动
+- 规则：只增不改；修改已有行必须先向用户说明原因并获授权
+
+> ## 修改铁律
+>
+> 本文件**只增不改**。
+>
+> - 追加新行：允许
+> - 修改已有行：**必须**先向用户说明原因并获授权
+> - 删除已有行：**必须**先向用户说明原因并获授权
+>
+> 发现已有行有误时，不要改，单独报告给用户。
+
+> **修订说明（2026-09-21，Step 1 · 裁判裁决 1–6）**
+>
+> 本段记录 Step 1 启动时裁判对 Step 0「遗留项 / 待裁判裁决」六项的裁决，以及对 0.4
+> 示例路径的更正。以下内容**不改动 Step 0 已冻结行**，仅在此说明并落到对应文档。
+>
+> 1. **共享库引用方式**（原 D-3）：**采用项目引用（`ProjectReference`）起步**，NuGet 化留待
+>    分发期再评估；仓库内仍只有一份 `ZIV.Core` / `ZIV.Imaging` 源码（Z26 不变）。
+> 2. **发布目录**（原 D-9）：固定目录定为 **`D:\Program Files\ZIV.AI`**（可用环境变量
+>    `ZIV_AI_PUBLISH_DIR` 覆盖），与 ZIV 的 Z16 思路一致。
+> 3. **Python 后端选型**（原 D-7）：**Step 1 只支持 SGLang 路线**；LightX2V 作为
+>    **Step 7 可选加速**再引入，接口仍统一在 OpenAPI 契约后。
+> 4. **单实例与端口**（原遗留项 4）：沿用 D-15（单实例 + 本地回环 HTTP）；
+>    端口**动态分配**——由 Python 后端启动时选择空闲端口，写入**程序目录** `settings.ini`
+>    的 `backend.port` 键，C# 侧读取该值再访问后端（固定端口易冲突，故不固定）。
+>    OpenAPI `servers` 仍写 `http://127.0.0.1:{port}`，`port` 运行时由 `settings.ini` 提供。
+> 5. **输出目录策略**（原遗留项 5）：默认输出到**主图同目录**并追加 `_ai_{timestamp}` 后缀；
+>    批量场景输出到**程序目录 `output/`**（见 `SPEC.md` §3.9）。
+> 6. **遮罩画布坐标约定**（原遗留项 6）：内部一律以**主图原始像素坐标**为准；显示变换只在
+>    UI 内做，导出时映射回原始像素（见 `SPEC.md` §3.9）。
+>
+> **ProjectReference 路径更正**：0.4 示例 `..\..\ZIV\src\ZIV.Core\ZIV.Core.csproj` 相对层级
+> 有误（该示例假设 ZIV.AI 项目位于 `src\` 下一级）。实际项目位于 `src\ZivAiEditor.<X>\`，
+> 距 `D:\devlop\` 为**三级**，正确路径为
+> `..\..\..\ZIV\src\ZIV.Core\ZIV.Core.csproj` 与
+> `..\..\..\ZIV\src\ZIV.Imaging\ZIV.Imaging.csproj`。以本更正为准，0.4 示例路径作废。
+
+> **修订说明（2026-09-21，Step 2 · 后端转向 ComfyUI + IPC）**：Python 后端由 SGLang 改为
+> ComfyUI v0.37.0 in-process 管线；跨进程契约新增 `contracts/ipc-protocol.md`（IPC 传输），
+> `openapi.yaml` 降级为 Schema 参考。依据 `_test_step2/REPORT.md`。详见本文件末尾「## Step 2」段。
+
+## 冻结规则
+
+- 冻结项不可删改；确需修改，就地更新并在本表上方追加「修订说明」段落
+- 修订说明必须包含：改了什么、为什么、影响哪些接口
+- 内部实现（`private` 方法、数据结构、锁、日志）不冻结
+- 每次 Step 结束追加新冻结项，旧项保持不动
+- 如果是 Step N（N>0）新增的接口，另起 Step N 段，不改旧段
+- ZIV.AI 的契约凡**引用** `ZIV.Core` / `ZIV.Imaging` 的类型（如 `SKImageRef`），
+  以 ZIV 内签名为准，**不得在 ZIV.AI 重新定义**（Z26）
+- 铁律编号自 ZIV 的 Z16 之后**续接**：Z17 起归 ZIV.AI；Z1–Z16 为继承约束，原文以
+  `D:\devlop\ZIV\DOC\SPEC.md` §6 为准
+
+---
+
+## Step 0（日期：2026-09-21）
+
+> **本段为 Step 0 新增冻结**。目标：建立 ZIV.AI 文档体系，冻结定位、铁律（Z17–Z28）、
+> 项目结构、核心契约（签名草案）与共享库引用方式。**本步不写代码**，不改 ZIV / ImageGlass。
+
+### 0.1 铁律（冻结）
+
+| 编号 | 铁律 | 冻结于 | 备注 |
+|---|---|---|---|
+| Z17 | AI 推理进程隔离：C# 不加载 Python 运行时、不 P/Invoke Python C API，只经本地 HTTP 或命名管道 | Step 0 | C# 侧唯一入口 `IInferenceClient` |
+| Z18 | GPU 资源串行：所有推理请求进单一队列，4080 16GB 不并发；交互优先；OOM 降级重试 | Step 0 | `ExecutionQueue`（Agent） |
+| Z19 | 遮罩二值且不预填充：遮罩 PNG 只含 0 / 255；原图与遮罩分开传；禁止 C# 侧预填充 | Step 0 | `MaskSpec.IsBinary = true` |
+| Z20 | 任务状态持久化：任务 / 步骤 / 参数 / 路径 / 耗时入 SQLite；可恢复、可取消 | Step 0 | `SqliteTaskStore`（App） |
+| Z21 | 模型空闲卸载：空闲超时释放显存；保留最近一个；超时可配置 | Step 0 | 后端负责，C# 配置（`BackendOptions`） |
+| Z22 | Planner 可降级：LLM 解析失败回退默认计划；Planner 可替换 | Step 0 | `LlmPlanner` + `FallbackPlanner` |
+| Z23 | AI 模块独立更新：AI 模块可单独更新；Python 后端可单独升级 | Step 0 | 经 OpenAPI 契约解耦 |
+| Z24 | 不破坏原图：输出到新文件；中间结果保留；可回溯 | Step 0 | `ToolResult.OutputImagePath` |
+| Z25 | AI 模块独立解决方案：独立 `ZIV.AI.sln`；不进 `ZIV.sln`；不共享构建产物 | Step 0 | — |
+| Z26 | 共享库不复制：`ZIV.Core` / `ZIV.Imaging` 仓库中只有一份；通过项目引用或 NuGet 引用 | Step 0 | 见 0.4 共享库引用声明 |
+| Z27 | 进程隔离不破：AI Editor 与 ZIV 是独立进程；ZIV 只经命令行 / URL 协议 / 命名管道调用 | Step 0 | — |
+| Z28 | 独立运行不依赖 ZIV：`ZivAiEditor.App.exe` 启动不要求 ZIV 存在或运行 | Step 0 | — |
+
+> **继承约束**：ZIV 的 **Z1–Z16** 继续适用（无静态中枢 / 单向依赖 / 契约纯净 / 平台隔离 /
+> 编解码可插拔 / 查看器不碰 IO / 设置唯一入口 / 无上帝模块 / 资源释放 / 批量解耦 /
+> 异步取消 / 缓存有界 / 抽离不发明 / 仅便携版 / 逻辑搬耦合切 / 固定发布目录）。
+> 原文以 `D:\devlop\ZIV\DOC\SPEC.md` §6 为准，**引用而非复制**；ZIV.AI 语境下的适用说明见
+> `SPEC.md` §6.1。
+
+### 0.2 项目结构（冻结）
+
+| 项目 | 职责 | 依赖 |
+|---|---|---|
+| `ZivAiEditor.Contracts` | 契约与模型（5 接口 + 6 模型），不依赖 Avalonia / 平台 | `ZIV.Core`（+ BCL） |
+| `ZivAiEditor.Agent` | Planner / Executor 编排、串行队列 | `ZivAiEditor.Contracts` |
+| `ZivAiEditor.Tools` | `IEditTool` 实现 + `ToolRegistry` | `ZivAiEditor.Contracts` |
+| `ZivAiEditor.Backend` | `IInferenceClient` 实现（HTTP）+ Python 进程管理 | `ZivAiEditor.Contracts` |
+| `ZivAiEditor.UI` | 主界面、`MaskCanvas`、任务卡片流、模板面板 | `ZivAiEditor.Contracts`（+ Avalonia） |
+| `ZivAiEditor.App` | 装配 + 平台 + 对外接口（CLI / URL / HTTP）+ 存储 | 全部 |
+| （外部）`ZIV.Core` | 共享契约与值对象（`SKImageRef` 等） | 无（仅 BCL + SkiaSharp） |
+| （外部）`ZIV.Imaging` | 共享编解码 / 变换 / 保存 | `ZIV.Core` |
+| （外部）Python 推理后端 | Qwen-Image-2.1 + LightX2V / SGLang，独立进程 | 不属于 `ZIV.AI.sln` |
+
+**依赖方向（冻结）**：
+`ZivAiEditor.App → ZivAiEditor.UI → ZivAiEditor.Agent / Tools / Backend → ZivAiEditor.Contracts → ZIV.Core / ZIV.Imaging`。
+
+- `UI` **编译期不引用** `Agent` / `Tools` / `Backend`，只依赖 `Contracts` 的接口
+  （含 `IInferenceClient`）
+- `Agent` / `Tools` / `Backend` 三者**禁止互相引用**，协作经 `Contracts`，由 `App` 装配
+- 禁止反向 / 循环依赖、同层互相引用
+
+### 0.3 核心契约（冻结 · 签名草案）
+
+> 以下为 **Step 0 签名草案**，Step 1 可补充但不破坏既有成员；任何修改走修订说明。
+
+#### 0.3.1 接口（5）
+
+| 接口 | 文件 | 已冻结签名（草案） |
+|---|---|---|
+| `IInferenceClient` | `ZivAiEditor.Contracts/Inference/IInferenceClient.cs` | `: IDisposable`；`Task<HealthStatus> CheckHealthAsync(CancellationToken ct = default)`；`Task<InferenceTaskHandle> SubmitInpaintAsync(InpaintRequest, IProgress<InferenceProgress>?, CancellationToken ct = default)`；`Task<InferenceTask> GetTaskAsync(string taskId, CancellationToken ct = default)`；`Task<bool> CancelTaskAsync(string taskId, CancellationToken ct = default)` |
+| `IEditTool` | `ZivAiEditor.Contracts/Tools/IEditTool.cs` | `string Name { get; }`；`string Description { get; }`；`IReadOnlyList<string> Capabilities { get; }`；`bool CanHandle(EditStep step)`；`Task<ToolResult> ExecuteAsync(ToolInput input, IProgress<StepProgress>?, CancellationToken ct = default)` |
+| `IPlanner` | `ZivAiEditor.Contracts/Planning/IPlanner.cs` | `Task<EditPlan> PlanAsync(PlanRequest request, CancellationToken ct = default)` |
+| `IExecutor` | `ZivAiEditor.Contracts/Execution/IExecutor.cs` | `Task<TaskState> ExecuteAsync(EditPlan plan, IProgress<TaskProgress>?, CancellationToken ct = default)`；`Task<TaskState> RerunAsync(string taskId, IProgress<TaskProgress>?, CancellationToken ct = default)`；`Task<bool> CancelAsync(string taskId, CancellationToken ct = default)` |
+| `IToolRegistry` | `ZivAiEditor.Contracts/Tools/IToolRegistry.cs` | `void Register(IEditTool tool)`；`bool Unregister(string toolName)`；`IEditTool? Get(string toolName)`；`IReadOnlyList<IEditTool> All { get; }` |
+
+```csharp
+// ZivAiEditor.Contracts/Inference/IInferenceClient.cs
+public interface IInferenceClient : IDisposable
+{
+    Task<HealthStatus> CheckHealthAsync(CancellationToken ct = default);
+    Task<InferenceTaskHandle> SubmitInpaintAsync(
+        InpaintRequest request,
+        IProgress<InferenceProgress>? progress = null,
+        CancellationToken ct = default);
+    Task<InferenceTask> GetTaskAsync(string taskId, CancellationToken ct = default);
+    Task<bool> CancelTaskAsync(string taskId, CancellationToken ct = default);
+}
+
+// ZivAiEditor.Contracts/Tools/IEditTool.cs
+public interface IEditTool
+{
+    string Name { get; }
+    string Description { get; }
+    IReadOnlyList<string> Capabilities { get; }
+    bool CanHandle(EditStep step);
+    Task<ToolResult> ExecuteAsync(
+        ToolInput input,
+        IProgress<StepProgress>? progress = null,
+        CancellationToken ct = default);
+}
+
+// ZivAiEditor.Contracts/Planning/IPlanner.cs
+public interface IPlanner
+{
+    Task<EditPlan> PlanAsync(PlanRequest request, CancellationToken ct = default);
+}
+
+// ZivAiEditor.Contracts/Execution/IExecutor.cs
+public interface IExecutor
+{
+    Task<TaskState> ExecuteAsync(
+        EditPlan plan,
+        IProgress<TaskProgress>? progress = null,
+        CancellationToken ct = default);
+    Task<TaskState> RerunAsync(
+        string taskId,
+        IProgress<TaskProgress>? progress = null,
+        CancellationToken ct = default);
+    Task<bool> CancelAsync(string taskId, CancellationToken ct = default);
+}
+
+// ZivAiEditor.Contracts/Tools/IToolRegistry.cs
+public interface IToolRegistry
+{
+    void Register(IEditTool tool);
+    bool Unregister(string toolName);
+    IEditTool? Get(string toolName);
+    IReadOnlyList<IEditTool> All { get; }
+}
+```
+
+#### 0.3.2 模型（6 + 辅助）
+
+| 模型 | 文件 | 已冻结字段（草案） |
+|---|---|---|
+| `EditPlan` | `ZivAiEditor.Contracts/Planning/EditPlan.cs` | `string PlanId`；`string SourcePrompt`；`string MainImagePath`；`string? ReferenceImagePath`；`MaskSpec? Mask`；`IReadOnlyList<EditStep> Steps`；`DateTimeOffset CreatedAt` |
+| `EditStep` | `ZivAiEditor.Contracts/Planning/EditStep.cs` | `string StepId`；`int Order`；`string ToolName`；`IReadOnlyDictionary<string,string> Parameters`；`IReadOnlyList<string> DependsOn`；`StepStatus Status`；`string? ErrorMessage` |
+| `ToolInput` | `ZivAiEditor.Contracts/Tools/ToolInput.cs` | `string StepId`；`string MainImagePath`；`string? ReferenceImagePath`；`MaskSpec? Mask`；`IReadOnlyDictionary<string,string> Parameters`；`string WorkingDirectory` |
+| `ToolResult` | `ZivAiEditor.Contracts/Tools/ToolResult.cs` | `string StepId`；`bool Success`；`string? OutputImagePath`；`string? ErrorMessage`；`TimeSpan Duration`；`IReadOnlyDictionary<string,string> Metadata` |
+| `MaskSpec` | `ZivAiEditor.Contracts/Imaging/MaskSpec.cs` | `string MaskImagePath`；`int Width`；`int Height`；`bool IsBinary = true`；`bool Invert` |
+| `TaskState` | `ZivAiEditor.Contracts/Execution/TaskState.cs` | `string TaskId`；`TaskStatus Status`；`EditPlan Plan`；`IReadOnlyList<StepState> StepStates`；`DateTimeOffset CreatedAt`；`DateTimeOffset? StartedAt`；`DateTimeOffset? FinishedAt`；`string? OutputImagePath`；`string? ErrorMessage` |
+
+```csharp
+// 6 个核心模型（签名草案）
+public sealed class EditPlan
+{
+    public string PlanId { get; init; } = Guid.NewGuid().ToString("N");
+    public string SourcePrompt { get; init; } = "";
+    public string MainImagePath { get; init; } = "";
+    public string? ReferenceImagePath { get; init; }
+    public MaskSpec? Mask { get; init; }
+    public IReadOnlyList<EditStep> Steps { get; init; } = Array.Empty<EditStep>();
+    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.Now;
+}
+
+public sealed class EditStep
+{
+    public string StepId { get; init; } = Guid.NewGuid().ToString("N");
+    public int Order { get; init; }
+    public string ToolName { get; init; } = "";
+    public IReadOnlyDictionary<string, string> Parameters { get; init; }
+        = new Dictionary<string, string>();
+    public IReadOnlyList<string> DependsOn { get; init; } = Array.Empty<string>();
+    public StepStatus Status { get; set; } = StepStatus.Pending;
+    public string? ErrorMessage { get; set; }
+}
+
+public sealed class ToolInput
+{
+    public string StepId { get; init; } = "";
+    public string MainImagePath { get; init; } = "";
+    public string? ReferenceImagePath { get; init; }
+    public MaskSpec? Mask { get; init; }
+    public IReadOnlyDictionary<string, string> Parameters { get; init; }
+        = new Dictionary<string, string>();
+    public string WorkingDirectory { get; init; } = "";
+}
+
+public sealed class ToolResult
+{
+    public string StepId { get; init; } = "";
+    public bool Success { get; init; }
+    public string? OutputImagePath { get; init; }
+    public string? ErrorMessage { get; init; }
+    public TimeSpan Duration { get; init; }
+    public IReadOnlyDictionary<string, string> Metadata { get; init; }
+        = new Dictionary<string, string>();
+}
+
+public sealed class MaskSpec
+{
+    public string MaskImagePath { get; init; } = "";
+    public int Width { get; init; }
+    public int Height { get; init; }
+    public bool IsBinary { get; init; } = true;
+    public bool Invert { get; init; }
+}
+
+public sealed class TaskState
+{
+    public string TaskId { get; init; } = "";
+    public TaskStatus Status { get; set; } = TaskStatus.Pending;
+    public EditPlan Plan { get; init; } = new();
+    public IReadOnlyList<StepState> StepStates { get; set; } = Array.Empty<StepState>();
+    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset? StartedAt { get; set; }
+    public DateTimeOffset? FinishedAt { get; set; }
+    public string? OutputImagePath { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+```
+
+**辅助类型（草案，Step 1 冻结）**
+
+| 类型 | 用途 |
+|---|---|
+| `PlanRequest` | 三图路径 + 提示词 + 选项（`IPlanner.PlanAsync` 输入） |
+| `InpaintRequest` | 单次推理请求，映射 OpenAPI `/v1/inpaint` |
+| `InferenceTaskHandle` | 提交返回的 `taskId` + 初始状态 |
+| `InferenceTask` | 后端任务快照，映射 `/v1/task/{id}` |
+| `HealthStatus` | 后端健康与模型加载状态，映射 `/v1/health` |
+| `StepState` | 单步运行记录（状态 / 耗时 / 输出路径） |
+| `StepProgress` / `TaskProgress` / `InferenceProgress` | 三级进度（`IProgress<T>`） |
+| `StepStatus` / `TaskStatus` | 步骤 / 任务状态枚举 |
+
+#### 0.3.3 跨进程契约
+
+| 文件 | 内容 | 状态 |
+|---|---|---|
+| `contracts/openapi.yaml` | OpenAPI 3.1：`/v1/health`、`/v1/inpaint`、`/v1/task/{id}` | **草案**，Step 1 冻结 |
+
+### 0.4 共享库引用方式声明（冻结）
+
+> **铁律 Z26**：`ZIV.Core` / `ZIV.Imaging` 在仓库中只有一份，禁止 fork / 拷贝源码副本。
+
+- **声明**：ZIV.AI 通过**项目引用（`ProjectReference`）或 NuGet 包引用（`PackageReference`）**
+  使用 `ZIV.Core` / `ZIV.Imaging`，二者**择一**，不混用。
+- **Step 0 现状**：**未定稿**。两种方式权衡如下，最终由裁判裁决（见 `ARCHITECTURE.md`
+  「遗留项」第 1 项）：
+  - **项目引用**：`ZivAiEditor.Contracts` / `ZivAiEditor.Tools` 等以
+    `..\..\ZIV\src\ZIV.Core\ZIV.Core.csproj` 形式引用；开发期同机方便，但要求两仓库相邻、
+    版本联动，且 `ZIV.AI.sln` 的构建会连带构建 ZIV 项目（与「不共享构建产物」Z25 需协调）。
+  - **NuGet 引用**：由 ZIV 侧产出 `ZIV.Core` / `ZIV.Imaging` 包并指定版本；分发干净、
+    版本明确，但需要 ZIV 侧建立打包与版本策略。
+- **约束**：无论哪种方式，`ZIV.AI` 都**不得修改** `ZIV.Core` / `ZIV.Imaging` 的源码或
+  契约（Z26）；若需要新成员，在 ZIV 侧走 ZIV 的修改流程，再由 ZIV.AI 引用新版本。
+- **共享类型引用而非复制**：例如 `SKImageRef` 是 `ZIV.Core` 的类型，ZIV.AI 直接引用，
+  **不得在 `ZivAiEditor.Contracts` 重新定义**；凡文档 / 契约中出现的共享类型，一律指向
+  `ZIV.Core` / `ZIV.Imaging`。
+
+> **修订说明**：任何对 Step 0 冻结项的修改，须追加修订说明段落并获用户授权。
+> Step 0 为初始冻结，暂无修订。
+
+---
+
+## Step 1（日期：2026-09-21）
+
+> **本段为 Step 1 新增冻结**。目标：建立 `ZIV.AI.sln` + 七项目骨架 + `Contracts` 契约落地，
+> 并把 OpenAPI 契约冻结提前到本步；不改 ZIV / ImageGlass，不复制共享库源码。
+
+### 1.1 项目结构（冻结）
+
+| 项目 | TFM | 输出 | 依赖（ProjectReference） |
+|---|---|---|---|
+| `ZivAiEditor.Contracts` | net8.0 | 类库 | `ZIV.Core` |
+| `ZivAiEditor.Backend` | net8.0 | 类库 | `Contracts` |
+| `ZivAiEditor.Agent` | net8.0 | 类库 | `Contracts` |
+| `ZivAiEditor.Tools` | net8.0 | 类库 | `Contracts` |
+| `ZivAiEditor.UI` | net8.0 | 类库 | `Contracts`、`Agent`、`Tools`、`Backend`、`ZIV.Core`、`ZIV.Imaging`（+ Avalonia / Avalonia.Skia / SkiaSharp） |
+| `ZivAiEditor.App` | net8.0-windows | WinExe | `UI`、`Backend`、`Agent`、`Tools`、`Contracts`、`ZIV.Core`、`ZIV.Imaging`（+ Avalonia.Desktop / Avalonia.Themes.Fluent） |
+| `ZivAiEditor.Tests` | net8.0 | 测试 | `Contracts`、`Agent`、`Tools`（+ xunit / Microsoft.NET.Test.Sdk） |
+
+**依赖方向（冻结，Step 1 版）**：
+`App → UI → Agent / Tools / Backend → Contracts → ZIV.Core / ZIV.Imaging`。
+
+- `UI` **编译期可引用** `Agent` / `Tools` / `Backend` 程序集（便于 `App` 装配与类型贯通），
+  但**代码中只允许使用 `Contracts` 的接口**，不得直接调用其实现类；此点取代 Step 0 0.2 中
+  「UI 编译期不引用 Agent / Tools / Backend」的措辞（Step 0 原行不改，以本段为准）
+- `Agent` / `Tools` / `Backend` 三者仍**禁止互相引用**
+- Step 1 **不引用** `ZIV.Viewer` / `ZIV.Gallery` / `ZIV.Batch` / `ZIV.App`
+- 禁止反向 / 循环依赖、同层互相引用
+
+### 1.2 核心契约冻结确认
+
+Step 0 0.3 的 **5 个接口 + 6 个模型 + 辅助类型**已在 `ZivAiEditor.Contracts` 落地，
+**签名与 Step 0 完全一致**，无新增、无删改：
+
+- 接口：`IInferenceClient` / `IEditTool` / `IPlanner` / `IExecutor` / `IToolRegistry`
+- 模型：`EditPlan` / `EditStep` / `ToolInput` / `ToolResult` / `MaskSpec` / `TaskState`（类）
+- 枚举：`TaskStatus` / `StepStatus`
+- 辅助：`PlanRequest` / `InpaintRequest` / `InferenceTaskHandle` / `InferenceTask` /
+  `HealthStatus`（含 `ModelStatus`）/ `InferenceProgress` / `StepProgress` /
+  `StepState` / `TaskProgress`
+
+> **澄清（不改 0.3）**：`TaskState` 是**类**，`TaskStatus` 是**枚举**；Step 1 启动文本曾
+> 把 `TaskState` 误称为枚举，以 0.3 冻结为准。
+
+### 1.3 共享库引用方式定稿（Step 1）
+
+- 采用**项目引用**：`ZivAiEditor.Contracts` / `ZivAiEditor.UI` / `ZivAiEditor.App` 以
+  `..\..\..\ZIV\src\ZIV.Core\ZIV.Core.csproj`、`..\..\..\ZIV\src\ZIV.Imaging\ZIV.Imaging.csproj`
+  引用共享库（相对层级见上方修订说明）。
+- 不复制源码；`ZIV.Core` / `ZIV.Imaging` 的 NuGet 化留待分发期再评估。
+- 已知副作用：经 `ZIV.AI.sln` 构建时，ZIV 项目不在该 sln 内，MSBuild 对非 sln 的
+  `ProjectReference` 会回退到默认配置（Debug），故 `bin` / `obj` 会写入 ZIV 目录；
+  直接构建单个 `ZivAiEditor.*` 项目则按 Release 构建 ZIV。记录为已知现象，不违反 Z25
+  （各自解决方案与发布产物仍独立）。
+
+### 1.4 裁决落地表（裁决 1–6）
+
+| 裁决 | 内容摘要 | 落地点 |
+|---|---|---|
+| 1 | 共享库用项目引用起步 | 本文件 1.3；`ARCHITECTURE.md` D-3 |
+| 2 | 发布目录 `D:\Program Files\ZIV.AI` | `ARCHITECTURE.md` D-9；`publish.ps1` |
+| 3 | Step 1 只支持 SGLang，LightX2V 为 Step 7 可选加速 | `ARCHITECTURE.md` D-7 |
+| 4 | 单实例 + 回环 HTTP 沿用 D-15；端口**动态分配**，写入程序目录 `settings.ini` 的 `backend.port`，C# 侧读取 | `contracts/openapi.yaml` servers；`SPEC.md` §3.9 |
+| 5 | 输出默认主图同目录 + `_ai_{timestamp}`；批量到程序目录 `output/` | `SPEC.md` §3.9 |
+| 6 | 遮罩内部用主图原始像素坐标，显示变换只在 UI | `SPEC.md` §3.9 |
+
+### 1.5 跨进程契约冻结（OpenAPI 3.1）
+
+`contracts/openapi.yaml` 本步冻结为 **8 个端点**（字段 snake_case）：
+
+`/v1/health`、`/v1/inpaint`、`/v1/img2img`、`/v1/upscale`、`/v1/segment`、
+`/v1/outpaint`、`/v1/task/{id}`、`/v1/task/{id}/cancel`。
+
+- 所有编辑类 POST 共享 `ImageEditRequest`（含 `image_path` / `mask_path` / `prompt` /
+  `steps` / `seed` / `denoise` / `output_path`），统一返回 `TaskAccepted`（`task_id`）。
+- 任务查询返回 `TaskStatusResponse`（`state` / `progress` / `output_path` / `error`），
+  状态枚举命名为 `TaskRunState`，避免与 C# 的 `TaskState` 类混淆。
+- 契约冻结提前于 Step 0 规划的 Step 2；Step 2 调整为「生成 DTO / 客户端」等后续工作。
+
+> **遗留（Step 4）**：`IInferenceClient` 当前只有 `SubmitInpaintAsync` 一个提交入口，
+> 而 OpenAPI 已冻结 6 个编辑端点（inpaint / img2img / upscale / segment / outpaint 等）。
+> Step 4 实现 `HttpInferenceClient` 时需扩展提交入口（新增方法或泛化请求），
+> **扩展走修订说明，不破坏既有成员**。
+
+### 1.6 构建环境与 SDK（Step 1 定版）
+
+- **SDK 固定**：`global.json` 置于**仓库根** `D:\devlop\ZIV.AI\global.json`，固定
+  **SDK 10.0.401**（`rollForward latestFeature`）。放仓库根是为了让任意工作目录
+  （仓库根 / `src`）都应用同一 SDK 钉版。
+- **原因（重要）**：Avalonia 12.1.1 的 XAML 源生成器需要 **Roslyn 4.14（.NET SDK 10）**。
+  在 SDK 8.0.203 下，`MainWindow.axaml.cs` 会报
+  `CS0103: 名称"InitializeComponent"不存在`（生成器未运行），并伴随 `CS9057` 分析器版本警告。
+  故 ZIV.AI **不能**沿用 ZIV 的 8.0.203；ZIV 自身的 `global.json` 未改动。
+- **ZivAiEditor 项目**：`net8.0` / `net8.0-windows`，与 SDK 10 兼容（SDK 只影响工具链，不影响 TFM）。
+- 影响：`global.json`；`ARCHITECTURE.md` §7；`ACCEPTANCE.MD` 1.4；`DEVLOG.md` 问题 5。
+
+---
+
+## Step 2（日期：2026-09-21）
+
+> **修订说明（Step 2 · 后端转向 ComfyUI + IPC）**
+>
+> 本段记录 Step 2 启动时因后端选型变更而对 Step 0 / Step 1 冻结项的修订。
+> 依据：`_test_step2/REPORT.md` 实测报告（11 项任务全部执行完毕）。
+> 以下内容**不改动 Step 0 / Step 1 已冻结行**，仅在此说明并落到对应文档。
+>
+> 1. **D-7 修订**：Python 后端从「Step 1 只支持 SGLang」修订为
+>    「采用 ComfyUI v0.37.0 便携版源码，**in-process 直接调管线**（不启动 HTTP server）；
+>    SGLang 路线废弃；LightX2V / Lightning LoRA 作为 Step 7 可选加速再引入」。
+>    依据：实测确认 ComfyUI v0.37.0 原生支持 Qwen-Image-2.1（`QwenImage21Transformer2DModel`、
+>    `TextEncodeQwenImage21` 节点、`CLIPType.QWEN_IMAGE`），模型三件套可加载，
+>    端到端编辑闭环可跑通（512² 约 16.1s）。
+>
+> 2. **D-8 修订**：`contracts/openapi.yaml` 的 8 端点**降级为 Schema 参考**（保留定义，
+>    不再作为跨进程传输契约）；新增 `contracts/ipc-protocol.md` 作为 **IPC 传输契约**
+>    （Step 2 冻结）。OpenAPI 中的 `ImageEditRequest` / `TaskAccepted` / `TaskStatusResponse`
+>    等 schema 映射为 IPC 消息的 payload 结构。
+>    依据：实测确认 Named Pipe + 长度前缀协议性能充足（7.91MB 数据 2.71ms，2918 MB/s），
+>    且 IPC 无需 HTTP 栈开销。
+>
+> 3. **0.3.3 跨进程契约修订**：从「只有 `openapi.yaml`」修订为
+>    「`openapi.yaml`（Schema 参考）+ `ipc-protocol.md`（IPC 传输契约，Step 2 冻结）」。
+>
+> 4. **1.5 跨进程契约冻结修订**：Step 1 冻结的 8 个 OpenAPI 端点**保留定义不变**，
+>    但状态从「跨进程唯一契约」调整为「Schema 参考」；IPC 协议独立冻结于 Step 2 段。
+>
+> 5. **Z23 补充**：原文「经 OpenAPI 契约解耦」补充为「经 OpenAPI（Schema 参考）
+>    或 **IPC 协议**解耦」；Z23 的核心约束（AI 模块与 Python 后端可各自升级）不变。
+>
+> 6. **管道方向与消息类型收敛（Step 2.1 实测后修订）**：
+>    - 管道方向从「Python = server，C# = client」修订为「C# = Server，Python = Client」。
+>      理由：C# 的 PythonProcessManager 掌控生命周期，启动时序无竞态。
+>    - 消息类型收敛为 ping / pong，删除 health / health_result。
+>      理由：ping/pong 是 IPC 惯例，pong 的 payload 已承载健康状态字段。
+>    - preview 帧明确为 0x02 二进制帧，承载 JPEG 字节流，
+>      来源为 ComfyUI 的 latent_preview.get_previewer()。
+>    - 上述修订仅涉及 contracts/ipc-protocol.md，不改动 Step 0 / Step 1 冻结行。
+> 7. **progress 帧扩展与 vram 口径（Step 2.2 修订）**：
+>    - `progress` 新增**可选字段** `stage`（`loading_model` / `sampling` / `vae_decode`）
+>      与 `sub_stage`（`stage="loading_model"` 时为 `dit` / `te` / `vae`；`stage="sampling"`
+>      时为 `ready` 或 null）；新增 §3.3「加载阶段进度序列」记录实测 7 帧。
+>      属**向后兼容的协议扩展**（新字段可选，旧端忽略），不改变既有消息语义。
+>    - `pong.vram_used_mb` 口径明确为 **NVML 当前 GPU 占用**；并记录 ComfyUI
+>      **延迟加载权重**（load 后未推理前接近基线属正常）。
+>    - `ipc_version` 由 **`0.2` 升至 `0.3`**（§7 记录变更点）。
+>    - 依据 Step 2.2 复测：`load_models_gpu()` 前 `torch.cuda.memory_allocated() == 0`、
+>      DiT 参数 device 为 `cpu`；调用后约 **6920 MB**、device 为 `cuda:0`。
+>    - 上述修订仅涉及 contracts/ipc-protocol.md，不改动 Step 0 / Step 1 冻结行。
+>
+> **Z17 不改**：原文「只经本地 HTTP 或命名管道」已覆盖 Named Pipe，本次后端转向
+> **未突破 Z17**（C# 不加载 Python 运行时、不 P/Invoke Python C API）。
+>
+> **实测确认的关键事实（写入冻结记录）**：
+> - ComfyUI v0.37.0 **不存在官方 Embedding API**（无 `comfy/client/`、
+>   无 `embedded_comfy_client.py`）—— 必须自封装推理进程。
+> - `InterruptProcessingException` 继承 **`BaseException`**（非 `Exception`）——
+>   Python 侧取消捕获必须用 `except BaseException` 或指定异常类型。
+> - **共享内存不比 Named Pipe 快**（实测 7.91MB：Named Pipe 2.71ms vs 共享内存 5.37ms）——
+>   不引入共享内存。
+> - **Named Pipe 默认 ACL 允许 Everyone / Anonymous 读** ——
+>   必须显式收紧为**仅当前用户**（`PipeSecurity`）。
+> - **Python 3.13 free-threading 不可用**（`_is_gil_enabled() == True`，无 `python3.13t.exe`）——
+>   不启用 free-threading。
+> - **pywin32 未安装** —— Python 侧同步使用 `ctypes`（已验证可行）。
+> - **无显存泄漏**：3 次加载/卸载循环后显存稳定；进程退出后回到基线。
+> - **模型路径绝对直传**：无需 `extra_model_paths.yaml`，不触碰 `C:\AI\ComfyUI_PIC`。
+
+### 2.1 后端选型（冻结）
+
+- **后端 = ComfyUI v0.37.0 便携版**（`D:\devlop\ZIV.AI\Comfyui`），**in-process 直接
+  `import comfy` 源码调管线**，不启动 HTTP server。
+- **模型三件套**（绝对路径直传，只读引用 `C:\AI\ComfyUI_PIC`，不拷贝、不修改）：
+  - DiT：`...\diffusion_models\image2\qwen_image_2.1_int8_convrot.safetensors`
+  - TE：`...\text_encoders\qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors`
+  - VAE：`...\vae\qwen_image_2.1_vae_bf16.safetensors`
+- **加载 API**：`comfy.sd.load_diffusion_model` / `load_clip(..., CLIPType.QWEN_IMAGE)` /
+  `comfy.sd.VAE`；**采样**：`CFGGuider` + `sampler_object("euler")` +
+  `nodes_flux.get_schedule`，`cfg=1.0`。
+
+### 2.2 IPC 传输契约（冻结）
+
+- **传输**：Windows **Named Pipe**（`PipeOptions.Asynchronous`），**仅当前用户** ACL
+  （`PipeSecurity` + `SetAccessRuleProtection(true, false)` + `NamedPipeServerStreamAcl.Create`）。
+- **帧格式**：`[4 字节小端长度][1 字节帧类型][载荷]`（详见 `contracts/ipc-protocol.md`）。
+- **消息**：`health` / `submit` / `accepted` / `progress` / `preview` / `result` /
+  `cancel` / `canceled` / `error`。
+> 以修订说明第 6 条为准：`health` / `health_result` 作废，改为 `ping` / `pong`；
+> 管道方向为 **C# = Server / Python = Client**。
+- **payload schema** 沿用 `contracts/openapi.yaml` 的 `ImageEditRequest` / `TaskAccepted` /
+  `TaskStatusResponse`（作为 Schema 参考）。
+- **取消**：C# 发 `cancel` → Python 调 `interrupt_current_processing()`，捕获
+  `InterruptProcessingException`（`BaseException`）→ 回 `canceled`。
+- **进度**：Python 采样 `callback(step, x0, x, total)` → `progress`（含 `fraction`）；
+  预览帧走独立二进制帧。
+
+### 2.3 实测事实（依据 `_test_step2/REPORT.md`）
+
+见上方修订说明的「实测确认的关键事实」。关键性能：Named Pipe 7.91MB 单程 **2.71ms**；
+512² 编辑端到端约 **16.1s**；进程退出显存回基线（~813 MiB）。
+
+### 2.4 项目结构与依赖
+
+Step 1 冻结的 7 项目结构与依赖方向**不变**（见 1.1）。Step 2 起：
+- `ZivAiEditor.Backend` 新增 `IpcInferenceClient : IInferenceClient`（Step 2 实现）；
+  `HttpInferenceClient` 保留为备用。
+- Python 推理进程新建于 `D:\devlop\ZIV.AI\python\`（Step 2 起）。
+
+> **遗留**：`IInferenceClient` 目前只有 `SubmitInpaintAsync`；Step 2/4 按需扩展提交入口
+> （走修订说明，不破坏既有成员）。
+
+---
+
+## Step 3（日期：2026-09-21）
+
+> **修订说明（Step 3 · 重新定义：空闲卸载 + heartbeat）**
+>
+> 原 `ACCEPTANCE.MD` 把 Step 3 规划为「SGLang 服务」，但 SGLang 路线已随
+> **D-7 修订**废弃（后端改为 ComfyUI in-process + IPC）。本步**重新定义** Step 3 为
+> **空闲卸载（Z21）+ heartbeat**；不改动 Step 0/1/2 已冻结行，仅在此追加。
+
+### 3.1 范围（冻结）
+
+- **空闲卸载（Z21）**：模型空闲超时后释放 DiT / TE / VAE 与显存，回到 `not_loaded`；
+  **进程与管道保持连接**，下次 `submit` 惰性重载。超时与检查间隔可配置
+  （`config.IDLE_UNLOAD_SECONDS` / `IDLE_CHECK_INTERVAL_S`，可用环境变量覆盖以便测试）。
+- **heartbeat（新增消息，IPC 契约 0.3 → 0.4）**：Python 周期发送
+  `{"type":"heartbeat","vram_used_mb":<NVML>,"current_task_id":<id|null>}`；
+  C# 侧超时未收（默认 30 s）触发 `HeartbeatLost` 事件。**自动重启留待 Step 4**。
+- **主循环非阻塞轮询**：Python 主循环改为 `PeekNamedPipe` 轮询（不再阻塞读），
+  以使 heartbeat 线程的写不被 fd 锁饿死（Step 2.4 的 fd 锁约束）。
+- **关闭「智能显存优化」（等效官方 `--disable-smart-memory`）**：由
+  `model_loader.prepare_environment()` 置 `comfy.cli_args.args.disable_smart_memory = True`，
+  **必须在首次 `import comfy.model_management` 之前**（该模块在 import 时把该值读成模块
+  常量）。依据 klein 启动器 `aimdo_init.py` 实测；本步复测采样峰值 **16020 → 9144 MiB**、
+  `torch alloc` **11.4 GB → 0.7 GB**，耗时基本不变。
+
+### 3.2 契约变更
+
+- `contracts/ipc-protocol.md`：新增 `heartbeat` 消息（§3.2），**ipc_version 0.3 → 0.4**；
+  追加修订记录与 §7 变更点。属**向后兼容扩展**（旧端忽略未知消息）。
+- `IInferenceClient` / `InferenceProgress` **签名不变**；C# 侧以事件
+  （`HeartbeatReceived` / `HeartbeatLost`）与 `LastHeartbeatAt` 暴露给 App 层。
+
+### 3.3 实测事实（本步）
+
+- 采样峰值（关闭智能显存优化后）：`nvidia-smi` **9144 MiB**、`torch alloc` **0.7 GB**
+  （此前开启时为 16020 MiB / 11.4 GB）；512²/4 步单次推理 **~13.7 s**（与此前相当）。
+- 空闲卸载后 `torch.cuda.memory_allocated()` 降至 **8.8 MB**；`nvidia-smi` 因 WDDM
+  计账滞后 ~1.5 s，最终回落至 **~1038 MiB**。
+- 卸载后重载：惰性 load ≈ **1.6–2.6 s**；下次推理首个采样步前的 `moving_to_gpu` 约
+  **5–6 s**（卸载后需重新上 GPU；与 Step 2.3 的 2.51 s 热态不同）。
+- heartbeat：每 10 s 一帧；`HeartbeatLost` 阈值 30 s。
+- 依据：Step 3 实测（`DOC/DEVLOG.md` Step 3 段）。
+
+> **遗留**：Python 主循环改为轮询后，`submit` 期间仍为同步执行；heartbeat 线程与
+> 采样写入经 `FrameIO._write_lock` 串行。`unload_all_models()` 会卸载全部 ComfyUI
+> 托管模型（当前仅本模型）。

@@ -1,0 +1,367 @@
+openapi: 3.1.0
+info:
+  title: ZIV.AI Inference Backend API
+  version: 0.2.0
+  summary: ZIV.AI 本地推理后端的跨进程契约（Step 1 冻结）
+  description: |
+    ZIV.AI 的 C# 前端与 Python 推理后端之间的唯一通信契约（Z17 / Z23）。
+
+    - 仅监听本地回环（127.0.0.1 / localhost），禁止对外网开放（SPEC §4）。
+    - 所有请求经单一队列串行执行，交互优先，OOM 降级重试（Z18）。
+    - 遮罩为二值 PNG（只含 0 / 255），原图与遮罩分开传（Z19）。
+    - 输出一律新文件，不覆盖原图（Z24）。
+    - 字段命名统一 snake_case，跨 C# / Python 两端一致。
+  license:
+    name: Proprietary
+servers:
+  - url: http://127.0.0.1:{port}
+    description: 本地回环；端口动态分配（后端启动时选空闲端口，写入程序目录 settings.ini 的 backend.port，C# 侧读取）
+    variables:
+      port:
+        default: "8787"
+        description: 本地 HTTP 端口占位值；实际端口以程序目录 settings.ini 的 backend.port 为准
+
+tags:
+  - name: health
+    description: 后端健康与模型状态
+  - name: inference
+    description: 推理任务提交与查询
+
+paths:
+  /v1/health:
+    get:
+      operationId: getHealth
+      tags: [health]
+      summary: 后端健康检查与模型加载状态
+      description: C# 侧用于探测后端是否可用、模型是否已加载（Z21 空闲卸载后为未加载）。
+      responses:
+        "200":
+          description: 后端可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: 后端已启动但尚不可服务（如模型加载中）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /v1/inpaint:
+    post:
+      operationId: submitInpaint
+      tags: [inference]
+      summary: 提交一次重绘 / 局部编辑请求
+      description: 提交后立即返回任务句柄（202）；结果经 `/v1/task/{id}` 轮询获取。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageEditRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/TaskAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/img2img:
+    post:
+      operationId: submitImg2Img
+      tags: [inference]
+      summary: 提交一次图生图请求
+      description: 以主图（可选参考图）为条件按提示词整体重绘。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageEditRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/TaskAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/upscale:
+    post:
+      operationId: submitUpscale
+      tags: [inference]
+      summary: 提交一次超分 / 放大请求
+      description: 在共享请求字段之外，允许指定放大倍率与目标边长。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ImageEditRequest"
+                - type: object
+                  properties:
+                    scale:
+                      type: number
+                      format: float
+                      description: 放大倍率（可选）
+                    target_width:
+                      type: integer
+                      description: 目标宽度（可选）
+                    target_height:
+                      type: integer
+                      description: 目标高度（可选）
+      responses:
+        "202":
+          $ref: "#/components/responses/TaskAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/segment:
+    post:
+      operationId: submitSegment
+      tags: [inference]
+      summary: 提交一次分割 / 抠图请求
+      description: 在共享请求字段之外，允许指定分割目标类别与是否返回遮罩。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ImageEditRequest"
+                - type: object
+                  properties:
+                    target:
+                      type: string
+                      description: 分割目标描述（可选）
+                    return_mask:
+                      type: boolean
+                      description: 是否同时输出遮罩 PNG（可选）
+      responses:
+        "202":
+          $ref: "#/components/responses/TaskAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/outpaint:
+    post:
+      operationId: submitOutpaint
+      tags: [inference]
+      summary: 提交一次扩图 / 外绘请求
+      description: 在共享请求字段之外，允许指定四边扩展像素。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ImageEditRequest"
+                - type: object
+                  properties:
+                    expand_left:
+                      type: integer
+                      description: 左侧扩展像素（可选）
+                    expand_right:
+                      type: integer
+                      description: 右侧扩展像素（可选）
+                    expand_top:
+                      type: integer
+                      description: 上侧扩展像素（可选）
+                    expand_bottom:
+                      type: integer
+                      description: 下侧扩展像素（可选）
+      responses:
+        "202":
+          $ref: "#/components/responses/TaskAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/task/{id}:
+    get:
+      operationId: getTask
+      tags: [inference]
+      summary: 查询任务状态与结果
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 提交时返回的 task_id
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 任务快照
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusResponse"
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/task/{id}/cancel:
+    post:
+      operationId: cancelTask
+      tags: [inference]
+      summary: 取消任务
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 提交时返回的 task_id
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 取消确认
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskAccepted"
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  responses:
+    TaskAccepted:
+      description: 已接受，进入队列
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/TaskAccepted"
+    BadRequest:
+      description: 请求非法（如主图缺失、遮罩非二值）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unavailable:
+      description: 后端不可用
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    HealthStatus:
+      type: object
+      required: [status, models]
+      properties:
+        status:
+          type: string
+          enum: [ok, loading, degraded, down]
+        version:
+          type: [string, "null"]
+          description: 后端版本（Z23 版本解耦）
+        models:
+          type: array
+          description: 已知模型及其加载状态
+          items:
+            $ref: "#/components/schemas/ModelStatus"
+        idle_unload_seconds:
+          type: integer
+          description: 空闲卸载超时（秒，可配置，Z21）
+
+    ModelStatus:
+      type: object
+      required: [name, loaded]
+      properties:
+        name:
+          type: string
+          description: 模型标识，如 qwen-image-2.1
+        loaded:
+          type: boolean
+        last_used_at:
+          type: [string, "null"]
+          format: date-time
+          description: 最近一次使用时间（可空）
+
+    ImageEditRequest:
+      type: object
+      description: 所有编辑类 POST 的共享请求体。
+      required: [image_path, prompt, steps, seed, denoise]
+      properties:
+        image_path:
+          type: string
+          description: 主图路径（只读，Z24）
+        mask_path:
+          type: [string, "null"]
+          description: 可选二值遮罩 PNG 路径（只含 0 / 255，Z19）
+        prompt:
+          type: string
+          description: 自然语言编辑指令
+        steps:
+          type: integer
+          minimum: 1
+          description: 推理步数
+        seed:
+          type: integer
+          format: int64
+          description: 随机种子；-1 表示随机
+        denoise:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: 去噪强度
+        output_path:
+          type: [string, "null"]
+          description: 期望输出路径；缺省由后端生成新文件（Z24）
+
+    TaskAccepted:
+      type: object
+      required: [task_id]
+      properties:
+        task_id:
+          type: string
+          description: 任务标识，用于 `/v1/task/{id}` 查询与取消
+
+    TaskRunState:
+      type: string
+      description: 任务运行状态（与 C# 的 TaskState 类区分，故命名 TaskRunState）。
+      enum: [pending, queued, running, succeeded, failed, canceled]
+
+    TaskStatusResponse:
+      type: object
+      required: [state, progress]
+      properties:
+        state:
+          $ref: "#/components/schemas/TaskRunState"
+        progress:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        output_path:
+          type: [string, "null"]
+          description: 成功后的新文件路径（Z24）
+        error:
+          type: [string, "null"]
+          description: 失败原因（可空）
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        detail:
+          type: [string, "null"]
