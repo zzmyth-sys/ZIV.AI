@@ -1,0 +1,5 @@
+SHM_WAITING
+SIZE=589824B (0.56MB) avg_ms=101.480 throughput_MBps=5.5
+SIZE=2359296B (2.25MB) avg_ms=1.669 throughput_MBps=1347.7
+SIZE=8294236B (7.91MB) avg_ms=5.371 throughput_MBps=1472.6
+DONE

@@ -1,0 +1,358 @@
+import ctypes
+import subprocess
+import threading
+import uuid
+
+import config
+import engine as engine_module
+import ipc
+import model_loader
+import pipeline
+
+INTERRUPT_EXCEPTION_NAME = "InterruptProcessingException"
+
+MODEL_STATUS_NOT_LOADED = engine_module.STATE_NOT_LOADED
+
+_ENGINE = engine_module.ModelEngine()
+
+# Single in-flight task state (Z18 serial). `cancel` is delivered by draining
+# the pipe from inside the sampling loop (`_make_cancel_poller`), so the read
+# loop only sees a `cancel` frame when no task is in flight.
+_ACTIVE_LOCK = threading.Lock()
+_ACTIVE_TASK_ID = None
+
+
+class _NvmlMemory(ctypes.Structure):
+    _fields_ = [
+        ("total", ctypes.c_ulonglong),
+        ("free", ctypes.c_ulonglong),
+        ("used", ctypes.c_ulonglong),
+    ]
+
+
+def _vram_via_nvml():
+    try:
+        library = ctypes.WinDLL("nvml.dll")
+    except (OSError, AttributeError):
+        return None
+    try:
+        if library.nvmlInit_v2() != 0:
+            return None
+        try:
+            handle = ctypes.c_void_p()
+            library.nvmlDeviceGetHandleByIndex_v2.argtypes = [
+                ctypes.c_uint,
+                ctypes.POINTER(ctypes.c_void_p),
+            ]
+            if library.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(handle)) != 0:
+                return None
+            memory = _NvmlMemory()
+            library.nvmlDeviceGetMemoryInfo.argtypes = [
+                ctypes.c_void_p,
+                ctypes.POINTER(_NvmlMemory),
+            ]
+            if library.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(memory)) != 0:
+                return None
+            return round(memory.used / (1024.0 * 1024.0), 1)
+        finally:
+            library.nvmlShutdown()
+    except (OSError, AttributeError):
+        return None
+
+
+def _vram_via_nvidia_smi():
+    try:
+        raw = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    try:
+        first = raw.decode("utf-8", "ignore").strip().splitlines()[0].strip()
+        return float(first)
+    except Exception:
+        return None
+
+
+def get_vram_used_mb():
+    value = _vram_via_nvml()
+    if value is None:
+        value = _vram_via_nvidia_smi()
+    return 0.0 if value is None else float(value)
+
+
+def _models():
+    return _ENGINE.models
+
+
+def _status_response(message, message_type):
+    return {
+        "type": message_type,
+        "request_id": message.get("request_id"),
+        "status": "ok",
+        "version": config.BACKEND_VERSION,
+        "protocol_version": config.PROTOCOL_VERSION,
+        "model_status": _ENGINE.status,
+        "vram_used_mb": get_vram_used_mb(),
+        "idle_unload_seconds": config.IDLE_UNLOAD_SECONDS,
+        "models": _models(),
+    }
+
+
+def handle_ping(message):
+    return _status_response(message, "pong")
+
+
+def handle_submit(message, frame_io):
+    """Run a task synchronously; `cancel` is polled from the sampler callback.
+
+    Pipe I/O stays single-threaded (a `FileIO` lock would deadlock a worker
+    thread's write against the main loop's blocking read), so cancellation is
+    delivered through `poll_cancel` in the sampling loop instead.
+    """
+    task_id = message.get("task_id") or uuid.uuid4().hex
+    payload = message.get("payload") or {}
+    _set_active(task_id)
+    try:
+        _run_submit(frame_io, task_id, payload)
+    finally:
+        _ENGINE.touch()
+        _clear_active(task_id)
+    return "continue"
+
+
+def handle_cancel(message, frame_io):
+    """Fallback cancel handled outside sampling (e.g. a late/queued frame).
+
+    While a task is running its poller consumes the `cancel` frame directly;
+    this only fires when no task is in flight, which is a no-op.
+    """
+    task_id = message.get("task_id")
+    active = _active_task_id()
+    if active is None or (task_id and task_id != active):
+        return "continue"
+    _interrupt_processing()
+    return "continue"
+
+
+def _run_submit(frame_io, task_id, payload):
+    try:
+        frame_io.write_json({"type": "accepted", "task_id": task_id})
+        # Must precede any `import comfy.model_management`: it fixes the
+        # smart-memory flag at import time (see model_loader).
+        model_loader.prepare_environment()
+        _clear_interrupt()
+
+        try:
+            _ENGINE.ensure_loaded(_make_progress_pusher(frame_io, task_id))
+        except Exception as exc:
+            _write_error(frame_io, task_id, "model_load_failed", exc)
+            return
+
+        frame_io.write_json(
+            {
+                "type": "progress",
+                "task_id": task_id,
+                "step": 0,
+                "total": 0,
+                "fraction": 1.0,
+                "message": "model_loaded",
+                "stage": "sampling",
+                "sub_stage": "ready",
+            }
+        )
+
+        model, clip, vae = _ENGINE.components
+        try:
+            result = pipeline.run(
+                model,
+                clip,
+                vae,
+                payload,
+                on_progress=_make_sampling_progress(frame_io, task_id),
+                on_preview=_make_preview(frame_io, task_id),
+                poll_cancel=_make_cancel_poller(frame_io),
+            )
+        except Exception as exc:
+            _write_error(frame_io, task_id, "inference_failed", exc)
+            return
+
+        frame_io.write_json(
+            {
+                "type": "result",
+                "task_id": task_id,
+                "output_path": result["output_path"],
+                "duration_ms": result["duration_ms"],
+                "width": result["width"],
+                "height": result["height"],
+                "seed": result["seed"],
+            }
+        )
+    except BaseException as exc:
+        # `InterruptProcessingException` derives from BaseException, so the
+        # cancellation path must be caught here (never `except Exception`).
+        if not _is_interrupt(exc):
+            raise
+        _release_caches()
+        _write_canceled(frame_io, task_id)
+
+
+def _make_sampling_progress(frame_io, task_id):
+    def push(step, total, fraction, stage, message_text):
+        frame_io.write_json(
+            {
+                "type": "progress",
+                "task_id": task_id,
+                "step": step,
+                "total": total,
+                "fraction": fraction,
+                "message": message_text,
+                "stage": stage,
+                "sub_stage": None,
+            }
+        )
+
+    return push
+
+
+def _make_preview(frame_io, task_id):
+    def push(step, total, jpeg_bytes):
+        frame_io.write_preview(task_id, step, total, jpeg_bytes)
+
+    return push
+
+
+def _make_cancel_poller(frame_io):
+    """Drain any pending control frames from inside the sampling loop.
+
+    Only `cancel` triggers work (sets the interrupt flag); `ping` is answered so
+    the pipe stays clean. `shutdown` during a task is ignored.
+    """
+
+    def poll():
+        while frame_io.has_pending_frame():
+            frame = frame_io.read_frame()
+            if frame is None:
+                break
+            frame_type, payload = frame
+            if frame_type != ipc.FRAME_JSON:
+                continue
+            try:
+                message = ipc.decode_json(payload)
+            except ValueError:
+                continue
+            if not isinstance(message, dict):
+                continue
+            message_type = message.get("type")
+            if message_type == "cancel":
+                _interrupt_processing()
+            elif message_type == "ping":
+                frame_io.write_json(handle_ping(message))
+
+    return poll
+
+
+def _is_interrupt(exc):
+    return type(exc).__name__ == INTERRUPT_EXCEPTION_NAME
+
+
+def _interrupt_processing():
+    try:
+        import comfy.model_management as mm
+
+        mm.interrupt_current_processing(True)
+    except Exception:
+        pass
+
+
+def _clear_interrupt():
+    try:
+        import comfy.model_management as mm
+
+        mm.interrupt_current_processing(False)
+    except Exception:
+        pass
+
+
+def _release_caches():
+    """Release a canceled run's activation memory; keep the model resident."""
+    try:
+        import comfy.model_management as mm
+
+        mm.soft_empty_cache(force=True)
+    except Exception:
+        pass
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+def _set_active(task_id):
+    global _ACTIVE_TASK_ID
+    with _ACTIVE_LOCK:
+        _ACTIVE_TASK_ID = task_id
+
+
+def _clear_active(task_id):
+    global _ACTIVE_TASK_ID
+    with _ACTIVE_LOCK:
+        if _ACTIVE_TASK_ID == task_id:
+            _ACTIVE_TASK_ID = None
+
+
+def _active_task_id():
+    with _ACTIVE_LOCK:
+        return _ACTIVE_TASK_ID
+
+
+def active_task_id():
+    """Public accessor for the heartbeat / idle watcher."""
+    return _active_task_id()
+
+
+def is_busy():
+    """True while a task is in flight (Z18: do not unload concurrently)."""
+    return _active_task_id() is not None
+
+
+def _write_canceled(frame_io, task_id):
+    frame_io.write_json({"type": "canceled", "task_id": task_id})
+
+
+def _write_error(frame_io, task_id, code, exc):
+    frame_io.write_json(
+        {
+            "type": "error",
+            "task_id": task_id,
+            "code": code,
+            "message": "%s: %s" % (type(exc).__name__, exc),
+        }
+    )
+
+
+def _make_progress_pusher(frame_io, task_id):
+    def push(stage, sub_stage, fraction, message):
+        frame_io.write_json(
+            {
+                "type": "progress",
+                "task_id": task_id,
+                "step": 0,
+                "total": 0,
+                "fraction": fraction,
+                "message": message,
+                "stage": stage,
+                "sub_stage": sub_stage,
+            }
+        )
+
+    return push
+
+
+def handle_shutdown(message):
+    return {"type": "shutdown_ack"}
