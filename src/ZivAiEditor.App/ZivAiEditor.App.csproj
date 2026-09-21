@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ZivAiEditor.App</RootNamespace>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishAot>true</PublishAot>
+    <PublishSingleFile Condition="'$(PublishAot)' != 'true'">true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ZivAiEditor.UI\ZivAiEditor.UI.csproj" />
+    <ProjectReference Include="..\ZivAiEditor.Backend\ZivAiEditor.Backend.csproj" />
+    <ProjectReference Include="..\ZivAiEditor.Agent\ZivAiEditor.Agent.csproj" />
+    <ProjectReference Include="..\ZivAiEditor.Tools\ZivAiEditor.Tools.csproj" />
+    <ProjectReference Include="..\ZivAiEditor.Contracts\ZivAiEditor.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\ZIV\src\ZIV.Core\ZIV.Core.csproj" />
+    <ProjectReference Include="..\..\..\ZIV\src\ZIV.Imaging\ZIV.Imaging.csproj" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\settings.ini" Link="settings.ini" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

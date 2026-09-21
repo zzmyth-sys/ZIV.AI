@@ -1,0 +1,58 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ZivAiEditor.Contracts", "ZivAiEditor.Contracts\ZivAiEditor.Contracts.csproj", "{1F3BC6CA-0BEB-482B-BDCA-1D65D1C5272A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ZivAiEditor.Backend", "ZivAiEditor.Backend\ZivAiEditor.Backend.csproj", "{273ED57A-74FB-42B4-AA5D-7F2FF0925B3A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ZivAiEditor.Agent", "ZivAiEditor.Agent\ZivAiEditor.Agent.csproj", "{76D28ED4-D4D3-49D7-A1C9-8AF3B7E89C06}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ZivAiEditor.Tools", "ZivAiEditor.Tools\ZivAiEditor.Tools.csproj", "{BED63349-7AA7-44BA-8707-2049F24C9ABA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ZivAiEditor.UI", "ZivAiEditor.UI\ZivAiEditor.UI.csproj", "{82FE7DD0-0152-4406-9C0B-8298B81CD479}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ZivAiEditor.App", "ZivAiEditor.App\ZivAiEditor.App.csproj", "{646CC570-ACC5-4B04-9AAC-B1DC450BF21D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ZivAiEditor.Tests", "ZivAiEditor.Tests\ZivAiEditor.Tests.csproj", "{71447BB0-FD49-4161-97FB-E8D3C6B7679D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1F3BC6CA-0BEB-482B-BDCA-1D65D1C5272A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1F3BC6CA-0BEB-482B-BDCA-1D65D1C5272A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1F3BC6CA-0BEB-482B-BDCA-1D65D1C5272A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1F3BC6CA-0BEB-482B-BDCA-1D65D1C5272A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{273ED57A-74FB-42B4-AA5D-7F2FF0925B3A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{273ED57A-74FB-42B4-AA5D-7F2FF0925B3A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{273ED57A-74FB-42B4-AA5D-7F2FF0925B3A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{273ED57A-74FB-42B4-AA5D-7F2FF0925B3A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{76D28ED4-D4D3-49D7-A1C9-8AF3B7E89C06}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{76D28ED4-D4D3-49D7-A1C9-8AF3B7E89C06}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{76D28ED4-D4D3-49D7-A1C9-8AF3B7E89C06}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{76D28ED4-D4D3-49D7-A1C9-8AF3B7E89C06}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BED63349-7AA7-44BA-8707-2049F24C9ABA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BED63349-7AA7-44BA-8707-2049F24C9ABA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BED63349-7AA7-44BA-8707-2049F24C9ABA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BED63349-7AA7-44BA-8707-2049F24C9ABA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{82FE7DD0-0152-4406-9C0B-8298B81CD479}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{82FE7DD0-0152-4406-9C0B-8298B81CD479}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{82FE7DD0-0152-4406-9C0B-8298B81CD479}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{82FE7DD0-0152-4406-9C0B-8298B81CD479}.Release|Any CPU.Build.0 = Release|Any CPU
+		{646CC570-ACC5-4B04-9AAC-B1DC450BF21D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{646CC570-ACC5-4B04-9AAC-B1DC450BF21D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{646CC570-ACC5-4B04-9AAC-B1DC450BF21D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{646CC570-ACC5-4B04-9AAC-B1DC450BF21D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{71447BB0-FD49-4161-97FB-E8D3C6B7679D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{71447BB0-FD49-4161-97FB-E8D3C6B7679D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{71447BB0-FD49-4161-97FB-E8D3C6B7679D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{71447BB0-FD49-4161-97FB-E8D3C6B7679D}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ZivAiEditor.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ZivAiEditor.Contracts\ZivAiEditor.Contracts.csproj" />
+    <ProjectReference Include="..\ZivAiEditor.Agent\ZivAiEditor.Agent.csproj" />
+    <ProjectReference Include="..\ZivAiEditor.Tools\ZivAiEditor.Tools.csproj" />
+    <ProjectReference Include="..\ZivAiEditor.Backend\ZivAiEditor.Backend.csproj" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+</Project>

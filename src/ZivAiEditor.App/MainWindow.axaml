@@ -1,0 +1,10 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ZivAiEditor.App.MainWindow"
+        Title="ZIV.AI Editor"
+        Width="960"
+        Height="640">
+  <TextBlock HorizontalAlignment="Center"
+             VerticalAlignment="Center"
+             Text="ZIV.AI Editor — Step 1 skeleton" />
+</Window>
