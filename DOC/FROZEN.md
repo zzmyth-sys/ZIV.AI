@@ -687,3 +687,94 @@ Step 1 冻结的 7 项目结构与依赖方向**不变**（见 1.1）。Step 2 �
 | `handlers.py` / 心跳 / 空闲卸载 | `IpcIdleUnloadTests` |
 | Backend 契约变更 | `ContractsSmokeTests` + 相关 IPC 用例 |
 | Step 收尾 / 发布前 / 跨模块重构 | **全量** `dotnet test ZIV.AI.sln` |
+
+---
+
+## Step 6（日期：2026-09-22）
+
+> **修订说明（Step 6 · 推理管线优化：SageAttention + 长边分辨率 + Steps 默认）**
+>
+> 本段为 Step 6 追加。目标：① 默认启用 SageAttention ② 分辨率默认语义改为「目标长边 1536」
+> ③ `InpaintRequest.Steps` 默认 20 → 25 ④ 启用 ComfyUI Dynamic VRAM（见 6.6）。
+> **不改动 Step 0–5 已冻结行**；唯一契约数值变更见下方 6.3（`InpaintRequest.Steps` 默认值）。
+
+### 6.1 分辨率默认语义：长边（side）口径（冻结）
+
+- **改了什么**：新增 `config.RESOLUTION_MODE`（`"side"` / `"area"`）、`config.RESOLUTION_SIDE`
+  （默认 **1536**）与 `config.RESOLUTION_SIDE_FALLBACK`（默认 `1536,1280,1024,768,640`）；
+  `pipeline` 新增 `_target_size(width, height, value, mode)`，把「目标分辨率」映射到目标
+  width/height：`side` 令 `max(w,h)==value`（目标**长边**），`area` 保持 Step 4 的
+  `w*h≈value²` 面积口径。
+- **为什么**：Qwen-Image-2.1 下短边过小会明显损失细节；以长边（1536）为口径更直观，且与
+  常用「长边 N 像素」描述一致。
+- **兼容规则（保留 Step 4 行为）**：显式设置环境变量 `ZIV_AI_MAX_RESOLUTION` 会**强制**
+  `RESOLUTION_MODE="area"`（使既有测试 / 脚本仍按面积口径工作）；未设置时默认 `"side"`。
+  `ZIV_AI_RESOLUTION_MODE` 可显式覆盖（env 优先于兼容规则）。
+- **影响哪些接口**：`pipeline.encode_prompt(...)` 追加可选参数 `mode=None`（缺省取
+  `config.RESOLUTION_MODE`），**向后兼容**；`run()` / `_run_once()` 内部传递 `mode`。
+  `config.MAX_RESOLUTION` / `RESOLUTION_FALLBACK` / `DEFAULT_RESOLUTION` **原样保留**。
+
+### 6.2 SageAttention 默认开启（冻结）
+
+- **改了什么**：新增 `config.SAGE_ATTENTION`（默认 `"1"` 即开启）；
+  `model_loader._apply_runtime_defaults()` 去掉 `DISABLE_SMART_MEMORY` 的提前返回，改为分别
+  判断——保留原有 disable-smart-memory 行为，并新增 SageAttention 门控：仅当
+  `config.SAGE_ATTENTION` 且 `importlib.util.find_spec("sageattention")` 非 `None` 时才设
+  `comfy.cli_args.args.use_sage_attention = True`。
+- **为什么**：降低注意力开销（与 Step 3 关闭 smart memory 同属运行时策略）。
+- **包缺失时保持关闭**：`sageattention` 未安装时**不**设置该 flag（否则 ComfyUI
+  `comfy/ldm/modules/attention.py:30-36` 会 `exit(-1)`），并记一条 warning。
+- **回退**：设 `ZIV_AI_SAGE_ATTENTION=0`（或 `false`）恢复原生 attention。
+- **影响哪些接口**：无契约变更；仅 `model_loader` 运行时默认。
+
+### 6.3 `InpaintRequest.Steps` 默认 20 → 25（冻结）
+
+- **改了什么**：`ZivAiEditor.Contracts/Inference/InpaintRequest.cs` 的 `Steps` 默认值由
+  **20** 改为 **25**（其余成员不动）。
+- **为什么**：提高默认采样质量（相关实测数字由主会话实测后另行登记）。
+- **推翻 Step 4.1 的冲突措辞**：Step 4.1 称「既有成员与默认值不变」；本项**明确推翻**该措辞中
+  与 `Steps` 默认值相关的部分——仅 `Steps` 默认值变更，Step 4.1 新增的 `Lora` /
+  `Optimizations` 与其余默认值保持不变。Step 4.1 原行不改，以本段为准。
+- **影响哪些接口**：`InpaintRequest.Steps` 默认值（`IInferenceClient` 签名不变）；显式传
+  `Steps` 的调用方不受影响。IPC 契约 `contracts/ipc-protocol.md` 的 `submit.payload` 示例
+  `steps` 同步为 25。
+
+### 6.4 文档同步
+
+- `contracts/ipc-protocol.md`：`submit.payload` 示例 `"steps"` 由 20 同步为 25（结构与
+  `ipc_version` 不变，仍为 `0.5`）。
+- `DOC/OPTIMIZATION.md`：本段**不写入** ZIV.AI 改后的实测数字（由主会话实测后补）。
+
+### 6.5 新增铁律 Z30（冻结）
+
+| 编号 | 铁律 | 冻结于 | 备注 |
+|---|---|---|---|
+| Z30 | GPU 任务先确认空闲：启动任何会占用 GPU 的任务前**必须先确认 GPU 空闲**（无其他计算进程、显存接近基线）；**不空闲时必须先与用户确认才能继续**，不得自行启动 | Step 6 | **核心动机：保护硬件资产**；正文见 `SPEC.md` §6.2（Z30） |
+
+> **理由（核心动机：保护硬件资产）**：2026-09-22，在未确认 GPU 空闲、且未按
+> `DOC/OPTIMIZATION.md` §6.1「1024 面积口径峰值 16004/16376 MiB，仅余约 370 MiB」预留余量
+> 的情况下，同进程连跑两次 1536×960 采样，导致整机崩溃。**关联**：`SPEC.md` §6.2（Z30）、
+> `ACCEPTANCE.MD`「测试执行原则」。
+
+### 6.6 运行时显存策略：启用 ComfyUI Dynamic VRAM（Step 6 修正）
+
+- **改了什么**：新增 `config.DYNAMIC_VRAM`（默认开启，env `ZIV_AI_DYNAMIC_VRAM`），并在
+  `model_loader.prepare_environment()` 增加 `_enable_dynamic_vram()`：复现官方
+  `ComfyUI/main.py` 的 DynamicVRAM 引导（`comfy_aimdo.control.init()` → `init_devices()` →
+  `model_patcher.CoreModelPatcher = ModelPatcherDynamic` → `memory_management.aimdo_enabled = True`）。
+- **为什么（根因）**：该引导只写在官方入口 `ComfyUI/main.py` 里。ZIV.AI 后端是进程内直连
+  ComfyUI（入口 `python/server/main.py`），从不执行它，于是落到 legacy `ModelPatcher`：粗粒度
+  offload、卸载不彻底；16GB 卡上 side 1536 时 TE(~8.7G) + VAE encode(~9G) + DiT(~9.4G) 叠加
+  冲顶（实测峰值 16030 MiB、冷跑 41.9s，并曾导致整机崩溃，见 `SPEC.md` §6.2 Z30）。启用
+  Dynamic VRAM 后权重以 vbar 按需换入换出，峰值 **13091 MiB**、冷跑 **19.73s**（优于官方
+  server 流的 22.15s / 14968 MiB）。
+- **初始化顺序（关键约束）**：`comfy_aimdo.control.init()` 必须在首次 import
+  `comfy_aimdo.host_buffer` 之前执行 —— `host_buffer` 在 import 时绑定 `lib = control.lib`，
+  若先 import `comfy.model_management` 会把该引用冻结成 `None`，加载模型时报
+  `'NoneType' object has no attribute 'hostbuf_allocate'`。
+- **回退**：设 `ZIV_AI_DYNAMIC_VRAM=0`（或 `false`）回到 legacy `ModelPatcher`。
+- **未采用**（本步初稿，实测后移除）：`RESERVE_VRAM_GB`（保留显存，无收益）；`pipeline._release`
+  手动分时卸载（A/B 对照 19.96/18.12s vs 19.73/18.13s，无收益，Dynamic VRAM 下冗余）。
+- **Step 3.4 关系**：Step 3.4「运行时默认关闭 smart memory」**继续有效**（`DISABLE_SMART_MEMORY`
+  维持 `1`，与 Dynamic VRAM 无冲突，实测生效）。
+- **影响哪些接口**：无契约变更；仅运行时显存/加载策略（`config` / `model_loader`）。

@@ -56,7 +56,8 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
     # `clip` (strength_clip) takes effect on the conditioning.
     model, clip = pipeline_hooks.apply_pre_sampling_hooks(model, clip, request)
 
-    candidates = _resolution_candidates()
+    mode = config.RESOLUTION_MODE
+    candidates = _resolution_candidates(mode)
     oom_types = _oom_types()
     last_error = None
     for index, resolution in enumerate(candidates):
@@ -65,7 +66,7 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
                 raise torch.cuda.OutOfMemoryError("forced OOM (ZIV_AI_FORCE_OOM)")
             return _run_once(
                 model, clip, vae, prompt, image_path, mask_path, output_path,
-                resolution, steps, seed, denoise, started,
+                resolution, mode, steps, seed, denoise, started,
                 on_progress, on_preview, poll_cancel,
             )
         except oom_types as exc:
@@ -83,7 +84,7 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
 
 
 def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
-              resolution, steps, seed, denoise, started,
+              resolution, mode, steps, seed, denoise, started,
               on_progress, on_preview, poll_cancel):
     import comfy.model_management as mm
     import comfy.sample
@@ -95,7 +96,7 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
 
     # Stage 2: encode the prompt + optional reference image (clip is patched).
     positive, negative, latent_image, mask = encode_prompt(
-        clip, vae, prompt, image_path, mask_path, resolution
+        clip, vae, prompt, image_path, mask_path, resolution, mode
     )
 
     previewer = preview_module.get_previewer(model)
@@ -147,9 +148,9 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
     }
 
 
-def encode_prompt(clip, vae, prompt, image_path, mask_path, resolution=None):
+def encode_prompt(clip, vae, prompt, image_path, mask_path, resolution=None, mode=None):
     """Pipeline stage: conditioning + latents from the prompt / reference."""
-    return _encode(clip, vae, prompt, image_path, mask_path, resolution)
+    return _encode(clip, vae, prompt, image_path, mask_path, resolution, mode)
 
 
 def sample(model, positive, negative, latent, noise, steps, denoise, mask, seed, callback):
@@ -190,15 +191,43 @@ def save_png(image, output_path):
     image.save(output_path)
 
 
-def _resolution_candidates():
-    values = [int(config.MAX_RESOLUTION)] + [int(v) for v in config.RESOLUTION_FALLBACK]
+def _target_size(width, height, value, mode):
+    """Map an input size to (target_width, target_height) for a resolution mode.
+
+    ``side`` keeps the aspect ratio and makes the long edge equal ``value``;
+    ``area`` keeps the aspect ratio and makes the pixel area equal ``value**2``
+    (the Step 4 formula). Both snap to a multiple of 32 (min 32).
+    """
+    ratio = width / height
+    if mode == "side":
+        if ratio >= 1:
+            target_w, target_h = value, value / ratio
+        else:
+            target_w, target_h = value * ratio, value
+    else:
+        target_w = (value * value * ratio) ** 0.5
+        target_h = (value * value / ratio) ** 0.5
+    width = max(32, round(target_w / 32) * 32)
+    height = max(32, round(target_h / 32) * 32)
+    return width, height
+
+
+def _resolution_candidates(mode=None):
+    if mode is None:
+        mode = config.RESOLUTION_MODE
+    if mode == "side":
+        upper = int(config.RESOLUTION_SIDE)
+        values = [upper] + [int(v) for v in config.RESOLUTION_SIDE_FALLBACK]
+    else:
+        upper = int(config.MAX_RESOLUTION)
+        values = [upper] + [int(v) for v in config.RESOLUTION_FALLBACK]
     seen = set()
     ordered = []
     for value in values:
-        if value > 0 and value <= config.MAX_RESOLUTION and value not in seen:
+        if value > 0 and value <= upper and value not in seen:
             seen.add(value)
             ordered.append(value)
-    return ordered or [int(config.MAX_RESOLUTION)]
+    return ordered or [upper]
 
 
 def _oom_types():
@@ -239,7 +268,7 @@ def _free_vram():
         pass
 
 
-def _encode(clip, vae, prompt, image_path, mask_path, resolution):
+def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None):
     """Encode prompt + optional source image into conditioning / latents.
 
     Returns ``(positive, negative, latent_samples, denoise_mask)``. With a mask
@@ -251,18 +280,21 @@ def _encode(clip, vae, prompt, image_path, mask_path, resolution):
     import node_helpers
     import torch
 
+    if mode is None:
+        mode = config.RESOLUTION_MODE
+
     source = _load_image_tensor(image_path) if image_path else None
     mask = _load_mask_tensor(mask_path) if mask_path else None
 
     references = []
     images_vl = []
-    latent_pixels = int(resolution or config.MAX_RESOLUTION)
+    default_resolution = config.RESOLUTION_SIDE if mode == "side" else config.MAX_RESOLUTION
+    latent_pixels = int(resolution or default_resolution)
     if source is not None:
         samples = source[:1].movedim(-1, 1)  # [1,3,H,W]
-        ratio = samples.shape[3] / samples.shape[2]
-        width = round((latent_pixels * latent_pixels * ratio) ** 0.5 / 32) * 32
-        height = round((latent_pixels * latent_pixels / ratio) ** 0.5 / 32) * 32
-        width, height = max(32, width), max(32, height)
+        width, height = _target_size(
+            samples.shape[3], samples.shape[2], latent_pixels, mode
+        )
         if (width, height) == (samples.shape[3], samples.shape[2]):
             resized = source[:1]
         else:
@@ -294,7 +326,12 @@ def _encode(clip, vae, prompt, image_path, mask_path, resolution):
             latent_h = references[0].shape[2]
             latent_w = references[0].shape[3]
         else:
-            latent_h = latent_w = latent_pixels // 16
+            side = (
+                max(32, round(latent_pixels / 32) * 32)
+                if mode == "side"
+                else latent_pixels
+            )
+            latent_h = latent_w = side // 16
         latent_samples = torch.zeros(
             [1, 64, latent_h, latent_w], device=mm.intermediate_device()
         )

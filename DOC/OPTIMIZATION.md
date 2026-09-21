@@ -94,3 +94,30 @@
 
 > **显存触顶风险**：1024 编辑设备峰值 16004 MiB，仅余约 370 MiB；更高分辨率（2048）
 > 极可能 OOM，已由 `pipeline.py` 的 OOM 降级（1024 → 768 → 640）兜底。
+
+### 6.2 Step 6 实测：SageAttention + side 1536 + Dynamic VRAM
+
+- 配置：`side` 口径长边 **1536**（输出 1536×960）、`steps=25`、`seed=42`、`cfg=1.0`、
+  SageAttention 2.2、`DISABLE_SMART_MEMORY=1`、**Dynamic VRAM 启用**（`aimdo_enabled=True`）；
+  环境 Windows / RTX 4080 16GB / ComfyUI 0.37.0（Python 3.13.14）。
+- 脚本：`E:\temp\opencode\zivai_stage_1536.py`；输出 `zivai_norel_cold.png` / `zivai_norel_hot.png`。
+
+| 阶段 | 冷跑 | 热跑 |
+|---|---|---|
+| encode + 环境准备 | 5.44 s | 4.21 s |
+| moving + 采样（25 步） | 13.35 s | 13.03 s |
+| VAE decode + 保存 | 0.94 s | 0.90 s |
+| **总耗时** | **19.73 s** | **18.13 s** |
+| **峰值显存（nvidia-smi）** | **13091 MiB** | **13093 MiB** |
+
+- 对照（同输入 / 同意图 / 同 seed / 同 1536）：
+  - legacy `ModelPatcher`（未启用 Dynamic VRAM）：冷 41.90 s、峰值 **16030 MiB**；
+  - 官方 ComfyUI server 流（`ComfyUI/main.py` 启动）：22.15 s、峰值 14968 MiB。
+- 长边 2048（输出 2048×1280，同输入 / 同意图 / 同 seed）：冷跑 **40.00 s**、热跑 **39.30 s**，
+  峰值 **12084 / 12226 MiB**（encode 9.23 / 8.39 s、moving+sample 29.20 / 29.30 s、
+  decode 1.57 / 1.61 s）。**未 OOM、未触发 tiled VAE**；采样段约为 1536 的 **2.2×**（面积比 1.78×）。
+  峰值反低于 1536，是 Dynamic VRAM 在显存吃紧时把权重 evict 到 host RAM 的表现（PCIe 往返换显存）。
+- 结论：启用 Dynamic VRAM 是本次最大收益项（峰值 −2.9 GB，冷跑 −53%），且优于官方流；
+  `pipeline._release` 手动分时卸载 A/B 对照无收益（19.96 / 18.12 s），已移除。
+- 已知风险：`comfy_aimdo.control.init()` 必须先于 `comfy_aimdo.host_buffer` 的首次 import，
+  否则 `host_buffer.lib` 被冻结为 `None`（见 `FROZEN.md` §6.6）。

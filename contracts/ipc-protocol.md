@@ -134,7 +134,7 @@
   "image_path": "C:\\path\\main.png",
   "mask_path": null,
   "prompt": "make the background a snowy mountain",
-  "steps": 20,
+  "steps": 25,
   "seed": -1,
   "denoise": 1.0,
   "output_path": null,
@@ -193,9 +193,9 @@ C#(server)                                              Python(client)
    │  ◄──────────────── {type:pong, model_status, ...}    │
    │  {type:submit, op:"inpaint", payload:{...}} ───────►│
    │  ◄──────────────── {type:accepted, task_id}          │
-   │  ◄──────────────── {type:progress, step:1/20}        │
+   │  ◄──────────────── {type:progress, step:1/25}        │
    │  ◄─ {type:preview} + [0x02: task_id + JPEG]          │  (每步，可降频)
-   │  ◄──────────────── {type:progress, step:20/20}       │
+   │  ◄──────────────── {type:progress, step:25/25}       │
    │  ◄──────────────── {type:result, output_path}        │
    │  {type:shutdown} ──────────────────────────────────►│  (应用退出)
 ```
