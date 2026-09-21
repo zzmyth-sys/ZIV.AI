@@ -642,6 +642,18 @@
    - 原因：WDDM/NVML 计账滞后（~1.5 s），非泄漏。
    - 解决：测试改为轮询 `CheckHealth`（NVML）直到 `not_loaded` 且 `vram < 阈值`。
 
+### 默认策略说明（Step 3 收尾）
+
+- **为什么默认关闭 smart memory**：512²/4 步实测，开启时采样峰值 `nvidia-smi` 16020 MiB、
+  `torch alloc` 11.4 GB（16GB 卡随时 OOM）；关闭后 9144 MiB / 0.7 GB，**显存降约 43%**，
+  单次推理 13.0 → 13.7 s（**速度损失约 5%**）。ZIV.AI 定位本地单卡交互，稳定性优先，
+  故**默认关闭**（**与 ComfyUI 原生默认不同**）。来源：`klein启动器/aimdo_init.py`。
+- **回退方式**：设环境变量 `ZIV_AI_DISABLE_SMART_MEMORY=0`（或 `false`）即恢复原生行为。
+- **顺序约束（踩坑）**：`comfy/model_management.py` 在 **import 时**把
+  `args.disable_smart_memory` 读成模块常量；而 `handlers._clear_interrupt()` 会先于
+  `prepare_environment()` 导入该模块，导致设置失效。现由 `handlers._run_submit` 开头先调
+  `model_loader.prepare_environment()`，保证早于任何 `comfy.model_management` 导入。
+
 ### 遗留项
 
 - **自动重启未实现**（Step 4）：`HeartbeatLost` 仅暴露事件，`PythonProcessManager` 不订阅。

@@ -107,6 +107,21 @@
 | Step 10 | 集成到 ZIV：CLI / URL 协议 / 命名管道，被 ZIV 可选调用 | ZIV 能唤起并取回结果；进程隔离不破（Z27） |
 | Step 11 | 对外接口完善：本地 HTTP API + 单实例 + 文档 | 三入口闭环；只绑回环；契约与 OpenAPI 一致 |
 
+### Step 4–9 规划（Step 3 修订后，追加）
+
+> 上表 Step 3 起按 SGLang 路线规划；随 **D-7 修订**与 **Step 3 重定义**（空闲卸载 + heartbeat），
+> 后续目标调整如下（**追加，不修改上表**）。
+
+| Step | 目标 |
+|---|---|
+| Step 4 | App 层集成 + `HeartbeatLost` 自动重启 |
+| Step 5 | Planner（`LlmPlanner` + `FallbackPlanner`） |
+| Step 6 | Executor（多步执行 + 重跑） |
+| Step 7 | Tools（`ToolRegistry` + 首批工具） |
+| Step 8 | MaskCanvas（手绘遮罩） |
+| Step 9 | AiEditorWindow（三图 + 卡片流） |
+| 优化候选 | 见 `DOC/OPTIMIZATION.md` |
+
 ---
 
 ## 验收记录

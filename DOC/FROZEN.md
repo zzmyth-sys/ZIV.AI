@@ -554,6 +554,18 @@ Step 1 冻结的 7 项目结构与依赖方向**不变**（见 1.1）。Step 2 �
 - heartbeat：每 10 s 一帧；`HeartbeatLost` 阈值 30 s。
 - 依据：Step 3 实测（`DOC/DEVLOG.md` Step 3 段）。
 
+### 3.4 运行时默认策略：默认关闭 smart memory
+
+- ZIV.AI **默认关闭** ComfyUI smart memory（`disable_smart_memory = True`，等效官方
+  `--disable-smart-memory`）——**与 ComfyUI 原生默认不同**。
+- 实测（512²/4 步，RTX 4080 16GB）：峰值 `nvidia-smi` **16020 → 9144 MiB**、
+  `torch alloc` **11.4 GB → 0.7 GB**（显存降约 **43%**），单次推理 **13.0 → 13.7 s**
+  （速度损失约 **5%**）。
+- 回退：环境变量 **`ZIV_AI_DISABLE_SMART_MEMORY=0`**（或 `false`）即恢复原生行为。
+- 顺序约束：必须在首次 `import comfy.model_management` **之前**设置（该模块在 import 时
+  读取该值），由 `model_loader.prepare_environment()` 落地。
+- 性质：**运行时策略**，不改动 Step 0 / Step 1 / Step 2 的冻结行。
+
 > **遗留**：Python 主循环改为轮询后，`submit` 期间仍为同步执行；heartbeat 线程与
 > 采样写入经 `FrameIO._write_lock` 串行。`unload_all_models()` 会卸载全部 ComfyUI
 > 托管模型（当前仅本模型）。

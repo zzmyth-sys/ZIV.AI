@@ -44,10 +44,15 @@ OUTPUT_DIR = os.environ.get(
 # ---- 显存策略（Z21 空闲卸载：Step 3 实现）----
 # auto = 交给 ComfyUI 的 model_management 决定权重驻留（CPU/GPU/offload）
 VRAM_MODE = "auto"
-# 关闭 ComfyUI「智能显存优化」（等效官方 --disable-smart-memory）。
-# 依据 klein 启动器实测：开启时采样峰值 ~16G（随时 OOM），关闭后稳态更低。
-# 注意：comfy.model_management 在 import 时读取该值，必须在首次 import comfy.* 前设置
-# （由 model_loader.prepare_environment() 落地）。
+# 关闭 ComfyUI「智能显存优化」（等效官方 --disable-smart-memory）。**默认关闭**。
+# 实测（512²/4 步，RTX 4080 16GB）：
+#   开启时：峰值 nvidia-smi 16020 MiB / torch alloc 11.4 GB / 13.0 s
+#   关闭后：峰值 nvidia-smi  9144 MiB / torch alloc  0.7 GB / 13.7 s
+#   权衡：显存降约 43%，速度损失约 5%（本地单卡交互，稳定性优先）。
+# 回退方式：设环境变量 ZIV_AI_DISABLE_SMART_MEMORY=0（或 false）即恢复原生行为。
+# 顺序约束：comfy.model_management 在 import 时把该值读成模块常量，
+#   必须在首次 import comfy.model_management 之前设置
+#   （由 model_loader.prepare_environment() 落地；handlers._run_submit 先调它）。
 DISABLE_SMART_MEMORY = os.environ.get("ZIV_AI_DISABLE_SMART_MEMORY", "1") not in ("", "0", "false", "False")
 # 空闲卸载超时（秒，可配置，Z21）；可用环境变量覆盖以便测试
 IDLE_UNLOAD_SECONDS = float(os.environ.get("ZIV_AI_IDLE_UNLOAD_S", "300"))
