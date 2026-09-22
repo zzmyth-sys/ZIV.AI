@@ -1150,3 +1150,40 @@ public interface ILlmClient : IDisposable
   详见 `_test_step2/e2e_step7/RESULT.md`。
 - **影响范围**：`python/server/outpaint.py` / `pipeline.py`（实现）、`test_outpaint.py`（单测）；
   **不改任何 C# 契约 / 冻结签名 / `ipc-protocol.md`**（op / anchor / payload 不变）。
+
+---
+
+## 修订说明（2026-09-22 · Step 7 审计修正：Z8 拆分 + 1.1 项目表同步）
+
+> 本段为**只增**修订，**不改动 Step 0–7 已冻结行**。依据 Step 7 审计发现，处理 Z8
+> 违规与 1.1 项目表同步；均不涉及契约 / 签名 / 行为变更。
+
+### 7.9 代码拆分（Z8）
+
+- **改了什么**：`ZivAiEditor.Backend/IpcInferenceClient.cs`（896 物理行 / 778 非空行）
+  拆为 5 个文件，均为**纯物理拆分**，不改行为 / 签名 / 可见性：
+  - `IpcFraming.cs`：帧格式（长度前缀读写 / `ReadFrameAsync` / `WriteJsonAsync`）
+  - `IpcDtos.cs`：`PingRequest` / `SubmitPayload` / `ResolutionPayload` / `SubmitRequest` / `CancelRequest`
+  - `IpcJsonContext.cs`：`JsonSerializerContext` + `JsonSerializable`
+  - `IpcInferenceClient.cs`：核心公共 API（提交 / 取消 / 健康检查 / 生命周期），`partial`
+  - `IpcInferenceClient.Receive.cs`：后台接收循环 / 心跳 / 帧分发与解析，`partial`
+- **为什么**：`Z8 · 无上帝模块`（单文件超过 600 行必须拆分）。拆分后各文件
+  323 / 422 / 93 / 37 / 17 物理行，均 < 600（非空行口径 284 / 365 / 78 / 31 / 15）。
+- **死代码清理**：删除零调用点的三参 `HandleBinaryFrame(byte[], string, int, int)`；保留单参版本。
+- **性质**：纯重构，`IInferenceClient` / DTO 字段 / IPC 消息均不变；`ipc-protocol.md` 不变。
+
+### 7.10 1.1 项目表同步（修订说明，不改原表）
+
+- **事实**：`FROZEN.md` 1.1 项目表将 `ZivAiEditor.Tests` 的依赖列为
+  `Contracts`、`Agent`、`Tools`（+ xunit / Microsoft.NET.Test.Sdk）。
+  Step 7 为 `ZivAiEditor.Backend` 增加 `InternalsVisibleTo("ZivAiEditor.Tests")`
+  （测试 `IpcSubmitMapper`），使 Tests **同时引用 `Backend`**。
+- **处理**：1.1 原表**不改**（只增不改），以本修订说明为准——Tests 依赖更新为
+  `Contracts`、`Agent`、`Tools`、**`Backend`**（+ xunit / Microsoft.NET.Test.Sdk）。
+- **影响**：仅项目引用说明；不改契约 / 签名 / 行为。
+
+### 7.11 Z14 便携性缺口登记
+
+- **处理**：新建 `DOC/RELEASE-CHECKLIST.md` 记录发布前必做项（路径硬编码 /
+  publish 不打包后端 / `FindTemplate` 找错文件）。
+- **性质**：仅文档登记；本步不改运行时代码。
