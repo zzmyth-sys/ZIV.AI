@@ -7,20 +7,30 @@ namespace ZivAiEditor.App.Controls;
 
 /// <summary>
 /// Shared self-drawn window chrome (Step 9C.2): drop shadow + rounded root + title bar
-/// (title text and minimize / maximize / close buttons) + 8-way resize strips. The
+/// (left slot, centered title, minimize / maximize / close) + 8-way resize strips. The
 /// hosting window supplies its content through <see cref="Body"/> (a dedicated property,
-/// not <c>Content</c>, because the UserControl's <c>Content</c> is its own XAML root).
+/// not <c>Content</c>, because the UserControl's <c>Content</c> is its own XAML root),
+/// plus optional <see cref="LeftContent"/> / <see cref="CenterContent"/> slots that
+/// mirror ZIV's title bar (function icons left, title centered).
 /// </summary>
 public partial class ChromeTitleBar : UserControl
 {
-    public static readonly StyledProperty<string> TitleTextProperty =
-        AvaloniaProperty.Register<ChromeTitleBar, string>(nameof(TitleText), "");
+    public static readonly StyledProperty<object?> LeftContentProperty =
+        AvaloniaProperty.Register<ChromeTitleBar, object?>(nameof(LeftContent));
+
+    public static readonly StyledProperty<object?> CenterContentProperty =
+        AvaloniaProperty.Register<ChromeTitleBar, object?>(nameof(CenterContent));
+
+    public static readonly StyledProperty<object?> RightContentProperty =
+        AvaloniaProperty.Register<ChromeTitleBar, object?>(nameof(RightContent));
 
     public static readonly StyledProperty<object?> BodyProperty =
         AvaloniaProperty.Register<ChromeTitleBar, object?>(nameof(Body));
 
+    private readonly ContentPresenter? _left;
+    private readonly ContentPresenter? _center;
+    private readonly ContentPresenter? _right;
     private readonly ContentPresenter? _body;
-    private readonly TextBlock? _title;
 
     public ChromeTitleBar()
     {
@@ -31,12 +41,24 @@ public partial class ChromeTitleBar : UserControl
         BtnMaximize = this.FindControl<Button>("PART_BtnMaximize");
         BtnClose = this.FindControl<Button>("PART_BtnClose");
         IconMaximize = this.FindControl<Path>("PART_IconMaximize");
+        _left = this.FindControl<ContentPresenter>("PART_Left");
+        _center = this.FindControl<ContentPresenter>("PART_Center");
+        _right = this.FindControl<ContentPresenter>("PART_Right");
         _body = this.FindControl<ContentPresenter>("PART_Body");
-        _title = this.FindControl<TextBlock>("PART_TitleText");
 
-        if (_title is not null)
+        if (_left is not null)
         {
-            _title.Text = TitleText;
+            _left.Content = LeftContent;
+        }
+
+        if (_center is not null)
+        {
+            _center.Content = CenterContent;
+        }
+
+        if (_right is not null)
+        {
+            _right.Content = RightContent;
         }
 
         if (_body is not null)
@@ -45,11 +67,25 @@ public partial class ChromeTitleBar : UserControl
         }
     }
 
-    /// <summary>Caption text shown in the title bar.</summary>
-    public string TitleText
+    /// <summary>Left-aligned title-bar content (e.g. the toolbar icons).</summary>
+    public object? LeftContent
     {
-        get => GetValue(TitleTextProperty);
-        set => SetValue(TitleTextProperty, value);
+        get => GetValue(LeftContentProperty);
+        set => SetValue(LeftContentProperty, value);
+    }
+
+    /// <summary>Centered title-bar content (e.g. the file name).</summary>
+    public object? CenterContent
+    {
+        get => GetValue(CenterContentProperty);
+        set => SetValue(CenterContentProperty, value);
+    }
+
+    /// <summary>Right-aligned title-bar content, placed before the window buttons.</summary>
+    public object? RightContent
+    {
+        get => GetValue(RightContentProperty);
+        set => SetValue(RightContentProperty, value);
     }
 
     /// <summary>The hosting window's content, rendered below the title bar.</summary>
@@ -73,9 +109,17 @@ public partial class ChromeTitleBar : UserControl
     {
         base.OnPropertyChanged(change);
 
-        if (change.Property == TitleTextProperty && _title is not null)
+        if (change.Property == LeftContentProperty && _left is not null)
         {
-            _title.Text = change.NewValue as string ?? "";
+            _left.Content = change.NewValue;
+        }
+        else if (change.Property == CenterContentProperty && _center is not null)
+        {
+            _center.Content = change.NewValue;
+        }
+        else if (change.Property == RightContentProperty && _right is not null)
+        {
+            _right.Content = change.NewValue;
         }
         else if (change.Property == BodyProperty && _body is not null)
         {

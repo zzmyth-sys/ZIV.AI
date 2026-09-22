@@ -17,15 +17,12 @@
                   Height="40"
                   Background="{StaticResource ZivTitleBarBrush}">
             <Grid ColumnDefinitions="Auto,*,Auto">
-              <TextBlock x:Name="PART_TitleText"
-                         Grid.Column="0"
-                         Margin="12,0"
-                         VerticalAlignment="Center"
-                         Foreground="{StaticResource ZivTextBrush}"
-                         FontWeight="SemiBold"
-                         TextTrimming="CharacterEllipsis"
-                         Text="ZIV.AI Editor" />
+              <!-- Left slot (ZIV-style function icons) and centered title, mirroring ZIV. -->
+              <ContentPresenter x:Name="PART_Left" Grid.Column="0" VerticalAlignment="Center" />
+              <ContentPresenter x:Name="PART_Center" Grid.Column="1" Margin="8,0"
+                                VerticalAlignment="Center" HorizontalAlignment="Center" />
               <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                <ContentPresenter x:Name="PART_Right" VerticalAlignment="Center" />
                 <Button x:Name="PART_BtnMinimize" Classes="tb">
                   <Path Classes="winIcon" Stretch="None" Data="M0 5H10" Stroke="{StaticResource ZivTextBrush}" />
                 </Button>

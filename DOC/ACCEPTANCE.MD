@@ -1036,3 +1036,76 @@ JSON payload）；`SPEC.md` §3.4 / §7 授权修订。范围外：URL 协议注
 1. 追加 `DEVLOG.md` 的 Step 9C.1 记录（本步已完成）
 2. 在「验收记录」追加“Step 9C.1 通过，日期：____”（待签）
 3. 进入 Step 9B / 后续 Step，由用户决定
+
+---
+
+## Step 9C.2 验收：抽公共 chrome（子任务 A）+ 编辑器工具栏（子任务 B）
+
+**目标**：**A**：把 `MainWindow` 与 `ImagePreview` 重复的自绘 chrome 抽成公共控件 / 样式，
+行为与视觉**完全不变**；**B**：`ImagePreview` 顶部工具栏 + 纯工具状态机（**框架 / 状态，
+不接绘制**）。范围外：遮罩 / 裁切绘制（9C.3 / 9C.4）、ZIV 联调、GPU 端到端（Z29 / Z30）。
+流程使用 light-rip（Large，A / B 各一轮）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 新增 UI 纯逻辑 + App 控件；无反向 / 循环依赖；无新增项目引用 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `Contracts` 零新增、零修改；5 接口 + 6 模型签名未改 | ✅ |
+| G4 | 未授权修改检查 | Step 0–9C.1 冻结行未改；新增走 Step 9C.2 冻结节 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `FROZEN` 追加 Step 9C.2 | ✅ |
+| G6 | 便携性未破 | 无注册表 / 外部路径配置 | ✅ |
+| G7 | AI 推理进程隔离未破 | 工具栏 / 状态机不加载 Python，纯本地 UI（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.2.1 | 样式抽离 | 查 `Styles/ChromeStyles.axaml` / `App.axaml` | `Button.tb` / `Path.winIcon` 已抽出并合并 | ✅ |
+| 9C.2.2 | TitleBar 抽离 | 查 `Controls/ChromeTitleBar.axaml(.cs)` | `TitleText` + `Body` StyledProperty | ✅ |
+| 9C.2.3 | resize 抽离 | 查 `Controls/ChromeResizeBorders.axaml` | 8 条 Border + `ElementRole` | ✅ |
+| 9C.2.4 | 行为抽离 | 查 `Controls/ChromeBehavior.cs` | `Init` 统一接线两窗口 | ✅ |
+| 9C.2.5 | 重复行数 | 对比两窗口 | 148 → **0** | ✅ |
+| 9C.2.6 | 颜色统一 | 查 `ZivColors.axaml` / `ImagePreview.axaml` | 新增 2 Key 且被使用；既有 8 Key 未改 | ✅ |
+| 9C.2.7 | 视觉 / 行为回归 | 无头探针 + 真机 | 角色 / 布局 / 标题 / 最大化图标 / 缩放 / Esc 不变 | ✅（探针 ALL PASS；真机用户确认） |
+| 9C.2.8 | Z8 行数 | 查新增 / 修改文件 | 均 < 600 行（`MainWindow.axaml.cs` 526、`ImagePreview.axaml.cs` 413） | ✅ |
+| 9C.2.9 | 纯逻辑下沉 | 查 `ZivAiEditor.UI/Editing/` | `ToolMode` / `ToolStateMachine` 无 Avalonia 依赖 | ✅ |
+| 9C.2.10 | SetTool 切换 | `ToolStateMachineTests` | 切换正确（含 `None`） | ✅ |
+| 9C.2.11 | 画笔 / 橡皮互斥 | `ToolStateMachineTests` | 同时只有一个激活 | ✅ |
+| 9C.2.12 | Undo 禁用 | `ToolStateMachineTests` | `NotifyUndoStackChanged(false)` → `CanUndo=false` | ✅ |
+| 9C.2.13 | 清空遮罩禁用 | `ToolStateMachineTests` | `NotifyMaskChanged(false)` → `CanClearMask=false` | ✅ |
+| 9C.2.14 | 初始状态 | `ToolStateMachineTests` | 无工具 / 无遮罩 / 不可撤销 | ✅ |
+| 9C.2.15 | 工具栏布局 | 无头探针 + 真机 | 标题栏下、图片区上；6 按钮 | ✅（探针 + 真机） |
+| 9C.2.16 | 工具切换 + 光标 | 无头探针 | 点击→`CurrentTool` + `IsChecked` + 光标（Cross / Hand） | ✅ |
+| 9C.2.17 | 重置视图 | 无头探针 | 一次性事件 → `Fit()`（94% → 78%） | ✅ |
+| 9C.2.18 | 不接绘制 | 查代码 | 清空 / 撤销仅发事件，无绘制逻辑 | ✅ |
+| 9C.2.19 | 未改 chrome 控件 | `git diff` | 子任务 A 三控件未被 B 修改 | ✅ |
+| 9C.2.20 | 构建 / 测试 | `dotnet build` / `dotnet test`（受影响类） | 0 错误 0 警告；`ToolStateMachineTests` 9 通过；非 GPU 129 通过 | ✅ |
+| 9C.2.21 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.2.22 | 启动 / 无残留 | 启动 exe + 进程表 | 窗口正常、无新 Python 进程；结束无残留 | ✅ |
+| 9C.2.23 | 真机交互 | 用户执行一次真机验收 | 工具栏显示 / 6 按钮切换 / 光标 / Undo 禁用 / 缩放拖拽双击 Esc resize 无回归 | ⏳ 待用户确认 |
+| 9C.2.24 | 图标化 | 查 `Assets/Icons/TablerIcons.axaml` + `EditorToolbar.axaml` + 无头探针 | 6 按钮为 Tabler 图标（同 ZIV），几何已解析；无图标库 / 新 NuGet | ✅ |
+| 9C.2.25 | 预览顶栏 ZIV 单行 | 查 `ChromeTitleBar` / `EditorToolbar` / `ImagePreview` + 无头探针 | 左工具图标 + 中文件名 + 右窗口按钮；主窗体不变；图标 12.6 / stroke 1.19 / Spacing 2 / Margin 6,0 | ✅ |
+| 9C.2.26 | 顶栏按钮可点击 | 无头探针 | 7 个工具按钮 `role=User`；点击可达、双击不最大化 | ✅（探针 role 断言） |
+| 9C.2.27 | 右侧槽 + 对比按钮 | 查 `ImagePreview.axaml` + 无头探针 | `重置视图` 在右；`划像对比` 按钮在最右且禁用（功能下一步） | ✅ |
+| 9C.2.28 | 去掉缩放滚动条 | 无头探针 | 放大后 `AdvancedImageBox` 的 2 条滚动条 `ScrollBarVisibility.Hidden` | ✅ |
+| 9C.2.29 | 历史节点点击不闪退 | 无头复现探针 | 生成后选中历史节点不再崩溃（导航推迟到 Dispatcher，消除选择模型重入） | ✅ |
+
+### Step 9C.2 通过标准
+
+- 通用 G1–G8 全过
+- 专属 9C.2.1–9C.2.22 全过；9C.2.23 由用户真机确认
+
+### Step 9C.2 遗留说明（非阻断）
+
+- **UI 接线仅由外部（未入库）无头探针覆盖**；仓库内自动化只覆盖纯 `ToolStateMachine`。
+- 清空遮罩 / 撤销**无真实数据源**（9C.3 / 9C.4 接入）；工具栏目前仅框架。
+- 光标映射为近似（画笔 / 裁切同用 `Cross`）。
+
+### Step 9C.2 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 9C.2 记录（本步已完成）
+2. 在「验收记录」追加“Step 9C.2 通过，日期：____”（待签）
+3. 进入 Step 9C.3（遮罩绘制）或后续 Step，由用户决定

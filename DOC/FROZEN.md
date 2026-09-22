@@ -1465,3 +1465,51 @@ public interface ILlmClient : IDisposable
 - **无头实测**（`Avalonia.Headless` + `UseSkia`，真实位图 1020×543，视口 800×600，模拟输入）：
   初始适配 78%；滚轮 → 94%（锚点保持）；拖拽 → 偏移钳制；双击 78% ↔ 100%；单击不变；Esc 关闭。
 - **未跑 GPU 端到端**（Z29 / Z30）；本步不加载模型。
+
+---
+
+## Step 9C.2（日期：2026-09-23）
+
+> **新增说明（Step 9C.2 · 抽公共 chrome + 编辑器工具栏）**
+>
+> 本段为 Step 9C.2 **只增**记录。目标：A 抽公共 chrome（纯重构，行为 / 视觉不变）；
+> B `ImagePreview` 顶部工具栏 + 纯工具状态机（框架 / 状态，不接绘制）。**不改动 Step 0–9C.1
+> 已冻结行**；**无契约变更**（`Contracts` 零新增、零修改）。子任务 B **未改**子任务 A 的
+> chrome 控件（`ChromeTitleBar` / `ChromeResizeBorders` / `ChromeBehavior`）。
+
+### 9C.2.1 新增 App 层公共 chrome 控件（冻结 · 非契约）
+
+| 类型 / 文件 | 职责 |
+|---|---|
+| `Styles/ChromeStyles.axaml` | 共享 `Button.tb` / `Path.winIcon` 样式；`App.axaml` 以 `StyleInclude` 合并 |
+| `Controls/ChromeTitleBar.axaml(.cs)` | `UserControl`；ShadowWrapper+ChromeRoot+TitleBar；`LeftContent` / `CenterContent` / `Body`（object?）StyledProperty（`Auto,*,Auto`：左槽 / 居中槽 / 窗口按钮，同 ZIV）；暴露部件（TitleBar / BtnMinimize / BtnMaximize / BtnClose / IconMaximize） |
+| `Controls/ChromeResizeBorders.axaml(.cs)` | `UserControl`；8 条 resize Border + `WindowDecorationProperties.ElementRole` |
+| `Controls/ChromeBehavior.cs` | `internal static`；`Init(Window, ChromeTitleBar)` 设装饰角色 + 最小 / 最大 / 关闭 + 最大化图标 |
+
+- `MainWindow` / `ImagePreview` 改为直接承载 `<c:ChromeTitleBar>`（内容经 `Body`）。
+- 配色：`Themes/ZivColors.axaml` **追加** `ZivCanvasBackgroundBrush` / `ZivOverlayBrush`
+  （既有 Key 未改）。
+- 图标：`Assets/Icons/TablerIcons.axaml`（**Tabler Icons, MIT**，与 ZIV 同款；几何编译为
+  `StreamGeometry`），`App.axaml` 以 `ResourceInclude` 合并；工具栏 6 按钮使用其几何。
+  不引图标库 / 新 NuGet。
+
+### 9C.2.2 新增 UI 类型：工具状态机（冻结 · 非契约）
+
+| 类型 / 文件 | 归属 | 说明 |
+|---|---|---|
+| `ToolMode`（枚举） | `ZivAiEditor.UI/Editing/ToolMode.cs` | `None` / `Crop` / `MaskBrush` / `Eraser` |
+| `ToolStateMachine` | `ZivAiEditor.UI/Editing/ToolStateMachine.cs` | 纯逻辑（无 Avalonia）；`CurrentTool`、`HasImage`、`CanUndo`、`CanClearMask`、`CanCrop => HasImage`；`SetTool` / `NotifyImageChanged` / `NotifyUndoStackChanged` / `NotifyMaskChanged`；`event StateChanged` |
+| `EditorToolbar` | `ZivAiEditor.App/Controls/EditorToolbar.axaml(.cs)` | 6 按钮工具栏；`Attach(ToolStateMachine)`；`ClearMaskRequested` / `UndoRequested` / `ResetViewRequested` 事件 |
+
+- **ResetView 不进状态机**（一次性动作，由工具栏事件承载）。
+- **`Contracts` 零新增、零修改**：`IInferenceClient` / `IEditTool` / `IToolRegistry` /
+  `IExecutor` / `IPlanner` 与 6 个模型签名**未改**。
+
+### 9C.2.3 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：`ToolStateMachineTests` **9 通过 / 0 失败**；
+  非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **129 通过 / 0 失败**。
+- **外部无头探针**（`Avalonia.Headless` + `UseSkia`）→ **ALL PASS**（chrome 角色 / 布局 /
+  标题 / 最大化图标；工具栏 6 按钮 / 初始禁用 / 工具点击→状态+IsChecked+光标 / 重置视图→适配）。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步不加载模型。

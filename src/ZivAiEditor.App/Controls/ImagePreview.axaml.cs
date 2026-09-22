@@ -2,11 +2,15 @@ using System;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Chrome;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using UVtools.AvaloniaControls;
+using ZivAiEditor.UI.Editing;
 using ZivAiEditor.UI.Imaging;
 
 namespace ZivAiEditor.App.Controls;
@@ -28,12 +32,17 @@ public partial class ImagePreview : Window
     private const double WheelStep = 1.2;
 
     private readonly ImageViewModel _model = new();
+    private readonly ToolStateMachine _tools = new();
 
     private AdvancedImageBox? _box;
     private TextBlock? _emptyLabel;
     private Border? _zoomBadge;
     private TextBlock? _zoomText;
     private ChromeTitleBar? _chrome;
+    private EditorToolbar? _toolbar;
+    private TextBlock? _titleText;
+    private Button? _resetView;
+    private ToggleButton? _compare;
 
     private Bitmap? _bitmap;
     private string? _path;
@@ -57,6 +66,9 @@ public partial class ImagePreview : Window
     /// <summary>Zoom percentage currently applied (diagnostics / tests).</summary>
     public int ZoomPercent => _model.ZoomPercent;
 
+    /// <summary>The preview's tool state (diagnostics / tests).</summary>
+    public ToolStateMachine ToolState => _tools;
+
     /// <summary>Loads (or clears) the preview image. A repeat path is ignored.</summary>
     public void LoadImage(string? path)
     {
@@ -75,10 +87,11 @@ public partial class ImagePreview : Window
             return;
         }
 
-        Title = $"ZIV.AI - 大图预览 - {System.IO.Path.GetFileName(path)}";
-        if (_chrome is not null)
+        var fileName = System.IO.Path.GetFileName(path);
+        Title = fileName;
+        if (_titleText is not null)
         {
-            _chrome.TitleText = Title;
+            _titleText.Text = fileName;
         }
 
         _ = LoadAsync(path, generation);
@@ -134,6 +147,8 @@ public partial class ImagePreview : Window
         {
             _zoomBadge.IsVisible = true;
         }
+
+        _tools.NotifyImageChanged(true);
     }
 
     private void Init()
@@ -142,12 +157,41 @@ public partial class ImagePreview : Window
         _emptyLabel = this.FindControl<TextBlock>("PART_Empty");
         _zoomBadge = this.FindControl<Border>("PART_ZoomBadge");
         _zoomText = this.FindControl<TextBlock>("PART_ZoomText");
+        _titleText = this.FindControl<TextBlock>("PART_TitleText");
 
         _chrome = this.FindControl<ChromeTitleBar>("PART_Chrome");
         if (_chrome is not null)
         {
             ChromeBehavior.Init(this, _chrome);
         }
+
+        _toolbar = this.FindControl<EditorToolbar>("PART_Toolbar");
+        if (_toolbar is not null)
+        {
+            _toolbar.Attach(_tools);
+        }
+
+        // Right-slot title-bar buttons (reset view / compare). Marked "User" so the OS
+        // treats them as client content inside the caption area.
+        _resetView = this.FindControl<Button>("PART_BtnResetView");
+        _compare = this.FindControl<ToggleButton>("PART_BtnCompare");
+        if (_resetView is not null)
+        {
+            WindowDecorationProperties.SetElementRole(_resetView, WindowDecorationsElementRole.User);
+            _resetView.Click += (_, _) =>
+            {
+                _model.Fit();
+                ApplyModel();
+            };
+        }
+
+        if (_compare is not null)
+        {
+            WindowDecorationProperties.SetElementRole(_compare, WindowDecorationsElementRole.User);
+        }
+
+        _tools.StateChanged += (_, _) => OnToolsChanged();
+        OnToolsChanged();
 
         if (_box is not null)
         {
@@ -211,6 +255,7 @@ public partial class ImagePreview : Window
         _box.Zoom = _model.ZoomPercent;
         _box.Offset = new Vector(_model.OffsetX, _model.OffsetY);
         UpdateZoomBadge();
+        HideScrollBars();
 
         // The scroll-bar range follows the new zoom one layout pass later; re-apply
         // the offset then so the anchored position survives the range update.
@@ -220,9 +265,28 @@ public partial class ImagePreview : Window
                 if (_box is not null)
                 {
                     _box.Offset = new Vector(_model.OffsetX, _model.OffsetY);
+                    HideScrollBars();
                 }
             },
             DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// Hides the renderer's own scroll bars (they appear once the image is zoomed past
+    /// the viewport). Zoom / pan are driven by <see cref="ImageViewModel"/>, so the bars
+    /// are redundant; the control's parts stay alive (its code needs them) but invisible.
+    /// </summary>
+    private void HideScrollBars()
+    {
+        if (_box is null)
+        {
+            return;
+        }
+
+        foreach (var bar in _box.GetVisualDescendants().OfType<ScrollBar>())
+        {
+            bar.Visibility = ScrollBarVisibility.Hidden;
+        }
     }
 
     private void UpdateZoomBadge()
@@ -233,6 +297,34 @@ public partial class ImagePreview : Window
         }
 
         _zoomText.Text = _model.IsAtFit ? $"适配 {_model.ZoomPercent}%" : $"{_model.ZoomPercent}%";
+    }
+
+    /// <summary>Reacts to tool-state changes: cursor + right-slot button enablement.</summary>
+    private void OnToolsChanged()
+    {
+        UpdateCursor();
+
+        if (_resetView is not null)
+        {
+            _resetView.IsEnabled = _tools.HasImage;
+        }
+    }
+
+    private void UpdateCursor()
+    {
+        if (_box is null)
+        {
+            return;
+        }
+
+        var type = _tools.CurrentTool switch
+        {
+            ToolMode.Crop => StandardCursorType.Cross,
+            ToolMode.MaskBrush => StandardCursorType.Cross,
+            ToolMode.Eraser => StandardCursorType.Hand,
+            _ => StandardCursorType.Arrow,
+        };
+        _box.Cursor = new Cursor(type);
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
@@ -348,6 +440,8 @@ public partial class ImagePreview : Window
         {
             _zoomBadge.IsVisible = false;
         }
+
+        _tools.NotifyImageChanged(false);
     }
 
     private void DisposeBitmap()

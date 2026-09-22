@@ -34,4 +34,39 @@
     <Setter Property="StrokeLineCap" Value="Round" />
     <Setter Property="StrokeJoin" Value="Round" />
   </Style>
+
+  <!-- Editor toolbar buttons (ZIV-sized title-bar buttons, transparent) + Tabler icons. -->
+  <Style Selector="Button.tool, ToggleButton.tool">
+    <Setter Property="Width" Value="32" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.tool:pointerover /template/ ContentPresenter#PART_ContentPresenter,
+                 ToggleButton.tool:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource ZivButtonHoverBrush}" />
+  </Style>
+  <Style Selector="ToggleButton.tool:checked /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#3A6DF0" />
+  </Style>
+  <Style Selector="Button.tool:disabled, ToggleButton.tool:disabled">
+    <Setter Property="Opacity" Value="0.4" />
+  </Style>
+
+  <Style Selector="Path.toolIcon">
+    <Setter Property="Width" Value="12.6" />
+    <Setter Property="Height" Value="12.6" />
+    <Setter Property="Stretch" Value="Uniform" />
+    <Setter Property="StrokeThickness" Value="1.19" />
+    <Setter Property="StrokeLineCap" Value="Round" />
+    <Setter Property="StrokeJoin" Value="Round" />
+    <Setter Property="Stroke" Value="{StaticResource ZivTextBrush}" />
+  </Style>
+  <Style Selector="ToggleButton.tool:checked Path.toolIcon">
+    <Setter Property="Stroke" Value="White" />
+  </Style>
 </Styles>

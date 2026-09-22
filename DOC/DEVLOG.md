@@ -1779,3 +1779,160 @@ GPU 端到端（Z29 / Z30）。
 - **未修改** Step 0–9A 冻结行的既有成员；`Contracts` 零新增、零修改；
   `IInferenceClient` / `IEditTool` / `IToolRegistry` / `IExecutor` / `IPlanner` 签名未改。
 - **未修改** `C:\AI\ComfyUI_PIC`、`python/server/*`、`contracts/ipc-protocol.md`。
+
+---
+
+## [Step 9C.2] - 2026-09-23
+
+### 目标
+
+① **子任务 A**：抽取 `MainWindow` 与 `ImagePreview` 重复的自绘 chrome（约 148 行）为公共
+控件 / 样式，**行为与视觉完全不变**。② **子任务 B**：`ImagePreview` 顶部工具栏 + 纯工具
+状态机（**框架 / 状态，不接绘制逻辑**）。流程使用 light-rip（Large）。
+
+### 子任务 A：抽公共 chrome（纯重构）
+
+- **新增**：`Styles/ChromeStyles.axaml`（`Button.tb` / `Path.winIcon` 样式）；
+  `Controls/ChromeTitleBar.axaml(.cs)`（ShadowWrapper+ChromeRoot+TitleBar；标题经
+  `TitleText` StyledProperty，窗口内容经**独立** `Body` StyledProperty）；
+  `Controls/ChromeResizeBorders.axaml(.cs)`（8 条 resize Border）；
+  `Controls/ChromeBehavior.cs`（装饰角色 + 最小/最大/关闭接线 + 最大化图标切换）。
+- **修改**：`App.axaml` 合并 `ChromeStyles`；`Themes/ZivColors.axaml` **追加**
+  `ZivCanvasBackgroundBrush`(#161616) / `ZivOverlayBrush`(#99000000)（既有 Key 未改）；
+  `MainWindow.axaml(.cs)` 与 `ImagePreview.axaml(.cs)` 改用 `ChromeTitleBar.Body`。
+- **选型理由（chrome）**：`ChromeTitleBar` 用 **`UserControl` + 独立 `Body` StyledProperty**
+  （非 `Content`）。原因：`UserControl.Content` 已被其 XAML 根占用，若窗口再把内容塞进
+  `Content` 会互相覆盖；独立 `Body` 属性 + 内部 `ContentPresenter` 既保留用户要求的
+  UserControl 形态，又让部件保持为**直接子元素**（构造函数即可接线，无模板子元素时序问题）。
+  `ChromeBehavior` 从 `ChromeTitleBar` 暴露的部件读取（`Window.FindControl` **不能**跨
+  UserControl 名称域）。未采用 `Window` 基类 / ControlTheme（改动面更大、时序更复杂）。
+- **重复行数**：148 → **0**（两窗口不再含任何 chrome XAML/代码）；`MainWindow.axaml.cs`
+  588 → 526 行；本次净 `+309 / −327`（含新控件）。
+
+### 子任务 B：编辑器工具栏 + `ToolStateMachine`
+
+- **新增**：`ZivAiEditor.UI/Editing/ToolMode.cs`、`Editing/ToolStateMachine.cs`（纯逻辑，无
+  Avalonia）；`App/Controls/EditorToolbar.axaml(.cs)`；测试 `ToolStateMachineTests.cs`。
+- **修改**：`ImagePreview.axaml(.cs)` —— Body 改为
+  `DockPanel[ EditorToolbar(Dock=Top), 图片 Grid ]`；持有 `ToolStateMachine`；映射
+  `ToolMode → 光标`（`None→Arrow` / `Crop→Cross` / `MaskBrush→Cross` / `Eraser→Hand`）；
+  ResetView → `ImageViewModel.Fit()`；`NotifyImageChanged` 在「加载成功 / 清空」两条路径喂入。
+- **最终接口**：
+  - `ToolStateMachine`：`ToolMode CurrentTool`（默认 `None`）、`bool HasImage`、
+    `bool CanUndo`、`bool CanClearMask`、`bool CanCrop => HasImage`、
+    `void SetTool(ToolMode)`、`void NotifyImageChanged(bool)`、
+    `void NotifyUndoStackChanged(bool)`、`void NotifyMaskChanged(bool)`、
+    `event EventHandler? StateChanged`。**ResetView 不进状态机**。
+  - `EditorToolbar`：`void Attach(ToolStateMachine)`；`event` `ClearMaskRequested` /
+    `UndoRequested` / `ResetViewRequested`。
+- **按钮**：裁切 / 遮罩画笔 / 橡皮擦（`ToggleButton`，激活态蓝底 `#3A6DF0`）；清空遮罩 /
+  撤销 / 重置视图（`Button`）。初值 **Undo / 清空遮罩禁用**（无 undo 栈 / 无遮罩）；有图后
+  裁切 / 画笔 / 橡皮 / 重置启用。**本步不接绘制**（清空/撤销仅发事件，留 9C.3 / 9C.4）。
+
+### 子任务 B 收尾：工具栏图标化（2026-09-23）
+
+- **图标集**：采用与 ZIV **相同**的 **Tabler Icons（MIT，outline，24×24，stroke 2）**
+  （`D:\devlop\ZIV\src\ZIV.App\Assets\Icons\TablerIcons.axaml` 同款约定：几何数据编译为
+  `StreamGeometry` 资源，`Path` 描边渲染，不引图标库 / NuGet）。
+- **新增**：`src/ZivAiEditor.App/Assets/Icons/TablerIcons.axaml`（6 个 Key：`IconCrop` /
+  `IconBrush` / `IconEraser` / `IconTrash` / `IconUndo` / `IconZoomReset`）；`App.axaml` 以
+  `ResourceInclude` 合并。
+- **修改**：`Controls/EditorToolbar.axaml` —— 6 个文字按钮全部改为图标
+  （`Path Classes="toolIcon"`，16×16，stroke 1.6，圆头/圆角；激活态描边转白）；按钮尺寸
+  34×28；每个按钮加 `ToolTip.Tip` 作可读性补偿。
+- **映射**：裁切=`crop`、遮罩画笔=`brush`、橡皮擦=`eraser`、清空遮罩=`trash`、
+  撤销=`arrow-back-up`、重置视图=`zoom-reset`。
+- **验证**：build 0/0；外部无头探针新增「6 按钮内容均为已解析 `Path`」断言 → **ALL PASS**；
+  非 GPU **129 通过 / 0 失败**。
+
+### 子任务 B 收尾 2：预览顶栏改为 ZIV 单行样式（2026-09-23）
+
+- **用户裁决**：预览窗口顶栏改为 **ZIV 单行样式**——左侧 6 个工具图标 + 中间**文件名居中**
+  + 右侧最小化/最大化/关闭；**去掉**「ZIV.AI - 大图预览」文字。**主窗体标题栏保持不变**。
+- **`ChromeTitleBar`**：把 `TitleText`(string) 换成 `LeftContent` / `CenterContent`(object?)
+  两个内容槽（保留 `Body`）；标题栏 Grid 改为 ZIV 的 `Auto,*,Auto`（左槽 / 居中槽 / 窗口按钮）。
+  `MainWindow` 用 `LeftContent` 放「ZIV.AI Editor」`TextBlock`（`Margin="12,0"`）→ 外观不变。
+- **`EditorToolbar`**：去掉自身 `Border`/背景，改为 `StackPanel(Spacing=2, Margin=6,0)` 放入
+  标题栏左槽；按钮 **32×32 透明**（同 ZIV `Button.tb`），图标 **12.6px / stroke 1.19**
+  （同 ZIV `Path.icon`），hover 高亮、激活蓝底白图标、禁用 `Opacity 0.4`。
+- **`ImagePreview`**：`Body` 只剩图片 Grid；`PART_TitleText` 居中显示**文件名**（ZIV 样式）；
+  `Window.Title` = 文件名。
+- **验证**：build 0/0；外部无头探针更新（`LeftContent` / `CenterContent` + 顶栏含工具栏）
+  → **ALL PASS**；非 GPU **129 通过 / 0 失败**。
+
+### 子任务 B 收尾 3：顶栏按钮可点击 + 右侧槽（2026-09-23）
+
+- **缺陷修复（按钮不能点 / 双击按钮变最大化）**：根因是标题栏（`TitleBar` 角色）区域的
+  命中测试把其中的子按钮当作标题栏（caption），点击被拖拽/双击最大化吞掉。按 **ZIV 做法**
+  （`ZIV.App/MainWindow.Chrome.cs` 给标题栏内功能按钮设 `WindowDecorationsElementRole.User`），
+  给 `EditorToolbar` 的 5 个按钮与 `ImagePreview` 右侧 2 个按钮设 **`User` 角色**，OS 即视为
+  客户端内容，点击可达、双击不再最大化。
+- **布局调整（用户要求）**：`重置视图` 从左侧移到标题栏**右侧槽**（窗口按钮之前）；
+  新增 **`划像对比`** 按钮（Tabler `arrows-left-right`）也在最右侧。**本步该按钮禁用**，
+  划像对比**功能列入下一步实施**。
+- **`ChromeTitleBar`**：新增 `RightContent`(object?) 槽（col2，窗口按钮之前）。
+  工具按钮 / 图标样式移到 `Styles/ChromeStyles.axaml`，供左右两处复用。
+- **去掉缩放后出现的滚动条**：`AdvancedImageBox` 放大超出视口时会显示自带滚动条；缩放 / 平移
+  已由 `ImageViewModel` 驱动，滚动条冗余。在 `ApplyModel` 内把两个 `ScrollBar` 模板部件设为
+  `ScrollBarVisibility.Hidden`（部件保留，控件代码需要它们）。
+- **验证**：build 0/0；探针新增「7 个工具按钮 `role=User`」「对比按钮禁用」
+  「缩放后 2 条滚动条 `Hidden`」断言 → **ALL PASS**；非 GPU **129 通过 / 0 失败**。
+
+### 子任务 B 收尾 4：修复「点击历史节点闪退」（2026-09-23）
+
+- **现象**：生成（一次编辑产出节点）后，点击左栏**历史节点**，应用**闪退**。
+- **原因**：`MainWindow.OnHistorySelectionChanged` 在 ListBox 的 `SelectionChanged`
+  **事件处理中同步**调用 `_vm.NavigateTo` → `SessionViewModel.RefreshHistory` →
+  `MainWindow.RenderHistory` → `list.Items.Clear()`，在 Avalonia 选择模型**正处理选择变更**
+  的过程中**重入修改数据源**；选择模型随后枚举源时 `ItemsSourceView.get_Item(index)` 越界
+  抛异常 → 未捕获 → 进程崩溃。（9A 起潜伏，9C.2 期间复现。）
+- **修复**：把导航动作（`NavigateTo` + 清空选择 + 滚动）**推迟到
+  `Dispatcher.UIThread.Post(..., DispatcherPriority.Background)`**，待选择事件处理完成后再
+  重建历史列表，消除重入。
+- **验证**：新增无头复现探针（会话含 1 个生成节点 → 选中历史项）：**修复前崩溃**
+  （`ItemsSourceView.get_Item` 异常）、**修复后 ALL OK**（含二次导航）；build 0/0；
+  非 GPU **129 通过 / 0 失败**；`ChromeProbe` **ALL PASS**。
+
+### 关键决策
+
+1. chrome 抽离选 `UserControl + Body StyledProperty`（见上）；不引 Window 基类 / ControlTheme。
+2. 状态机**单事件** `StateChanged`，工具栏一次 `Refresh()` 重读全部 `IsChecked` / `IsEnabled`；
+   只订阅 `Click`（避免 `Checked`/`Unchecked` 递归），点击已激活项后强制回同步（防漂移）。
+3. 光标作用于 `PART_ImageBox`（接收指针输入的控件），实测生效，无需回退外层 Grid。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**（A、B 及合并后均 0/0）。
+- 测试（Z29，**无 GPU**）：`ToolStateMachineTests` **9 通过 / 0 失败**；非 GPU 全量
+  **129 通过 / 0 失败**。
+- **外部无头探针**（`Avalonia.Headless` + `UseSkia`）→ **ALL PASS**：
+  - A：两窗口 chrome 角色（titlebar/close + 恰好 8 条 resize）、body 部件解析、body 填满宽度、
+    标题文案、图像 1020×543、适配 78%、滚轮→94%、最大化点击→Maximized 且图标切换、最小化、
+    Esc 关闭。
+  - B：工具栏 + 6 按钮解析、初始 Undo/清空禁用、工具点击→`CurrentTool` + `IsChecked` +
+    光标（Cross/Hand）、重置视图→适配 78%。
+- **exe 启动**：窗口正常、**无新 Python 进程**、未占 GPU；结束**无残留进程**。
+
+### 遇到的问题与解决
+
+1. **计划预审 P0**：`UserControl` 不能同时拥有自身 chrome 与外部 `Content` → 改为独立
+   `Body` StyledProperty（预审给出的修复选项 2）。
+2. `WindowDecorationsElementRole` 位于 `Avalonia.Input`（非 `Avalonia.Controls.Chrome`）→ 补 using。
+3. `ContentPresenter` / `Path` 与 `System.IO.Path` 命名冲突 → `using Path = Avalonia.Controls.Shapes.Path;`。
+4. 预审另 4 项 P0（启用语义 / 光标目标 / UI 验证 / 事件刷新契约）→ 逐条钉死并在探针中验证。
+
+### 遗留项
+
+- **划像对比（swipe compare）功能未实现**：本步只加按钮（最右侧，禁用）；功能**下一步实施**
+  （进入对比模式 / 前后滑动分割）。已列入计划。
+- **UI 接线仅由外部（未入库）无头探针覆盖**；仓库内自动化只覆盖纯状态机。后续可考虑入库
+  headless 测试作为回归防线。
+- 清空遮罩 / 撤销**无真实数据源**（9C.3 / 9C.4 接入）；工具栏目前仅框架。
+- 光标映射为近似（画笔 / 裁切同用 `Cross`）。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未修改** Contracts / `python/server/*` / `C:\AI\ComfyUI_PIC`；**未新增 NuGet**；子任务 B
+  **未改**子任务 A 的 chrome 控件（`ChromeTitleBar` / `ChromeResizeBorders` / `ChromeBehavior`）。
+- 提交：子任务 A `58738f3`；子任务 B 见后续提交。

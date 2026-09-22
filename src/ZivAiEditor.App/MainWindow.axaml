@@ -20,7 +20,15 @@
     </Style>
   </Window.Styles>
 
-  <c:ChromeTitleBar x:Name="PART_Chrome" TitleText="ZIV.AI Editor">
+  <c:ChromeTitleBar x:Name="PART_Chrome">
+    <c:ChromeTitleBar.LeftContent>
+      <TextBlock Text="ZIV.AI Editor"
+                 Margin="12,0"
+                 VerticalAlignment="Center"
+                 Foreground="{StaticResource ZivTextBrush}"
+                 FontWeight="SemiBold"
+                 TextTrimming="CharacterEllipsis" />
+    </c:ChromeTitleBar.LeftContent>
     <c:ChromeTitleBar.Body>
       <DockPanel>
           <!-- Bottom input + status -->

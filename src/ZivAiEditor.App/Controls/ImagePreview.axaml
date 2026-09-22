@@ -19,41 +19,61 @@
        stream. It reuses the same self-drawn chrome as MainWindow (no OS title bar).
        The AdvancedImageBox only renders; all zoom / pan state lives in
        ZivAiEditor.UI.Imaging.ImageViewModel and is applied here (Z4). -->
-  <c:ChromeTitleBar x:Name="PART_Chrome" TitleText="ZIV.AI - 大图预览">
+  <c:ChromeTitleBar x:Name="PART_Chrome">
+    <c:ChromeTitleBar.LeftContent>
+      <c:EditorToolbar x:Name="PART_Toolbar" />
+    </c:ChromeTitleBar.LeftContent>
+    <c:ChromeTitleBar.CenterContent>
+      <TextBlock x:Name="PART_TitleText"
+                 Foreground="{StaticResource ZivTextBrush}"
+                 TextTrimming="CharacterEllipsis"
+                 IsHitTestVisible="False" />
+    </c:ChromeTitleBar.CenterContent>
+    <c:ChromeTitleBar.RightContent>
+      <StackPanel Orientation="Horizontal" Spacing="2" Margin="0,0,4,0" VerticalAlignment="Center">
+        <Button x:Name="PART_BtnResetView" Classes="tool" ToolTip.Tip="重置视图">
+          <Path Classes="toolIcon" Data="{StaticResource IconZoomReset}" />
+        </Button>
+        <ToggleButton x:Name="PART_BtnCompare" Classes="tool"
+                      ToolTip.Tip="划像对比（下一步实现）" IsEnabled="False">
+          <Path Classes="toolIcon" Data="{StaticResource IconCompare}" />
+        </ToggleButton>
+      </StackPanel>
+    </c:ChromeTitleBar.RightContent>
     <c:ChromeTitleBar.Body>
-          <!-- Image content -->
-          <Grid Background="{StaticResource ZivCanvasBackgroundBrush}">
-            <uv:AdvancedImageBox x:Name="PART_ImageBox"
-                                 Background="Transparent"
-                                 AutoCenter="True"
-                                 AutoPan="False"
-                                 AutoZoomToFit="False"
-                                 ShowGrid="False"
-                                 SelectionMode="None"
-                                 ZoomWithMouseWheelBehaviour="None"
-                                 PanWithMouseButtons="None"
-                                 ConstrainZoomOutToFitLevel="False" />
+      <!-- Image content -->
+      <Grid Background="{StaticResource ZivCanvasBackgroundBrush}">
+        <uv:AdvancedImageBox x:Name="PART_ImageBox"
+                             Background="Transparent"
+                             AutoCenter="True"
+                             AutoPan="False"
+                             AutoZoomToFit="False"
+                             ShowGrid="False"
+                             SelectionMode="None"
+                             ZoomWithMouseWheelBehaviour="None"
+                             PanWithMouseButtons="None"
+                             ConstrainZoomOutToFitLevel="False" />
 
-            <TextBlock x:Name="PART_Empty"
-                       Text="暂无图像"
-                       Foreground="{StaticResource ZivTextSecondaryBrush}"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center" />
+        <TextBlock x:Name="PART_Empty"
+                   Text="暂无图像"
+                   Foreground="{StaticResource ZivTextSecondaryBrush}"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center" />
 
-            <Border x:Name="PART_ZoomBadge"
-                    Margin="8"
-                    Padding="6,2"
-                    CornerRadius="4"
-                    Background="{StaticResource ZivOverlayBrush}"
-                    HorizontalAlignment="Right"
-                    VerticalAlignment="Top"
-                    IsVisible="False">
-              <TextBlock x:Name="PART_ZoomText"
-                         Text="适配"
-                         FontSize="11"
-                         Foreground="{StaticResource ZivTextBrush}" />
-            </Border>
-          </Grid>
+        <Border x:Name="PART_ZoomBadge"
+                Margin="8"
+                Padding="6,2"
+                CornerRadius="4"
+                Background="{StaticResource ZivOverlayBrush}"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                IsVisible="False">
+          <TextBlock x:Name="PART_ZoomText"
+                     Text="适配"
+                     FontSize="11"
+                     Foreground="{StaticResource ZivTextBrush}" />
+        </Border>
+      </Grid>
     </c:ChromeTitleBar.Body>
   </c:ChromeTitleBar>
 </Window>

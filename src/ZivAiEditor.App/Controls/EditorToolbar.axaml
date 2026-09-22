@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ZivAiEditor.App.Controls.EditorToolbar">
+  <!-- Tool buttons sit in the title bar's left slot; button/icon styling lives in
+       Styles/ChromeStyles.axaml. ResetView / Compare live on the right (ImagePreview). -->
+  <StackPanel Orientation="Horizontal" Spacing="2" Margin="6,0" VerticalAlignment="Center">
+    <ToggleButton x:Name="PART_BtnCrop" Classes="tool" ToolTip.Tip="裁切">
+      <Path Classes="toolIcon" Data="{StaticResource IconCrop}" />
+    </ToggleButton>
+    <ToggleButton x:Name="PART_BtnBrush" Classes="tool" ToolTip.Tip="遮罩画笔">
+      <Path Classes="toolIcon" Data="{StaticResource IconBrush}" />
+    </ToggleButton>
+    <ToggleButton x:Name="PART_BtnEraser" Classes="tool" ToolTip.Tip="橡皮擦">
+      <Path Classes="toolIcon" Data="{StaticResource IconEraser}" />
+    </ToggleButton>
+    <Button x:Name="PART_BtnClearMask" Classes="tool" ToolTip.Tip="清空遮罩">
+      <Path Classes="toolIcon" Data="{StaticResource IconTrash}" />
+    </Button>
+    <Button x:Name="PART_BtnUndo" Classes="tool" ToolTip.Tip="撤销">
+      <Path Classes="toolIcon" Data="{StaticResource IconUndo}" />
+    </Button>
+  </StackPanel>
+</UserControl>

@@ -186,12 +186,28 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (sender is ListBox list && list.SelectedItem is ListBoxItem { Tag: string nodeId })
+        if (sender is not ListBox list || list.SelectedItem is not ListBoxItem { Tag: string nodeId })
         {
-            _vm.NavigateTo(nodeId);
-            list.SelectedItem = null;
-            ScrollToEnd();
+            return;
         }
+
+        // Navigating rebuilds the history list. Mutating the ListBox's items while its
+        // selection model is still processing this selection change re-enters the model
+        // and throws (ItemsSourceView out-of-range) -> app crash. Defer to the dispatcher
+        // so the selection change completes first.
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                if (_vm is null)
+                {
+                    return;
+                }
+
+                _vm.NavigateTo(nodeId);
+                list.SelectedItem = null;
+                ScrollToEnd();
+            },
+            DispatcherPriority.Background);
     }
 
     private void RenderChat()
