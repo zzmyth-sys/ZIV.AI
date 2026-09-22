@@ -1,6 +1,6 @@
 # ZIV.AI 对话式交互设计（INTERACTION）
 
-- 文档状态：**设计已裁决，实现待后续 Step**（非冻结草案）
+- 文档状态：**逻辑层已实现（Step 8）；UI 待 Step 9**（非冻结草案）
 - 用途：记录对话式交互模型与关键决策，避免遗忘
 - 关联：[`ARCHITECTURE.md`](ARCHITECTURE.md)（分层）· [`SPEC.md`](SPEC.md)（Planner / Executor / Tool）·
   [`FROZEN.md`](FROZEN.md)（Z17–Z30）· [`OPTIMIZATION.md`](OPTIMIZATION.md)（文档风格参考）
@@ -64,11 +64,19 @@
 
 - **不变**：`Contracts` / `Executor` / `Tool` / `Backend` / Python 管线；`IPlanner` / `IExecutor` /
   `IEditTool` / `IToolRegistry` 契约不改。
-- **新增（Agent 层）**：`CommandParser` / `EditSession` / `EditNode`。
-  （命令解析与会话 DAG 是编排逻辑，归 Agent，符合 `ARCHITECTURE.md` §2 / §3。）
-- **新增（App 层）**：`SessionExporter`（会话导出属平台 / 文件 IO，归 App）。
+- **新增（Agent 层）**：`CommandParser` / `EditSession` / `EditNode` / `ISessionExporter` /
+  `SessionExporter`。
+  （命令解析、会话 DAG 与导出是编排 / 会话逻辑，归 Agent，符合 `ARCHITECTURE.md` §2 / §3；
+  `SessionExporter` 操作 `EditSession` 且零平台依赖，故与 `EditSession` 同层，见
+  `FROZEN.md`「修订说明（Step 8 归属修正）」8R.1。）
 - **新增（UI 层，Step 9+）**：聊天流 + 历史节点列表。
 - 依赖方向不变：`App → UI → Agent/Tools/Backend → Contracts`；Agent 只依赖 `Contracts`。
+
+> **实现状态（Step 8）**：逻辑层已落地——`CommandParser` / `EditSession` / `EditNode`（Agent）、
+> `ISessionExporter` / `SessionExporter`（Agent，见 8R.1 归属修正）、`Template/commands.json`、
+> `AppContext` 装配。
+> 契约与冻结记录见 `FROZEN.md` Step 8。`/扩图` 由 `width`/`height` 参数翻译为
+> `ResolutionPolicy{Explicit}`（`QW21outpaint` 要求）。UI、LLM 意图理解、`@图片N` 仍后置。
 
 ## 6. 不在本期范围
 
@@ -80,6 +88,7 @@
 
 ## 7. 待确认项
 
-- `commands.json` 的具体命令集。
-- 历史节点的 UI 展示形式（列表 / 时间轴 / 缩略图）。
-- 保存目录的默认值。
+- ~~`commands.json` 的具体命令集。~~ **已定（Step 8）**：初始 4 条（`/换背景` `/去水印`
+  `/去物体` `/扩图`），见 `Template/commands.json` 与 `FROZEN.md` 8.2；后续可增补。
+- 历史节点的 UI 展示形式（列表 / 时间轴 / 缩略图）——**留 Step 9**。
+- 保存目录的默认值——**留 Step 9**（`ISessionExporter` 接受调用方传入目录）。

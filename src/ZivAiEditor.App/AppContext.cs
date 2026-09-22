@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using ZivAiEditor.Agent;
 using ZivAiEditor.Backend;
 using ZivAiEditor.Contracts.Execution;
@@ -30,7 +31,10 @@ internal sealed class AppContext : IDisposable
         IToolRegistry tools,
         IExecutor executor,
         ExecutionQueue executionQueue,
-        IModelProfileRegistry modelProfiles)
+        IModelProfileRegistry modelProfiles,
+        ICommandParser commandParser,
+        EditSession session,
+        ISessionExporter sessionExporter)
     {
         Backend = backend;
         Client = client;
@@ -41,6 +45,9 @@ internal sealed class AppContext : IDisposable
         Executor = executor;
         _executionQueue = executionQueue;
         ModelProfiles = modelProfiles;
+        CommandParser = commandParser;
+        Session = session;
+        SessionExporter = sessionExporter;
     }
 
     private readonly HttpClient _llmHttp;
@@ -63,6 +70,15 @@ internal sealed class AppContext : IDisposable
 
     /// <summary>Model resolution profiles (Step 6.5); the UI maps a tier via <see cref="ResolutionTier"/>.</summary>
     public IModelProfileRegistry ModelProfiles { get; }
+
+    /// <summary>Deterministic slash-command / prompt parser (Step 8).</summary>
+    public ICommandParser CommandParser { get; }
+
+    /// <summary>The single in-memory edit session (Step 8); not persisted until export.</summary>
+    public EditSession Session { get; }
+
+    /// <summary>Exports the session on close (Step 8); the UI asks the user in Step 9.</summary>
+    public ISessionExporter SessionExporter { get; }
 
     public static AppContext Create()
     {
@@ -113,7 +129,45 @@ internal sealed class AppContext : IDisposable
             new FallbackPlanner(),
             ex => Debug.WriteLine($"[planner] degraded to fallback: {ex.Message}"));
 
-        return new AppContext(backend, client, llmHttp, plannerLlm, planner, tools, executor, executionQueue, modelProfiles);
+        // Step 8: deterministic command parser, one in-memory session, and the
+        // close-time exporter. The UI (Step 9) drives the session and asks the
+        // user whether to export on exit.
+        var commandParser = new CommandParser(ResolveCommandsPath());
+        var session = new EditSession();
+        var sessionExporter = new SessionExporter();
+
+        return new AppContext(
+            backend, client, llmHttp, plannerLlm, planner, tools, executor, executionQueue,
+            modelProfiles, commandParser, session, sessionExporter);
+    }
+
+    /// <summary>
+    /// Resolves <c>Template/commands.json</c> from the program directory, falling
+    /// back to walking up to the repository root (mirrors <see cref="SettingsLoader"/>).
+    /// If nothing is found the <see cref="CommandParser"/> uses its built-in set (Z28).
+    /// </summary>
+    private static string ResolveCommandsPath()
+    {
+        var programDirectory = System.AppContext.BaseDirectory;
+        var candidate = Path.Combine(programDirectory, "Template", "commands.json");
+        if (File.Exists(candidate))
+        {
+            return candidate;
+        }
+
+        var directory = new DirectoryInfo(programDirectory);
+        while (directory is not null)
+        {
+            var repository = Path.Combine(directory.FullName, "Template", "commands.json");
+            if (File.Exists(repository) && File.Exists(Path.Combine(directory.FullName, "DOC", "FROZEN.md")))
+            {
+                return repository;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return candidate;
     }
 
     public void Dispose()

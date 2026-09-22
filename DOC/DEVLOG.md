@@ -1465,3 +1465,111 @@ clamp）。范围外：Segment / Upscale 工具（Step 7.5）、UI（Step 9）�
   黑边的源图仍呈「框中景」——**输入所致**。`test_outpaint.py` 11 通过。
 - **未采用方案 B**（InstantX ControlNet）：官方 v1 ControlNet 与 2.1 兼容性未验证，登记为候选
   `OPTIMIZATION.md` §7.4，后续有需求再评估。
+
+## [Step 8] - 2026-09-22
+
+### 目标
+
+实现 `DOC/INTERACTION.md` 的**对话式交互逻辑层**：`CommandParser`（斜杠命令 + 自然语言 →
+单步 `EditPlan`，不走 LLM）、`EditSession`（内存 DAG，不持久化）、`SessionExporter`
+（关闭时导出 `session.json` + 图片）。范围外：UI（聊天流 + 历史节点列表，Step 9）、
+自然语言 LLM 重写、`@图片N` 多图引用、会话持久化 / 自动恢复、GPU 端到端（Z29/Z30）。
+
+### 做了什么
+
+- **Agent 层**：
+  - 新增 `CommandParser.cs`：`ICommandParser` + `ParseResult` + `CommandDefinition` +
+    `CommandParser`。构造时从 `Template/commands.json` 加载；缺失 / 解析失败 → 内置默认集
+    （`/换背景` / `/去水印` / `/去物体` / `/扩图`）。JSON 走**源生成**
+    （`CommandJsonContext`，避免 AOT 警告）。解析：`/` 开头精确匹配命令名 + 参数替换；
+    否则原文作 prompt。只产出 `EditPlan`，不依赖 `Executor`。
+  - 新增 `EditSession.cs`：`EditSession` + `EditNode`；`SetRoot` / `AppendNode` /
+    `NavigateTo` / `GetHistory` / `GetCurrentImagePath`。内存 DAG，无并发控制。
+- **App 层**：
+  - 新增 `SessionExporter.cs`：`ISessionExporter` + `SessionExporter`。写 `session.json`
+    （snake_case、`UnsafeRelaxedJsonEscaping` 保留中文）+ 拷贝节点图 `{NodeId}.png`；
+    捕获所有异常返回 `null`，不阻断关闭。JSON 走源生成（AOT）。
+  - `AppContext` 装配 `CommandParser`（路径解析：程序目录 → 逐级向上找仓库根，失败回退内置）
+    + `EditSession` + `SessionExporter`，并暴露三个属性供 Step 9 UI 使用。
+  - `App.csproj` 增加 `Template/commands.json` 拷贝到输出（`Link`）。
+- **配置**：`Template/commands.json`（仓库根，4 条命令，官方 PE 规范模板）。
+- **测试**：新增 `CommandParserTests`（10）/ `EditSessionTests`（6）/ `SessionExporterTests`（3）。
+- **文档**：`FROZEN` Step 8（8.1–8.5）；`DEVLOG` 本记录；`ACCEPTANCE` Step 8；
+  `INTERACTION` 状态更新。
+
+### 关键决策
+
+1. **`/扩图` 的分辨率翻译**：`QW21outpaint` 要求 `Resolution.Mode=Explicit`（FROZEN 7.5），
+   若 `CommandParser` 不处理，该命令永远执行失败。故在命令 `tool == "QW21outpaint"` 且含
+   `width`/`height` 参数时，把参数翻译为 `ResolutionPolicy{Explicit}`。属定向集成，不改契约。
+2. **`SessionExporter` 的测试可达性**：`Tests` 原为 `net8.0`，无法引用 `net8.0-windows` 的
+   `App`。改为 `net8.0-windows` + 新增 App 引用，以覆盖 App 层导出逻辑。不改变其他项目依赖。
+3. **JSON 可读性**：默认 STJ 会把中文转义为 `\uXXXX`，导出文件不可读；用
+   `UnsafeRelaxedJsonEscaping` + `WriteIndented`。该 options 一旦使用即只读，故
+   `SessionExportJsonContext` 用**静态单例**复用（否则第二次导出抛异常）。
+
+### 实测
+
+- `dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（按 Z29 只跑受影响类，**无 GPU**）：新增 3 类 → **19 通过 / 0 失败**；
+  非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **98 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步无 GPU 参与。
+
+### 遇到的问题与解决
+
+1. **导出 JSON 中文被转义**：首版用 `SessionExportJsonContext.Default`，中文变 `\uXXXX`，
+   测试断言 `/去水印` 失败。改为自定义 `JsonSerializerOptions`（`UnsafeRelaxedJsonEscaping`）。
+2. **`JsonSerializerOptions` 复用抛异常**：每次调用 `new Context(options)` 复用同一 options
+   实例，第二次因 options 已只读而失败（空会话导出返回 `null`）。改为**静态单例 context**。
+3. **测试工程 TFM**：见「关键决策 2」。
+
+### 遗留项
+
+- **UI 未实现**（Step 9）：聊天流 + 历史节点列表 + 关闭时询问导出。
+- **LLM 意图理解未实现**（后置）：`CommandParser` 不走 LLM；`PromptOptimizer` 仍为候选。
+- **`@图片N` 多图引用未实现**（后置）：模板仅用 `<image1>`。
+- **会话不持久化 / 不自动恢复**：关闭导出后如需恢复，需后续 Step 手动导入 JSON。
+- **`SessionExporter` 未在真实关闭流程接线**：本步只装配；询问用户留 Step 9。
+- **`CommandParser` 对无图斜杠命令不报错**：按 `INTERACTION.md` / `SPEC.md §3.1`，模板即
+  prompt，无图时按 T2I 处理；UI 侧应保证编辑命令有当前图。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未修改** Step 0–7 冻结行的既有成员；`Contracts` 未新增任何类型；`IInferenceClient` /
+  `IEditTool` / `IToolRegistry` / `IExecutor` / `IPlanner` 签名未改。
+- **未修改** `C:\AI\ComfyUI_PIC`。
+
+## [Step 8 · 收尾修正] - 2026-09-22
+
+### 目标
+
+修正 Step 8 的 `SessionExporter` 归属错位（App → Agent），并把 `Tests` 的 TFM / 依赖
+恢复到 FROZEN 1.1 表的约定。**只重构归属，不改签名、不改行为**。
+
+### 做了什么
+
+- **`SessionExporter` 归属 App → Agent**：`src/ZivAiEditor.App/SessionExporter.cs` 移至
+  `src/ZivAiEditor.Agent/SessionExporter.cs`；`namespace ZivAiEditor.App` →
+  `ZivAiEditor.Agent`；去掉同层 `using ZivAiEditor.Agent;`；更新类级 XML doc。
+  方法体与 `ISessionExporter` 签名**逐字不变**。
+  - 理由：与 `EditSession`（Agent 层）同层、**零平台依赖**（仅 BCL `System.IO` +
+    `System.Text.Json`）；`AppContext` 已有 `using ZivAiEditor.Agent;`，**无代码改动**。
+- **`Tests.csproj` 恢复**：TFM `net8.0-windows` → **`net8.0`**；删除对 `ZivAiEditor.App`
+  的 `ProjectReference`；依赖回到 `Contracts` / `Agent` / `Tools` / `Backend`。
+  `SessionExporterTests` 的 `using ZivAiEditor.App;` 删除，改由 `using ZivAiEditor.Agent;` 解析。
+- **文档**：`FROZEN` 追加「修订说明（Step 8 归属修正）」8R.1–8R.4；`INTERACTION` §5 归属表修正。
+  详见 `FROZEN.md` 8R。
+
+### 实测
+
+- `dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**（`ZivAiEditor.Tests` 输出
+  `bin/Release/net8.0/`）。
+- `dotnet test`（按 Z29，**无 GPU**，排除 `Ipc*` / `PlannerIntegration`）→ **98 通过 / 0 失败**
+  （含 `SessionExporterTests` 3 例，经 Agent 引用覆盖）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 备注
+
+- 只增不改：Step 0–7 冻结行、Step 8 原文均未动；修正记录见 `FROZEN.md` 8R。
+- 未修改 `C:\AI\ComfyUI_PIC`。

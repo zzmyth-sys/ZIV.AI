@@ -30,6 +30,7 @@
 
   <ItemGroup>
     <None Include="..\..\settings.ini" Link="settings.ini" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Template\commands.json" Link="Template\commands.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -1187,3 +1187,121 @@ public interface ILlmClient : IDisposable
 - **处理**：新建 `DOC/RELEASE-CHECKLIST.md` 记录发布前必做项（路径硬编码 /
   publish 不打包后端 / `FindTemplate` 找错文件）。
 - **性质**：仅文档登记；本步不改运行时代码。
+
+---
+
+## Step 8（日期：2026-09-22）
+
+> **修订说明（Step 8 · 对话式交互逻辑层）**
+>
+> 本段为 Step 8 追加。目标：实现 `DOC/INTERACTION.md` 的**逻辑层**——
+> `CommandParser`（正则 / `commands.json`，不走 LLM）+ `EditSession`（内存 DAG，不持久化）+
+> `SessionExporter`（关闭时导出）。UI（聊天流 + 历史节点列表）留 Step 9；自然语言 LLM 重写、
+> `@图片N` 多图引用后置。**不改动 Step 0–7 已冻结行的既有成员**；契约变更为**新增接口 / 类型**
+> （非破坏性），且**不新增 `Contracts` 项目类型**（新接口按归属放 Agent / App 层，见
+> `INTERACTION.md` §5）。
+
+### 8.1 新增契约（冻结）
+
+| 类型 | 文件 | 说明 |
+|---|---|---|
+| `ICommandParser`（接口） | `ZivAiEditor.Agent/CommandParser.cs` | `Task<ParseResult> ParseAsync(string input, EditSession session, CancellationToken ct = default)` |
+| `ParseResult`（类） | 同上 | `bool Success`；`EditPlan? Plan`；`string? ErrorMessage`；`string? MatchedCommand` |
+| `CommandDefinition`（类） | 同上 | `Name` / `Params` / `Tool` / `Template` / `Description`（`commands.json` 条目） |
+| `CommandParser`（类） | 同上 | `ICommandParser` 实现；构造 `CommandParser(string commandsJsonPath = "Template/commands.json")`；构造时加载，失败用内置默认集 |
+| `EditSession`（类） | `ZivAiEditor.Agent/EditSession.cs` | `SessionId` / `RootImagePath?` / `Nodes` / `CurrentNodeId?` / `CreatedAt`；`SetRoot` / `AppendNode` / `NavigateTo` / `GetHistory` / `GetCurrentImagePath` |
+| `EditNode`（类） | 同上 | `NodeId` / `ParentNodeId?` / `ImagePath` / `Command` / `CreatedAt` |
+| `ISessionExporter`（接口） | `ZivAiEditor.App/SessionExporter.cs` | `Task<string?> ExportAsync(EditSession session, string outputDirectory, CancellationToken ct = default)`；失败返回 `null`，不抛 |
+| `SessionExporter`（类） | 同上 | `ISessionExporter` 实现；写 `session.json` + 拷贝节点图 `{NodeId}.png` |
+
+> **归属**：`CommandParser` / `EditSession` / `EditNode` 是编排逻辑，归 Agent（只依赖
+> `Contracts`）；`SessionExporter` 属平台 / 文件 IO，归 App。与 `INTERACTION.md` §5 一致。
+
+### 8.2 `Template/commands.json` 结构（冻结）
+
+- 路径：`Template/commands.json`（仓库根；App 以 `Link="Template/commands.json"` 拷贝到输出）。
+- 结构：`{ "version": "1.0", "commands": [ { name, params[], tool, template, description } ] }`。
+- 初始命令集：`/换背景 <target>`、`/去水印`、`/去物体 <object>`、`/扩图 <width> <height>`。
+- 模板遵循 Qwen-Image-2.1 官方提示词规范：`<image1>` 标签引用主图（多图后置）、编辑目标与
+  保持内容分列、肯定性表述（"Keep ... unchanged"）。
+- `tool` 取值必须是已注册工具名 `QW21edit` / `QW21outpaint`。
+- 缺失 / 解析失败 → `CommandParser` 使用**内置默认集**（含上述 4 条；Z28 无外部依赖）。
+
+### 8.3 解析与 DAG 语义（冻结）
+
+- 输入以 `/` 开头 → 按空白分词；首词精确匹配（Ordinal）命令名；参数数量须与 `params` 一致；
+  `{param}` 纯字符串替换；产出单步 `EditPlan`（`ToolName` = 命令 `tool`，`MainImagePath` =
+  当前工作图）。命令不匹配 / 参数不符 / 无图且无 prompt → `Success=false` + `ErrorMessage`。
+- 输入不以 `/` 开头 → 原文作为 prompt，产出单步 `QW21edit` 计划（无主图 → T2I）。
+- **`/扩图` 特例**：`QW21outpaint` 要求 `Resolution.Mode=Explicit`（FROZEN 7.5），故
+  `width`/`height` 参数同时被翻译为 `ResolutionPolicy{Mode=Explicit, Width, Height}`；否则该
+  命令无法执行。此为 Step 8 的定向集成，不改变任何契约。
+- `EditSession` 为内存 DAG，不持久化、无并发控制（UI 保证单线程）；发送命令 = 从
+  `CurrentNodeId` 出发 `AppendNode`；点击历史节点 = `NavigateTo`（后续从该节点分支）。
+- `SessionExporter` 只读导出：`session.json`（含全部 `EditNode`，snake_case、不转义非 ASCII）+
+  节点图拷贝为 `{NodeId}.png`；不自动恢复、不抛异常导致关闭失败。
+
+### 8.4 测试结果（冻结）
+
+- `dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（按 Z29 只跑受影响类，**无 GPU**）：`CommandParserTests` + `EditSessionTests` +
+  `SessionExporterTests` → **19 通过 / 0 失败**；非 GPU 全量（排除 `Ipc*` / 集成）→ **98 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步纯逻辑，无 GPU 参与。
+
+### 8.5 项目配置变更（非冻结契约）
+
+- `ZivAiEditor.Tests` 的 TFM 由 `net8.0` 改为 **`net8.0-windows`**，并新增对 `ZivAiEditor.App`
+  的 `ProjectReference`——以便测试 App 层的 `SessionExporter`（`net8.0` 无法引用
+  `net8.0-windows` 的 App）。不改变 `Contracts` / `Agent` / `Tools` / `Backend` 的依赖方向，
+  不新增项目；1.1 项目表以本段为准（Tests 依赖再加 `App`）。
+
+---
+
+> **修订说明（Step 8 归属修正，2026-09-22）**
+>
+> 本段为**只增**修订，**不改动 Step 0–7 已冻结行，也不改 Step 8 段（8.1–8.5）原文**。
+> 依据 Step 8 收尾复盘：`SessionExporter` 的归属错位（放 App 层）引发了连锁问题——
+> 它操作的是 Agent 层的 `EditSession`（同层本该同归属）、**零平台依赖**（只用 BCL 的
+> `System.IO` + `System.Text.Json`），且为测试它被迫把 `Tests` 从 `net8.0` 改为
+> `net8.0-windows` 并引用 `App`，**违反 FROZEN 1.1 表的 TFM 约定**。现更正如下。
+
+#### 8R.1 归属更正（取代 8.1 中 `ISessionExporter` / `SessionExporter` 的层）
+
+- **更正**：`ISessionExporter` / `SessionExporter` 的归属由 **App 层**更正为 **Agent 层**。
+  - 文件：`ZivAiEditor.App/SessionExporter.cs` → **`ZivAiEditor.Agent/SessionExporter.cs`**。
+  - namespace：`ZivAiEditor.App` → **`ZivAiEditor.Agent`**。
+  - 依据 `ARCHITECTURE.md` §2 / §3：会话 DAG 与导出是**编排 / 会话逻辑**，与 `EditSession` 同层；
+    且实现无任何平台 API（无注册表 / 无 Win32 / 无对话框），不需要归 App。
+- **签名与行为不变**：`ISessionExporter.ExportAsync(EditSession, string, CancellationToken)` 与
+  `SessionExporter` 方法体**原样不动**；`CommandParser` / `ParseResult` / `EditSession` /
+  `EditNode` 均不变。
+- **`AppContext`**：仅 `using` 解析来源变化（`ZivAiEditor.Agent`），**无代码改动**——仍构造并暴露
+  `ISessionExporter SessionExporter`，由 App 注入 UI（Step 9）。
+
+#### 8R.2 1.1 项目表恢复（取代 8.5）
+
+- **`ZivAiEditor.Tests` 的 TFM 恢复为 `net8.0`**（8.5 的 `net8.0-windows` 作废）。
+- **删除 `Tests` 对 `ZivAiEditor.App` 的 `ProjectReference`**；依赖恢复为
+  `Contracts` / `Agent` / `Tools` / `Backend`（+ xunit / Microsoft.NET.Test.Sdk），
+  与 1.1 表 / 7.10 修订说明一致。
+- 理由：`SessionExporter` 移入 Agent 后，测试经既有 `Agent` 引用即可覆盖，无需 App。
+- **性质**：仅项目配置与文件归属；不改契约 / 签名 / 行为 / 依赖方向。
+
+#### 8R.3 命令参数翻译规则（补充登记）
+
+> 补充说明 `CommandParser` 的职责边界（Step 8 已实现，此处登记规则，不改行为）。
+
+- **`CommandParser` 负责将命令参数翻译为工具所需的类型化字段**（写入 `EditPlan` / `EditStep`）。
+- **当前规则**：
+  - `/扩图 <width> <height>` → `ResolutionPolicy{Mode=Explicit, Width, Height}`
+    （`QW21outpaint` 强制要求 `Resolution.Mode=Explicit`，见 FROZEN 7.5）；
+  - **其他命令参数当前均为 `string`**，写入 `EditStep.Parameters`（简单 `{param}` 字符串替换，
+    不做类型转换）。
+- **扩展约定**：新增工具时，若其**必需字段类型化**（如 outpaint 的 `Resolution`），
+  `CommandParser` 需补充对应翻译；否则命令产出的计划无法执行。
+
+#### 8R.4 修正后验证
+
+- `dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（按 Z29，**无 GPU**，排除 `Ipc*` / `PlannerIntegration`）→ **98 通过 / 0 失败**
+  （含 `SessionExporterTests` 3 例，经 Agent 引用覆盖）。

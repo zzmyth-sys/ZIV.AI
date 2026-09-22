@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "commands": [
+    {
+      "name": "/换背景",
+      "params": ["target"],
+      "tool": "QW21edit",
+      "template": "Keep the character and pose in <image1> unchanged. Replace the background with {target}. Preserve the original facial identity, hair, body shape and pose.",
+      "description": "替换图像背景"
+    },
+    {
+      "name": "/去水印",
+      "params": [],
+      "tool": "QW21edit",
+      "template": "Remove all watermarks, logos, and subtitles from the image. Keep all other content unchanged.",
+      "description": "去除水印"
+    },
+    {
+      "name": "/去物体",
+      "params": ["object"],
+      "tool": "QW21edit",
+      "template": "Remove the {object} from <image1>. Fill the removed area naturally to match the surrounding context. Keep all other content unchanged.",
+      "description": "移除指定物体"
+    },
+    {
+      "name": "/扩图",
+      "params": ["width", "height"],
+      "tool": "QW21outpaint",
+      "template": "Extend the canvas to {width}x{height}. Fill the extended area with content consistent with <image1>.",
+      "description": "扩展画布"
+    }
+  ]
+}

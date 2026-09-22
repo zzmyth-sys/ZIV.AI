@@ -836,3 +836,66 @@ Step 7.5 候选。范围外：UI（Step 9）、独立超分模型 / 后处理抠
 1. 追加 `DEVLOG.md` 的 Step 7 记录（本步已完成）
 2. 在「验收记录」追加“Step 7 通过，日期：____”（待签）
 3. 进入 Step 7.5（原生 Segment / 独立超分）或 Step 8，由用户决定
+
+---
+
+## Step 8 验收：对话式交互逻辑层（CommandParser + EditSession + SessionExporter）
+
+**目标**：实现 `DOC/INTERACTION.md` 的**逻辑层**——`CommandParser`（斜杠命令 + 自然语言 →
+单步 `EditPlan`，不走 LLM）、`EditSession`（内存 DAG，不持久化）、`SessionExporter`
+（关闭时导出 `session.json` + 图片）。范围外：UI（Step 9）、LLM 意图理解、`@图片N` 多图引用、
+会话持久化 / 自动恢复、GPU 端到端（Z29/Z30）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ |
+| G2 | 依赖方向没破 | 新增 Agent（`CommandParser` / `EditSession`）+ App（`SessionExporter`）；无反向依赖 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `Contracts` 未新增类型；`IInferenceClient` / `IEditTool` / `IToolRegistry` / `IExecutor` / `IPlanner` 签名未改 | ✅ |
+| G4 | 未授权修改检查 | Step 0–7 冻结行未改；新增接口走 Step 8 冻结节 | ✅ |
+| G5 | 文档已更新 | `FROZEN` Step 8 / `DEVLOG` Step 8 / `ACCEPTANCE` Step 8 / `INTERACTION` 状态 | ✅ |
+| G6 | 便携性未破 | `commands.json` 随程序目录（App `Link` 拷贝）；缺失回退内置集 | ✅ |
+| G7 | AI 推理进程隔离未破 | `CommandParser` 只产出 `EditPlan`，不调 `Executor` / 后端（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 8.1 | 命令解析 | `CommandParserTests` | `/命令` 匹配并解析；参数替换模板；未知命令 / 参数不符 → 错误 | ✅ |
+| 8.2 | 自然语言 | `CommandParserTests` | 非 `/` 输入 → 单步 `QW21edit` 计划，prompt = 原文；无图 → T2I | ✅ |
+| 8.3 | 无图无 prompt | `CommandParserTests` | 空输入 → `Success=false` + `ErrorMessage` | ✅ |
+| 8.4 | commands.json | `CommandParserTests` | 文件可加载；缺失 → 内置默认集（含 `/换背景` `/去水印`） | ✅ |
+| 8.5 | `/扩图` 分辨率 | `CommandParserTests` | `width`/`height` → `ResolutionPolicy{Explicit}` | ✅ |
+| 8.6 | 会话 DAG | `EditSessionTests` | `AppendNode` 建父子链；历史节点分支产生兄弟节点 | ✅ |
+| 8.7 | 回溯 | `EditSessionTests` | `NavigateTo` 切换当前节点；未知 id 返回 false | ✅ |
+| 8.8 | 当前图 | `EditSessionTests` | 无节点 → 根图；皆无 → `null` | ✅ |
+| 8.9 | 导出 | `SessionExporterTests` | 写 `session.json` + 拷贝 `{NodeId}.png`；空会话可导出 | ✅ |
+| 8.10 | 导出容错 | `SessionExporterTests` | 失败返回 `null`，不抛异常 | ✅ |
+| 8.11 | App 装配 | 查 `AppContext.cs` | 构造并暴露 `CommandParser` / `Session` / `SessionExporter` | ✅ |
+| 8.12 | 构建 / 测试 | `dotnet build` / `dotnet test`（受影响类） | 0 错误 0 警告；新增 **19 通过 / 0 失败**；非 GPU 全量 **98 通过 / 0 失败** | ✅ |
+| 8.13 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+
+### Step 8 通过标准
+
+- 通用 G1–G8 全过
+- 专属 8.1–8.13 全过
+
+### Step 8 遗留说明（非阻断）
+
+- **UI 未实现**（Step 9）：聊天流 + 历史节点列表 + 关闭时询问导出。
+- **LLM 意图理解 / `@图片N` 多图引用未实现**：后置。
+- **会话不持久化 / 不自动恢复**：关闭导出后需后续 Step 手动导入。
+- **`SessionExporter` 未在真实关闭流程接线**：本步只装配，询问用户留 Step 9。
+- **无图斜杠命令按 T2I 处理**：UI 侧应保证编辑命令有当前图。
+
+### Step 8 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 8 记录（本步已完成）
+2. 在「验收记录」追加“Step 8 通过，日期：____”（待签）
+3. 进入 Step 9（UI 层：聊天流 + 历史节点列表），由用户决定
+
+> **修订（2026-09-22）**：8.x 中原描述「SessionExporter 在 App 层」与
+> 「Tests 引用 App / net8.0-windows」已修正为 Agent 层 / net8.0。
+> 详见 FROZEN 8R。
