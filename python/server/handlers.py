@@ -149,6 +149,8 @@ def _run_submit(frame_io, task_id, payload):
         model_loader.prepare_environment()
         _clear_interrupt()
         _configure_pre_sampling_hooks(payload)
+        if payload.get("resolution"):
+            _LOG.info("submit resolution payload: %s", payload.get("resolution"))
 
         try:
             _ENGINE.ensure_loaded(_make_progress_pusher(frame_io, task_id))

@@ -4,6 +4,7 @@ using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Inference;
 using TaskStatus = ZivAiEditor.Contracts.Enums.TaskStatus;
 
@@ -265,7 +266,8 @@ public sealed class IpcInferenceClient : IInferenceClient
                         Denoise: request.Denoise,
                         OutputPath: request.OutputPath,
                         Lora: request.Lora,
-                        Optimizations: request.Optimizations));
+                        Optimizations: request.Optimizations,
+                        Resolution: MapResolution(request.Resolution)));
 
                 var json = JsonSerializer.Serialize(submit, IpcJsonContext.Default.SubmitRequest);
                 try
@@ -286,6 +288,15 @@ public sealed class IpcInferenceClient : IInferenceClient
                     }
 
                     return handle;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    // The caller canceled: forward the cancel to the Python
+                    // backend so it interrupts sampling instead of running to
+                    // completion (Z18/Z20). Best effort — the task is already
+                    // being torn down.
+                    await TryForwardCancelAsync(stream, taskId, pending).ConfigureAwait(false);
+                    throw new OperationCanceledException(ct);
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
@@ -339,6 +350,29 @@ public sealed class IpcInferenceClient : IInferenceClient
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Best-effort cancel used when the caller's <see cref="CancellationToken"/>
+    /// fires during <see cref="SubmitInpaintAsync"/>. The cancel frame is sent
+    /// with <see cref="CancellationToken.None"/> so the already-canceled caller
+    /// token cannot block the write, then it waits briefly for the Python
+    /// <c>canceled</c> acknowledgement.
+    /// </summary>
+    private async Task TryForwardCancelAsync(Stream stream, string taskId, PendingTask pending)
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(new CancelRequest("cancel", taskId), IpcJsonContext.Default.CancelRequest);
+            await WriteJsonAsync(stream, json, CancellationToken.None).ConfigureAwait(false);
+
+            using var timeout = new CancellationTokenSource(Process.Options.RequestTimeoutMs);
+            await pending.CancelSignal.Task.WaitAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Best effort only: the submit path is already unwinding.
         }
     }
 
@@ -718,6 +752,19 @@ public sealed class IpcInferenceClient : IInferenceClient
             Seed = (long)ReadDouble(root, "seed"),
         };
 
+    /// <summary>Maps the contract <see cref="ResolutionPolicy"/> onto the IPC payload (snake_case).</summary>
+    private static ResolutionPayload? MapResolution(ResolutionPolicy? policy)
+        => policy is null
+            ? null
+            : new ResolutionPayload(
+                Mode: policy.Mode.ToString().ToLowerInvariant(),
+                Side: policy.Side,
+                Area: policy.Area,
+                Scale: policy.Scale,
+                Width: policy.Width,
+                Height: policy.Height,
+                MaxPixels: policy.MaxPixels);
+
     private static HealthStatus MapHealth(JsonElement root)
     {
         var models = new List<ModelStatus>();
@@ -811,7 +858,18 @@ internal sealed record SubmitPayload(
     double Denoise,
     string? OutputPath,
     LoraOptions? Lora,
-    OptimizationOptions? Optimizations);
+    OptimizationOptions? Optimizations,
+    ResolutionPayload? Resolution);
+
+/// <summary>Optional <c>submit.payload.resolution</c> (Step 6.5 / ipc_version 0.6).</summary>
+internal sealed record ResolutionPayload(
+    string? Mode,
+    int? Side,
+    int? Area,
+    float? Scale,
+    int? Width,
+    int? Height,
+    int? MaxPixels);
 
 internal sealed record SubmitRequest(
     string Type,
@@ -830,6 +888,7 @@ internal sealed record CancelRequest(string Type, string TaskId);
 [JsonSerializable(typeof(CancelRequest))]
 [JsonSerializable(typeof(LoraOptions))]
 [JsonSerializable(typeof(OptimizationOptions))]
+[JsonSerializable(typeof(ResolutionPayload))]
 internal partial class IpcJsonContext : JsonSerializerContext
 {
 }

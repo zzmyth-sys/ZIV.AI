@@ -1,7 +1,7 @@
 # ZIV.AI IPC 传输契约（IPC Protocol）
 
-- 文档状态：**Step 2 冻结**（2026-09-21）；**修订至 ipc_version 0.5**（Step 4 修订后）
-- **ipc_version：`0.5`**
+- 文档状态：**Step 2 冻结**（2026-09-21）；**修订至 ipc_version 0.6**（Step 6.5 修订后）
+- **ipc_version：`0.6`**
 - 用途：定义 C# 前端（`ZivAiEditor.App` / `ZivAiEditor.Backend`）与 Python 推理进程之间的
   **跨进程传输契约**。取代 Step 1 的「OpenAPI 作为跨进程唯一契约」定位（见 `FROZEN.md` Step 2）。
 - 依据：`_test_step2/REPORT.md`（11 项实测）。
@@ -46,6 +46,16 @@
 >   均为 **Python 进程内部变换**的开关，**不改变 IPC 消息结构与传输语义**；旧端忽略即可。
 > - 属**向后兼容的协议扩展**：新字段可选，缺省行为与 0.4 完全一致。
 > - 本步仅**预留钩子**（LoRA / MagCache 的具体实现不入 Step 4 范围）。
+>
+> **修订记录（ipc_version 0.5 → 0.6，2026-09-22 · Step 6.5 修订后）**
+>
+> - **`submit.payload` 新增可选字段 `resolution`**（§3.4）：
+>   `{ mode, side?, area?, scale?, width?, height?, max_pixels? }`，缺省 / `null` 表示
+>   **后端使用 `config` 默认分辨率**。
+> - C# 侧把用户 tier（Fast / Balanced / HighQuality）**翻译为绝对数值**后发送；Python 无状态，
+>   只按字段执行（Z23）。
+> - 属**向后兼容的协议扩展**：新字段可选，旧端忽略即可，缺省行为与 0.5 完全一致。
+> - `mode` 取值：`side`（长边）/ `area`（总像素）/ `scale`（输入长边 × 倍数）/ `explicit`（宽×高）。
 
 ---
 
@@ -139,7 +149,8 @@
   "denoise": 1.0,
   "output_path": null,
   "lora": null,
-  "optimizations": null
+  "optimizations": null,
+  "resolution": null
 }
 ```
 
@@ -160,6 +171,34 @@
 - 缺省（字段缺失或 `null`）时行为与 **0.4 完全一致**（不加载 LoRA、不启用 MagCache）。
 - **Step 4 只实现解析与注册接缝**（`python/server/pipeline_hooks.py`）；LoRA / MagCache 的
   具体加载逻辑留待后续优化步骤（`DOC/OPTIMIZATION.md`）。
+
+**可选字段（Step 6.5 / ipc_version 0.6）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `resolution` | object \| null | 目标输出分辨率；缺省 / `null` = 后端使用 `config` 默认（`RESOLUTION_MODE` / `RESOLUTION_SIDE`）。结构见下。 |
+
+```json
+{
+  "mode": "side",
+  "side": 1536,
+  "area": null,
+  "scale": null,
+  "width": null,
+  "height": null,
+  "max_pixels": 4194304
+}
+```
+
+- `mode`（必填，字符串）：
+  - `side`：目标**最长边** = `side`（QW21edit 默认；保持纵横比）。
+  - `area`：目标**总像素** ≈ `area`（保持纵横比）。
+  - `scale`：目标长边 = **输入图长边 × `scale`**（upscale 默认；Step 6.5 已接受并实现）。
+  - `explicit`：目标 **`width` × `height`**（outpaint 默认；不保持纵横比）。
+- `max_pixels`（可选，整数）：安全上限（防 UI 误设导致 OOM）；超过时后端**降级到安全值并记日志**。
+- **C# 侧翻译**：用户 tier（`Fast`=1024 / `Balanced`=1536 / `HighQuality`=2048，Qwen-2.1）
+  在 `ResolutionResolver` 译为绝对 `side` 后发送；**Python 无状态**，只按字段执行（Z23）。
+- **向后兼容**：字段缺失或 `null` 时行为与 **0.5 完全一致**（用 `config` 默认分辨率）。
 
 ### 3.5 `preview` 二进制帧（`0x02`）
 
@@ -223,7 +262,7 @@ C#(server)                                              Python(client)
 
 ## 7. 版本与兼容
 
-- **`ipc_version`：`0.5`**（管道名 `\\.\pipe\zivai.infer.v1` 为**通道版本**，与协议版本独立）。
+- **`ipc_version`：`0.6`**（管道名 `\\.\pipe\zivai.infer.v1` 为**通道版本**，与协议版本独立）。
   `ipc_version 0.1` 为**追溯设定**（原文档无版本字段）。
 - **0.1 → 0.2 变更点**：
   1. **管道方向**：`Python=server / C#=client` → `C#=Server / Python=Client`（C# 掌控 Python 生命周期，启动无竞态）。
@@ -242,6 +281,11 @@ C#(server)                                              Python(client)
   1. **`submit.payload` 新增可选字段** `lora` / `optimizations`（§3.4）：Python 进程内部
      优化的开关（LoRA / MagCache）。**向后兼容**：字段可选，缺省行为与 0.4 完全一致；
      本步只实现解析与钩子接缝，具体加载留待后续优化步骤。
+- **0.5 → 0.6 变更点**（Step 6.5）：
+  1. **`submit.payload` 新增可选字段** `resolution`（§3.4）：目标输出分辨率
+     （`side` / `area` / `scale` / `explicit` + `max_pixels` 安全上限）。C# 侧把用户 tier
+     译为绝对数值，Python 无状态执行。**向后兼容**：字段可选，缺省行为与 0.5 完全一致
+     （用 `config` 默认分辨率）；`config.PROTOCOL_VERSION` 同步升 `0.6`。
 - 协议变更时升 `ipc_version`（必要时同时升管道名 `v2`），旧前端可并存。
 - `openapi.yaml` 保留为 **Schema 参考**（`ImageEditRequest` / `TaskAccepted` /
   `TaskStatusResponse` 等结构即本协议 payload 的形状来源）。

@@ -172,8 +172,7 @@ public sealed class LlmPlanner : IPlanner
 
         if (tools.Count == 0)
         {
-            sb.AppendLine("- inpaint: edit only the masked region using the prompt (requires a mask).");
-            sb.AppendLine("- img2img: edit the whole image using the prompt (no mask).");
+            sb.AppendLine("- QW21edit: edit the image using the prompt (a mask enables a local edit; no mask does a reference-conditioned edit).");
         }
         else
         {
@@ -188,7 +187,7 @@ public sealed class LlmPlanner : IPlanner
 
         sb.AppendLine();
         sb.AppendLine("Rules:");
-        sb.AppendLine("- Use \"inpaint\" when a mask is present, otherwise use \"img2img\".");
+        sb.AppendLine("- Use \"QW21edit\" for edits, with or without a mask.");
         sb.AppendLine("- Prefer the fewest steps that satisfy the request.");
         sb.AppendLine("- Parameter values must be JSON strings.");
         sb.AppendLine("- Respond with ONLY a JSON object, no prose and no markdown fences.");
@@ -197,9 +196,9 @@ public sealed class LlmPlanner : IPlanner
         sb.AppendLine("{\"steps\":[{\"tool\":\"<tool name>\",\"params\":{\"prompt\":\"<text>\",\"steps\":\"25\",\"denoise\":\"1.0\"},\"depends_on\":[]}]}");
         sb.AppendLine();
         sb.AppendLine("Example 1 - prompt \"replace the sky with a sunset\", mask present:");
-        sb.AppendLine("{\"steps\":[{\"tool\":\"inpaint\",\"params\":{\"prompt\":\"replace the sky with a sunset\",\"steps\":\"25\",\"denoise\":\"1.0\"}}]}");
+        sb.AppendLine("{\"steps\":[{\"tool\":\"QW21edit\",\"params\":{\"prompt\":\"replace the sky with a sunset\",\"steps\":\"25\",\"denoise\":\"1.0\"}}]}");
         sb.AppendLine("Example 2 - prompt \"make it look like an oil painting\", no mask:");
-        sb.AppendLine("{\"steps\":[{\"tool\":\"img2img\",\"params\":{\"prompt\":\"make it look like an oil painting\",\"steps\":\"25\",\"denoise\":\"1.0\"}}]}");
+        sb.AppendLine("{\"steps\":[{\"tool\":\"QW21edit\",\"params\":{\"prompt\":\"make it look like an oil painting\",\"steps\":\"25\",\"denoise\":\"1.0\"}}]}");
         return sb.ToString();
     }
 

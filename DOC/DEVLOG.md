@@ -1017,3 +1017,322 @@
   2. live LLM 对复杂 prompt 仍选单步 → 非缺陷，见上「原因」；多步解析另有单测覆盖。
 - **模板**：新增 `settings.ini.template`（入库；`settings.ini` 仍被 `.gitignore` 忽略），
   含 `[llm.planner]` 段与预留段注释。
+
+---
+
+## [Step 6（Executor）] - 2026-09-22
+
+> 命名说明：`FROZEN.md` 已另有一段「Step 6（推理管线优化：SageAttention + 长边 1536 +
+> Dynamic VRAM + Z30）」。本段是**另一条工作流**的 Step 6（Executor），按 `ACCEPTANCE.MD`
+> 规划表（Step 6 = Executor）执行；为免混淆，标题显式标注「Executor」。两段互不改动。
+
+### 目标
+
+实现 Executor（多步执行 + 进度 + 取消 + 重跑占位 + 串行队列），并附带一个最小真实工具
+`InpaintTool` 与真实 `ToolRegistry`。范围外：upscale / segment / outpaint 工具（Step 7）、
+`ITaskStore` 持久化、队列优先级、UI、PromptOptimizer、GPU 端到端测试（Z29 / Z30）。
+
+### 职责划分（本步澄清，重要）
+
+| 角色 | 归属 | 边界 |
+|---|---|---|
+| Planner | Agent | 三图 + prompt → `EditPlan`；`FallbackPlanner` 主力、`LlmPlanner` 可选增强；**不执行** |
+| Executor | Agent | 按 `EditPlan` 编排步骤、串联中间结果、汇报进度、取消；**只编排，不调推理** |
+| Tool | Tools | 执行单步编辑；`InpaintTool` 经注入的 `IInferenceClient` 发起推理 |
+| PromptOptimizer | 独立层（未实现） | pipeline 前置的 prompt 重写；复用 `LocalLlmClient`，**不侵入** Planner / Executor / IPC 契约；仅登记于 `OPTIMIZATION.md` §2.1 |
+
+关键约束：`Executor` **不直接**注入 / 调用 `IInferenceClient`（ARCHITECTURE §4）；推理一律由
+Tool 负责。`Agent` / `Tools` 只依赖 `Contracts`，互不引用。
+
+### 做了什么
+
+- **`ToolRegistry`**（`ZivAiEditor.Tools/ToolRegistry.cs`）：`ConcurrentDictionary<string,IEditTool>`
+  实现 `IToolRegistry`；`Register`（同名替换）/ `Unregister` / `Get` / `All`（快照）线程安全；
+  无额外抽象（§11）。删除 throw-only 的 `PlaceholderToolRegistry.cs`。
+- **`InpaintTool`**（`ZivAiEditor.Tools/InpaintTool.cs`）：`IEditTool` 最小真实工具。
+  - `Name="inpaint"`、`Description="局部重绘 / 编辑（主图 + 可选遮罩 + 提示词）"`、
+    `Capabilities=["inpaint","edit","background-replace"]`、`CanHandle(step.ToolName=="inpaint")`。
+  - 构造注入 `IInferenceClient`；解析 `ToolInput.Parameters`（`prompt` 必填，
+    `steps`/`seed`/`denoise` 可选，缺省 25 / -1 / 1.0）→ `SubmitInpaintAsync` → `ToolResult`。
+  - **输出路径（Z24）**：优先 `output_path` 参数；否则 `WorkingDirectory/{StepId}.png`
+    （多步可链式）；原图永不覆盖。`Metadata["task_id"]` 记录后端任务号。
+  - **进度**：私有 `StepProgressAdapter` 把 `InferenceProgress` **同步**转发为 `StepProgress`
+    （避免 `Progress<T>` 的异步 post 造成测试竞态）。
+- **`ExecutionQueue`**（`ZivAiEditor.Agent/ExecutionQueue.cs`）：`SemaphoreSlim(1,1)` 单槽，
+  `RunAsync<T>(Func<CancellationToken,Task<T>>, ct)` 串行执行，保证 Z18 GPU 不并发；
+  优先级留待后续。
+- **`Executor`**（`ZivAiEditor.Agent/Executor.cs`）：实现 `IExecutor`。
+  - 注入 `IToolRegistry` + `ExecutionQueue`；整个任务经队列串行。
+  - 按 `EditStep.Order` 排序；逐步：查 `DependsOn`（前置须 `Succeeded`，否则 `Skipped`）→
+    `IToolRegistry.Get(ToolName)` → 构造 `ToolInput`（`MainImagePath` 用上一步输出，首步用原图；
+    `WorkingDirectory` = 主图目录）→ `tool.ExecuteAsync` → 更新 `StepState`。
+  - 失败（抛异常或 `Success=false`）→ `TaskState.Failed`，保留已完成步骤的中间结果（Z24），
+    后续标 `Skipped`。
+  - 依赖未满足 → 该步 `Skipped`，任务最终 `Failed`；其余不依赖它的步骤继续。
+  - 全部成功 → `Succeeded`，`OutputImagePath` = 最后一步输出。
+  - 取消：`CancelAsync(taskId)` 取消在飞 `CancellationTokenSource`（`_running` 并发字典）；
+    外部 `ct` 取消同样生效；当前步 `Canceled`、后续 `Canceled`、任务 `Canceled`。
+  - `RerunAsync` → `NotSupportedException`（无持久化，留接口给后续 Step）。
+  - 进度：`TaskProgress` 汇报 queued / running / step / succeeded / failed；步骤进度按
+    `(index+fraction)/count` 映射为总进度。
+- **Backend 取消透传**（`IpcInferenceClient.SubmitInpaintAsync`）：本仓库的 submit 是**阻塞到
+  完成**，`ct` 取消原先只抛异常、不给 Python 发 `cancel`（后端会继续采样）。新增
+  `TryForwardCancelAsync`：`ct` 取消时用 `CancellationToken.None` 干净地发 `cancel` 帧并
+  等 `canceled` 确认，再抛 `OperationCanceledException(ct)`。不改 `IInferenceClient` 签名、
+  不改 IPC 消息、不改 Python。超时路径（非 `ct`）行为不变。
+- **App 装配**（`AppContext`）：构造真实 `ToolRegistry` + 注册 `InpaintTool(client)` +
+  `ExecutionQueue` + `Executor(tools, queue)`；`LlmPlanner` 改用真实注册表（能看到 `inpaint`）；
+  暴露 `Tools` / `Executor`；`Dispose` 级联释放队列。删除临时 `EmptyToolRegistry.cs`。
+- **测试**（`ZivAiEditor.Tests`，无 GPU / 无 LLM）：
+  - `ExecutorTests`（9）：单步成功、两步按序 + 中间结果传递、三步链路、失败保留中间结果、
+    `CancelAsync` 取消、外部 `ct` 取消、`DependsOn` 违规跳过、未知任务取消返回 false、
+    `RerunAsync` 抛 `NotSupportedException`。
+  - `ToolRegistryTests`（4）：注册 / 查找 / All、注销、同名替换、null 抛错。
+  - `InpaintToolTests`（6）：参数转发、输出路径、缺省按 `WorkingDirectory` 派生、进度转发、
+    缺 prompt 失败、`CanHandle`。
+  - `ExecutionQueueTests`（2）：串行（最大并发 = 1）、返回值。
+- **文档**：`FROZEN.md` 追加「Step 6（Executor）」；`ACCEPTANCE.MD` 追加 Step 6 验收；
+  `OPTIMIZATION.md` §2.1 追加 PromptOptimizer 定位；本记录。
+
+### 实测
+
+- **构建**：`dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- **测试**（按 Z29 只跑受影响类，**不跑 GPU**）：
+  `dotnet test --filter "ExecutorTests|ToolRegistryTests|InpaintToolTests|ExecutionQueueTests"`
+  → **21 通过 / 0 失败**（170 ms）。
+  邻近回归 `ContractsSmokeTests|PlannerTests|LocalLlmClientTests` → **22 通过 / 0 失败**。
+- **GPU 端到端**：`nvidia-smi` = **1587 MiB / 16376 MiB**（高于基线 ~900 MiB，且有
+  `python.exe` 进程），**不满足 Z30「GPU 空闲」**，且未获用户明确同意 → **跳过**，由 mock
+  测试覆盖编排逻辑。
+
+### 遇到的问题与解决
+
+1. **输出路径拿不到（冻结接口缺口）**
+   - 现象：`InferenceTaskHandle` 只有 `TaskId/Status/QueuePosition`，输出路径只在**具体类**
+     `IpcInferenceClient.ResultReceived`（Backend）上；Tools 层禁止引用 Backend，`GetTaskAsync`
+     又 `NotSupported`。
+   - 解决（经用户裁决）：工具 / 执行器**显式指定输出路径**——`output_path` 参数优先，否则
+     `WorkingDirectory/{StepId}.png`；后端保证新文件（Z24）。不改任何冻结契约。
+2. **取消到不了 Python**
+   - 现象：阻塞式 `SubmitInpaintAsync` 在 `ct` 取消时只抛异常，不发 `cancel`，后端继续采样。
+   - 解决（经用户裁决）：改 **Backend 内部**响应 `ct`（`TryForwardCancelAsync`），不改契约 /
+     Python / 消息类型。
+3. **进度回调竞态**
+   - 现象：用 `Progress<T>` 包装会把回调 post 到线程池，测试可能在 `ExecuteAsync` 返回后才
+     收到进度。
+   - 解决：`InpaintTool` / `Executor` 内部用私有同步适配器转发，测试用自定义同步 `IProgress`。
+4. **依赖违规的任务状态语义**
+   - 决定：某步因 `DependsOn` 未满足而 `Skipped` → 计划未完整执行 → `TaskState.Failed`；
+     不依赖它的后续步骤仍执行。已在 DEVLOG / ACCEPTANCE 记录。
+
+### 遗留项
+
+- **`RerunAsync` 未实现**：需 `ITaskStore` 持久化（后续 Step）。
+- **`ExecutionQueue` 无优先级**：交互优先留待后续 Step。
+- **`InpaintTool` 值域不校验**：`steps` / `denoise` 非法值回退默认；越界由后端兜底。
+- **`GetTaskAsync` 仍 `NotSupported`**。
+- **仅 `inpaint` 一个真实工具**：`FallbackPlanner` 无 mask 时会产出 `img2img` 计划，但当前
+  注册表无 `img2img` 工具 → 该步骤会因「no tool registered」失败。Step 7 补 `img2img` 等工具。
+- **GPU 端到端未跑**（Z30 不空闲 + 未获同意）。
+- **PromptOptimizer 未实现**：仅 `OPTIMIZATION.md` §2.1 登记接缝。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未修改** `C:\AI\ComfyUI_PIC`、`python/server/*`、`DOC/*.md` 的 Step 0–5 冻结行。
+- **未修改** `IExecutor` / `IEditTool` / `IToolRegistry` / `TaskState` / `StepState` 签名（G3）。
+- `IpcInferenceClient.SubmitInpaintAsync` 仅新增 `ct` 取消分支，签名与超时路径不变。
+
+### Step 6 收尾修正（2026-09-22）
+
+> 依据独立验证（只读代码 + 最小验证）确认的两个 Step 6 遗留假设，做两处小修正。
+> 不改任何契约 / 公开方法签名；不改 `python/server/*`；不跑 GPU。
+
+#### 修正 1：`InpaintTool` 的 `output_path` 守卫
+
+- **问题**：若 `ToolInput` 解析出的 `output_path` 与 `MainImagePath` 规范化后相同，
+  后端 `pipeline._resolve_output_path`（`python/server/pipeline.py:404-424`）会**忽略**该路径
+  并改用默认路径（Z24），于是 `ToolResult.OutputImagePath` 指向**不存在**的文件 →
+  多步链式传递断裂。
+- **修改**（`InpaintTool.cs`）：`ResolveOutputPath` 对 `output_path` 与 `MainImagePath` 做
+  **规范化比较**（`Path.GetFullPath` + `ToLowerInvariant`，Windows 不区分大小写；异常时回退
+  `OrdinalIgnoreCase`）；相同则改用 `WorkingDirectory/{StepId}.png`。抽出 `DeriveOutputPath`
+  与 `PathsEqual` 两个私有方法。
+- **日志**：`ZivAiEditor.Tools` 层**无日志基础设施**（grep `ILogger` / `Debug.WriteLine` 零命中），
+  按任务约定「若项目有日志基础设施」**不引入**日志，仅以代码注释说明。
+- **单测**：`InpaintToolTests.InpaintTool_OutputPath_Equals_MainImage_Falls_Back`（`[Theory]`
+  3 例：同路径、大小写不同、含 `..`），断言回退到 `WorkingDirectory/{StepId}.png` 且
+  `InpaintRequest.OutputPath` 同步回退。
+
+#### 修正 2：`FallbackPlanner` 无 mask 时改用 `inpaint`
+
+- **问题**：`FallbackPlanner` 无 mask 时产出 `ToolName="img2img"`，但 `ToolRegistry` 只注册
+  `"inpaint"`，`Executor` 按名字查表 → `no tool registered for 'img2img'` → 任务失败。
+- **证据**（只读验证）：`handlers.handle_submit` 不检查 `op`；`pipeline.run` 接受
+  `mask_path=null` 并走同一管线；无 mask 时 `pipeline._encode`（`pipeline.py:322-337`）的
+  latent 为 `torch.zeros` + 输入图作 `reference_latents`（**参考条件 T2I**），**不是经典
+  img2img**（非从输入图 latent 去噪）。
+- **修改**（`FallbackPlanner.cs`）：有 / 无 mask 统一 `ToolName = InpaintToolName`（`"inpaint"`）；
+  移除无用的 `useMask` 局部变量；更新类注释说明「后端自动走 reference-conditioned 路径」。
+  `ImageToImageToolName` 常量**保留但标记 `[Obsolete]`**（满足「不改公开签名」约束，避免破坏
+  外部引用；计划 Step 7 移除）。
+- **单测**：`PlannerTests.FallbackPlanner_No_Mask_Produces_Inpaint_Tool`（新）、
+  `FallbackPlanner_With_Mask_Produces_Inpaint_Tool`（保留语义并改名）；
+  `ResilientPlanner_Degrades_To_Fallback_On_Llm_Failure` 断言改为 `inpaint`。
+- **效果**：`FallbackPlanner` 无 mask 计划现在能被 `Executor` 用已注册的 `InpaintTool` 执行。
+  本段**推翻**上文「遗留项」中「无 mask 会因 no tool registered 失败」一条（该行不改，以本段为准）。
+
+#### 说明：无 mask 路径 ≠ 经典 img2img
+
+- 后端无 mask 路径是「零 latent + 参考图条件」，`denoise < 1.0` 也不是从输入图 latent 部分
+  去噪（起点仍是 zeros，只是减少有效步数）。
+- **「经典 img2img」**（从输入图 VAE latent 起点、`denoise<1` 部分重绘）是**候选特性**，需后端
+  `pipeline._encode` 增加 flag（无 mask 时也用 `references[0]` 作起点），**非当前范围**，另立
+  Step 并实测。已登记于 `OPTIMIZATION.md` §2.1.2。
+
+#### 实测
+
+- `dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test --filter "ExecutorTests|InpaintToolTests|PlannerTests"` → **31 通过 / 0 失败**
+  （ExecutorTests 9 + InpaintToolTests 9 + PlannerTests 13；无 GPU，Z29）。
+- 未修改 Contracts / `python/server/*` / `C:\AI\ComfyUI_PIC`；未跑 GPU 端到端。
+
+### Step 6 命名收尾修正（2026-09-22）
+
+> 依据调研 Qwen-Image-2.1 官方编辑机制与用户裁决：**编辑工具命名统一为 `QW21edit`**
+> （QW21 = Qwen-Image-2.1），有/无 mask 都是「编辑」，不是经典 img2img。
+
+#### 修正内容
+
+1. **工具重命名**：`InpaintTool` → `QwenImage21EditTool`（文件 `InpaintTool.cs` →
+   `QwenImage21EditTool.cs`）。
+   - `Name` / `ToolName` = **`"QW21edit"`**（替换 `"inpaint"`）。
+   - `Description` = 「Qwen-Image-2.1 图像编辑（有 mask 时局部编辑；无 mask 时参考条件编辑）」。
+   - `Capabilities` = `["edit","inpaint","reference-edit","background-replace"]`。
+   - `CanHandle` 仅接受 `"QW21edit"`；**不保留** `"inpaint"` / `"img2img"` 别名（旧 C# 工具名
+     不再注册）。
+   - **命名理由**：QW21 明确指向模型；「edit」统一有/无 mask 两种编辑语义，避免把无 mask 的
+     「参考条件编辑」误称为 inpaint 或 img2img。
+   - **IPC `op` 字段仍为 `"inpaint"`**：属传输层标识，与 C# 工具名分层；后端 dispatch 不区分
+     `op`（都走 `pipeline.run`），不改 `ipc-protocol.md`。
+2. **`FallbackPlanner`**：有/无 mask 均产出 `ToolName = "QW21edit"`（`EditToolName` 常量）；
+   **删除** `ImageToImageToolName` 与旧的 `InpaintToolName` 常量。有/无 mask 的区别由
+   `PlanRequest.Mask` → `ToolInput.Mask` 承载，Tool 与后端据此自动选择 pipeline 分支。
+3. **`output_path` 守卫**：`QwenImage21EditTool.ResolveOutputPath` 对 `output_path` 与
+   `MainImagePath` 做规范化比较（`Path.GetFullPath` + `StringComparison.OrdinalIgnoreCase`）；
+   相同则回退 `WorkingDirectory/{StepId}.png`（避免后端忽略该路径改用默认路径 → 回填路径与
+   磁盘不符、多步链式断裂）。`Tools` 层无日志基础设施，不引入日志（代码注释说明）。
+4. **`LlmPlanner` 提示词对齐（附加）**：系统提示词的工具清单 / 规则 / few-shot 由
+   `inpaint` / `img2img` 统一改为 `QW21edit`，避免 LLM 产出注册表中不存在的 `img2img`。
+   属提示词文案对齐，**非契约、非冻结行**。
+5. **App 装配**：`AppContext` 注册 `new QwenImage21EditTool(client)`；
+   `IToolRegistry.Get("QW21edit")` 命中，`Get("inpaint")` / `Get("img2img")` 返回 null。
+
+#### 与经典 img2img 的语义区分
+
+- 有 mask：输入图 latent + `noise_mask`（局部编辑）。
+- 无 mask：纯噪声起点（`torch.zeros`）+ `reference_latents` 注入（参考条件编辑）。
+- 经典 img2img（输入图 latent 起点 + `denoise<1` 部分去噪）**不实现**，登记为
+  `OPTIMIZATION.md` §2.1.2 候选（Qwen-Image 系列在 ComfyUI 有已知未解决问题
+  GitHub Issue #9702 / #10063）。
+
+#### 测试更新
+
+- `InpaintToolTests` → `QwenImage21EditToolTests`（重命名类与文件）。
+- 新增 `QwenImage21EditTool_CanHandle_QW21edit_Returns_True`、
+  `QwenImage21EditTool_OutputPath_Equals_MainImage_Falls_Back`（`[Theory]` 3 例）、
+  `Tool_Registers_Under_QW21edit_Only`。
+- `ExecutorTests` / `PlannerTests` / `ToolRegistryTests` 中的工具名同步更新；
+  `LlmPlanner` 的 JSON **解析**用例保留任意工具名（测的是解析，不是命名策略）。
+
+#### 实测
+
+- `dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test --filter "ExecutorTests|QwenImage21EditToolTests|ToolRegistryTests|PlannerTests"`
+  → **36 通过 / 0 失败**（无 GPU，Z29）。
+- 未修改 Contracts / `python/server/*` / `ipc-protocol.md` 消息类型 / `C:\AI\ComfyUI_PIC`；
+  未跑 GPU 端到端。
+
+---
+
+## [Step 6.5] - 2026-09-22
+
+### 目标
+
+让用户/UI 能指定**输出分辨率**（此前写死在 `python/server/config.py` 的
+`RESOLUTION_MODE=side` / `RESOLUTION_SIDE=1536`，C# 侧完全不感知），并引入 `ModelProfile`
+支持未来模型扩展。覆盖三层契约透传：`EditPlan.Resolution → ToolInput.Resolution →
+InpaintRequest.Resolution → IPC submit.payload.resolution → Python`。范围外：upscale / outpaint
+工具（Step 7）、UI（Step 9）、`IModelProfileProvider`（未来扩展点）。
+
+### 做了什么
+
+- **新增契约**（`ZivAiEditor.Contracts`，均**新增、非破坏性**）：
+  - `Imaging/ResolutionMode.cs`（`Side`/`Area`/`Scale`/`Explicit`）、
+    `Imaging/ResolutionPolicy.cs`（`Mode` + `Side?`/`Area?`/`Scale?`/`Width?`/`Height?` +
+    `MaxPixels` 默认 `4_194_304`）。
+  - `Models/ResolutionTier.cs`、`Models/AspectPreset.cs`、`Models/ModelProfile.cs`、
+    `Models/IModelProfileRegistry.cs`。
+  - 三层可选字段：`InpaintRequest.Resolution` / `EditPlan.Resolution` / `ToolInput.Resolution`
+    （`ResolutionPolicy?`，默认 `null`）。
+- **Backend**：
+  - `ModelProfileRegistry`（`IModelProfileRegistry`）：注册 Qwen-Image-2.1
+    （`NativeSide=2048` / `SafeMaxSide=2048` / `MinSide=512` / `MultipleOf=16`；
+    `Fast=1024` / `Balanced=1536` / `HighQuality=2048`；7 组比例预设，1:1=2048²、16:9=2752×1536 等）；
+    `Default` = Qwen-2.1；预留 `IModelProfileProvider` 扩展注释（不实现）。
+  - `ResolutionResolver.FromTier(tier, profile)`：`Custom` 抛 `ArgumentException`；否则
+    `Mode=Side` / `Side=TierSides[tier]` / `MaxPixels=SafeMaxSide²`。
+  - `IpcInferenceClient`：`SubmitPayload` 新增 `Resolution`；新增 `ResolutionPayload`
+    （snake_case `mode/side/area/scale/width/height/max_pixels`）并注册进 `IpcJsonContext`。
+- **Agent / Tools**：`Executor` 构造 `ToolInput` 时透传 `plan.Resolution`；
+  `QwenImage21EditTool` 透传 `InpaintRequest.Resolution = input.Resolution`。
+- **App**：`AppContext` 构造并暴露 `IModelProfileRegistry ModelProfiles`。
+- **Python**（`python/server/`）：
+  - `pipeline.py`：新增 `_resolution_specs` / `_normalize_payload_resolution`（支持
+    `side`/`area`/`scale`/`explicit`；`scale` 用输入图长边 × 倍数，简化为 side；`max_pixels`
+    超限经 `_clamp_*` 降级并记日志）；`_target_size_from_spec` / `_size_for_no_source` /
+    `_snap16` / `_spec_label`；`run`/`_run_once`/`encode_prompt`/`_encode` 改为传递 `spec`，
+    **保留 `encode_prompt(resolution, mode)` 旧签名**（新增 `spec=None`，向后兼容）。
+  - `handlers.py`：`_run_submit` 记一条 resolution 日志。
+  - `config.py`：`PROTOCOL_VERSION` `0.5 → 0.6`。
+- **跨进程契约**：`contracts/ipc-protocol.md` `ipc_version 0.5 → 0.6`；§3.4 新增
+  `submit.payload.resolution` 可选字段（含结构、四种 mode、`max_pixels` 语义）；
+  §7 新增「0.5 → 0.6 变更点」。
+- **测试**（无 GPU）：`ResolutionPolicyTests`（5）、`ModelProfileRegistryTests`（4）、
+  `QwenImage21EditToolTests` +2（`Execute_Forwards_Resolution_To_InpaintRequest` /
+  `Execute_Null_Resolution_Remains_Null`）、`ExecutorTests` +2
+  （`Plan_With_Resolution_Transfers_To_ToolInput` / `Plan_Without_Resolution_Leaves_Null`）。
+
+### 实测
+
+- `dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test --filter "ResolutionPolicyTests|ModelProfileRegistryTests|QwenImage21EditToolTests|ExecutorTests|ToolRegistryTests|ContractsSmokeTests"`
+  → **39 通过 / 0 失败**（43 ms；无 GPU，Z29）。
+- Python `py_compile`（`pipeline.py` / `handlers.py` / `config.py`）通过。
+- **未跑 GPU 端到端**（Z29 / Z30）；Python 侧 resolution 行为为**只读代码确认**，未实跑。
+
+### 遇到的问题与解决
+
+1. **`encode_prompt` 签名兼容**：`FROZEN` Step 6.1 记录了
+   `pipeline.encode_prompt(...)` 追加可选 `mode=None` 的接缝。本步改为传 `spec` 时，
+   **保留旧参数 `resolution` / `mode` 并新增 `spec=None`**，旧调用方不受影响。
+2. **Python 无状态**：tier→数值的翻译全部在 C# `ResolutionResolver` 完成，Python 只按
+   `mode` + 数值执行（Z23）。
+3. **IPC 透传缺口**：任务未显式列出 `IpcInferenceClient`，但契约字段必须经其 `SubmitPayload`
+   序列化才能真正到达 Python；已一并补充 `ResolutionPayload` 与 `IpcJsonContext` 注册。
+
+### 遗留项
+
+- **upscale / outpaint 未实现**（Step 7）：`Scale` / `Explicit` 模式已在契约与 Python 侧就绪，
+  但 C# 侧暂无对应 resolver / 工具；`UpscaleResolver` / `OutpaintResolver` 按 §11 不预建。
+- **`IModelProfileProvider` 未实现**（未来扩展点，仅注释）。
+- **`wh_ratio` / `ratio_follow`**（提示词重写产物）与本步的 `ResolutionPolicy` 尚未打通。
+- **UI tier 选择**未实现（Step 9）。
+- Python resolution 行为**未做 GPU 实测**（Z29/Z30）。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未修改** `IInferenceClient` / `IExecutor` / `IEditTool` / `IToolRegistry` 签名；
+  `InpaintRequest` / `EditPlan` / `ToolInput` **只加可选字段**。
+- **未修改** `C:\AI\ComfyUI_PIC`；未跑 `dotnet test` 全量（Z29）。

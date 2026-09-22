@@ -851,3 +851,156 @@ public interface ILlmClient : IDisposable
 - **Step 3.4 关系**：Step 3.4「运行时默认关闭 smart memory」**继续有效**（`DISABLE_SMART_MEMORY`
   维持 `1`，与 Dynamic VRAM 无冲突，实测生效）。
 - **影响哪些接口**：无契约变更；仅运行时显存/加载策略（`config` / `model_loader`）。
+
+---
+
+## Step 6（Executor）（日期：2026-09-22）
+
+> **命名说明**：上方「Step 6（推理管线优化）」是另一条工作流（SageAttention / 长边 1536 /
+> Dynamic VRAM / Z30）；本段是 `ACCEPTANCE.MD` 规划表所指的 **Step 6 = Executor**
+> （多步执行 + 进度 + 取消 + 重跑占位 + 串行队列）。**两段互不改动**，标题显式标注
+> 「Executor」以区分。本段**无新增契约**，不改 Step 0–5 已冻结行。
+
+### 6E.1 无新增契约（冻结确认）
+
+本步**不新增、不修改**任何契约。`IExecutor` / `IEditTool` / `IToolRegistry` / `TaskState` /
+`StepState` / `TaskProgress` / `StepProgress` / `ToolInput` / `ToolResult` / `IInferenceClient`
+签名与 Step 0 0.3 / Step 1.2 **完全一致**。
+
+### 6E.2 实现清单（冻结）
+
+| 类 | 文件 | 职责 |
+|---|---|---|
+| `ToolRegistry` | `ZivAiEditor.Tools/ToolRegistry.cs` | `ConcurrentDictionary` 实现的 `IToolRegistry`；`Register`（同名替换）/ `Unregister` / `Get` / `All`（快照）线程安全；无额外抽象（§11） |
+| `InpaintTool` | `ZivAiEditor.Tools/InpaintTool.cs` | `IEditTool`；`Name="inpaint"`；注入 `IInferenceClient`；`ToolInput.Parameters`（`prompt` 必填，`steps`/`seed`/`denoise` 可选）→ `SubmitInpaintAsync` → `ToolResult`；输出新文件（Z24，`output_path` 优先，否则 `WorkingDirectory/{StepId}.png`）；同步转发 `InferenceProgress` → `StepProgress` |
+| `ExecutionQueue` | `ZivAiEditor.Agent/ExecutionQueue.cs` | `SemaphoreSlim(1,1)` 单槽串行（Z18）；`RunAsync<T>`；优先级留待后续 |
+| `Executor` | `ZivAiEditor.Agent/Executor.cs` | `IExecutor`；注入 `IToolRegistry` + `ExecutionQueue`；按 `Order` 编排、串联中间结果、`DependsOn` 校验、失败保留中间结果、取消、进度；`RerunAsync` → `NotSupportedException`；**不注入 / 不调 `IInferenceClient`** |
+| （修改）`IpcInferenceClient.SubmitInpaintAsync` | `ZivAiEditor.Backend/IpcInferenceClient.cs` | 新增 `ct` 取消分支：用 `CancellationToken.None` 发 `cancel` 帧并等 `canceled` 后抛 `OperationCanceledException(ct)`；**签名不变**、超时路径不变 |
+| （删除）`PlaceholderToolRegistry` / `PlaceholderExecutor` / `EmptyToolRegistry` | — | 由真实实现取代 |
+
+- **App 装配**：`AppContext` 构造真实 `ToolRegistry` + 注册 `InpaintTool` + `ExecutionQueue` +
+  `Executor`，暴露 `Tools` / `Executor`；`LlmPlanner` 改用真实注册表。
+
+### 6E.3 职责划分（冻结）
+
+`Planner`（生成 `EditPlan`）/ `Executor`（只编排，不调推理）/ `Tool`（经 `IInferenceClient`
+执行单步）/ `PromptOptimizer`（独立前置层，未实现，仅登记 `OPTIMIZATION.md` §2.1）四者边界
+见 `DEVLOG.md`「Step 6（Executor）」的职责划分表。
+
+### 6E.4 测试结果（冻结）
+
+- `dotnet build ZIV.AI.sln -c Release`：**0 错误 0 警告**。
+- `dotnet test`（按 Z29 只跑受影响类，无 GPU）：
+  `ExecutorTests` + `ToolRegistryTests` + `InpaintToolTests` + `ExecutionQueueTests`
+  → **21 通过 / 0 失败**。
+- GPU 端到端**未跑**（`nvidia-smi` = 1587 MiB，不满足 Z30；未获用户明确同意）。
+
+### 6E.5 收尾修正（2026-09-22，追加）
+
+> 依据独立只读验证确认的两个遗留假设，做两处小修正。**无契约变更**，不改任何公开方法签名，
+> 不改 Step 0–5 冻结行，不改 `python/server/*`。详见 `DEVLOG.md`「Step 6 收尾修正」。
+
+1. **`InpaintTool` 的 `output_path` 守卫**：`output_path` 与 `MainImagePath` 规范化后相同
+   （`Path.GetFullPath` + 不区分大小写）时，后端会忽略该路径并改用默认路径，导致回填路径
+   与磁盘文件不符、多步链式断裂。现改为回退 `WorkingDirectory/{StepId}.png`。
+   `IEditTool` / `ToolInput` / `ToolResult` 签名不变。
+2. **`FallbackPlanner` 无 mask 改用 `inpaint`**：有 / 无 mask 统一 `ToolName="inpaint"`，
+   使 `Executor` 能用已注册的 `InpaintTool` 执行无 mask 计划。`ImageToImageToolName` 常量
+   **保留并标记 `[Obsolete]`**（不改公开签名；计划 Step 7 移除）。
+   `IPlanner.PlanAsync` 签名不变。
+3. **行为澄清（冻结记录）**：后端无 mask 路径是「零 latent + 参考图条件」
+   （`pipeline._encode`），**不是经典 img2img**；`denoise<1` 亦非从输入图 latent 部分去噪。
+   「经典 img2img」为**候选特性**（需后端 `_encode` 加 flag），非当前范围，
+   登记于 `OPTIMIZATION.md` §2.1.2。
+
+- **收尾测试结果**：`dotnet test --filter "ExecutorTests|InpaintToolTests|PlannerTests"`
+  → **31 通过 / 0 失败**（无 GPU）。
+
+### 6E.6 工具命名统一修订（2026-09-22，追加）
+
+> 依据 Qwen-Image-2.1 编辑机制调研与用户裁决：编辑工具命名**统一为 `QW21edit`**
+> （QW21 = Qwen-Image-2.1）。**无契约变更**（`IEditTool` / `IToolRegistry` / `IExecutor` 签名
+> 不变），不改 Step 0–5 冻结行，不改 `python/server/*`，不改 `ipc-protocol.md` 消息类型。
+> 本段**取代** 6E.2 中 `InpaintTool` 的工具名与 6E.5 第 2 条的工具名措辞（旧行不改，以本段为准）。
+
+1. **新增工具标识 `"QW21edit"`（替换 `"inpaint"`）**：类 `QwenImage21EditTool`，文件
+   `ZivAiEditor.Tools/QwenImage21EditTool.cs`（由 `InpaintTool.cs` 重命名）；
+   `Name` / `ToolName = "QW21edit"`；
+   `Description = "Qwen-Image-2.1 图像编辑（有 mask 时局部编辑；无 mask 时参考条件编辑）"`；
+   `Capabilities = ["edit","inpaint","reference-edit","background-replace"]`。
+   `CanHandle` 仅接受 `"QW21edit"`（**不保留** `"inpaint"` / `"img2img"` 别名）。
+2. **`FallbackPlanner` 统一产出 `QW21edit`**：常量 `EditToolName = "QW21edit"`；
+   删除 `ImageToImageToolName` 与旧 `InpaintToolName`。`IPlanner.PlanAsync` 签名不变。
+   有 / 无 mask 的区别由 `PlanRequest.Mask` → `ToolInput.Mask` 承载。
+3. **IPC `op` 保持 `"inpaint"`**：传输层标识，与 C# 工具名分层；不改 `ipc-protocol.md`。
+4. **语义澄清（冻结）**：`QW21edit` 有 mask = 输入图 latent + `noise_mask`（局部编辑）；
+   无 mask = 纯噪声（`torch.zeros`）+ `reference_latents`（**参考条件编辑**）。
+   **经典 img2img**（输入图 latent + `denoise<1` 部分去噪）**不实现**，登记为
+   `OPTIMIZATION.md` §2.1.2 候选（Qwen-Image 系列在 ComfyUI 有已知未解决问题
+   GitHub Issue **#9702** / **#10063**）。
+5. **`LlmPlanner` 提示词对齐（附加，非契约）**：工具清单 / 规则 / few-shot 统一为 `QW21edit`。
+6. **App 装配**：`AppContext` 注册 `QwenImage21EditTool`；`Get("QW21edit")` 命中，
+   `Get("inpaint")` / `Get("img2img")` 返回 null。
+
+- **命名收尾测试结果**：
+  `dotnet test --filter "ExecutorTests|QwenImage21EditToolTests|ToolRegistryTests|PlannerTests"`
+  → **36 通过 / 0 失败**（无 GPU）。
+
+---
+
+## Step 6.5（日期：2026-09-22）
+
+> **修订说明（Step 6.5 · 分辨率策略 ResolutionPolicy + ModelProfile）**
+>
+> 本段为 Step 6.5 追加。目标：让用户/UI 能指定输出分辨率——此前分辨率写死在
+> `python/server/config.py`（`RESOLUTION_MODE=side` / `RESOLUTION_SIDE=1536`），C# 侧完全不感知。
+> 影响 QW21edit（输出清晰度）、upscale（放大倍数）、outpaint（扩图尺寸）三类工具。
+> **不改动 Step 0–6 已冻结行的既有成员**；契约变更为**新增可选字段 / 新类型**（非破坏性）。
+> 设计裁决：① IPC 传**绝对分辨率**（C# 翻译 tier → 数值；Python 无状态，Z23）；
+> ② Qwen-2.1 三档 Fast=1024 / Balanced=1536 / HighQuality=2048；
+> ③ 独立 Step 6.5，不与 Step 7 工具混合；④ 引入 `ModelProfile` 支持未来模型扩展；
+> ⑤ UI 不在本步范围（Step 9）。
+
+### 6.5.1 新增契约（冻结）
+
+| 类型 | 文件 | 说明 |
+|---|---|---|
+| `ResolutionMode`（枚举） | `Contracts/Imaging/ResolutionMode.cs` | `Side` / `Area` / `Scale` / `Explicit` |
+| `ResolutionPolicy`（值对象） | `Contracts/Imaging/ResolutionPolicy.cs` | `Mode`；`Side?` / `Area?` / `Scale?` / `Width?` / `Height?`；`MaxPixels`（默认 `4_194_304` = 2048²，OOM 安全上限） |
+| `ResolutionTier`（枚举） | `Contracts/Models/ResolutionTier.cs` | `Fast` / `Balanced` / `HighQuality` / `Custom` |
+| `AspectPreset`（值对象） | `Contracts/Models/AspectPreset.cs` | `Name` / `Width` / `Height` |
+| `ModelProfile`（值对象） | `Contracts/Models/ModelProfile.cs` | `ModelId` / `DisplayName` / `NativeSide` / `SafeMaxSide` / `MinSide` / `MultipleOf` / `TierSides` / `Presets` |
+| `IModelProfileRegistry`（接口） | `Contracts/Models/IModelProfileRegistry.cs` | `ModelProfile? Get(string)`；`ModelProfile Default`；`IReadOnlyList<ModelProfile> All` |
+
+### 6.5.2 三层可选字段扩展（冻结，非破坏性）
+
+- `InpaintRequest.Resolution`（`ResolutionPolicy?`，默认 `null`）
+- `EditPlan.Resolution`（`ResolutionPolicy?`，默认 `null`）
+- `ToolInput.Resolution`（`ResolutionPolicy?`，默认 `null`）
+
+**默认 `null` = 不传 = 各层使用缺省行为（Python 用 `config` 默认 1536）**，旧调用方行为与 Step 6
+完全一致。`IInferenceClient` / `IExecutor` / `IEditTool` / `IToolRegistry` 签名不变。
+
+### 6.5.3 实现清单（冻结）
+
+| 类 / 改动 | 文件 | 职责 |
+|---|---|---|
+| `ModelProfileRegistry` | `ZivAiEditor.Backend/ModelProfileRegistry.cs` | `IModelProfileRegistry` 实现；注册 Qwen-Image-2.1（NativeSide/SafeMaxSide=2048、MinSide=512、MultipleOf=16、三档 1024/1536/2048、7 组比例预设）；`Default` = Qwen-2.1；预留 `IModelProfileProvider` 扩展位（不实现） |
+| `ResolutionResolver` | `ZivAiEditor.Backend/ResolutionResolver.cs` | `FromTier(tier, profile)`：`Custom` 抛 `ArgumentException`；否则返回 `Mode=Side`、`Side=TierSides[tier]`、`MaxPixels=SafeMaxSide²` |
+| （修改）`IpcInferenceClient` | `ZivAiEditor.Backend/IpcInferenceClient.cs` | `SubmitPayload` 新增 `Resolution`；新增 `ResolutionPayload`（snake_case：`mode/side/area/scale/width/height/max_pixels`）并注册进 `IpcJsonContext` |
+| （修改）`Executor` | `ZivAiEditor.Agent/Executor.cs` | 构造 `ToolInput` 时透传 `plan.Resolution` |
+| （修改）`QwenImage21EditTool` | `ZivAiEditor.Tools/QwenImage21EditTool.cs` | `InpaintRequest.Resolution = input.Resolution` |
+| （修改）`AppContext` | `ZivAiEditor.App/AppContext.cs` | 构造并暴露 `IModelProfileRegistry ModelProfiles` |
+| （修改）Python | `python/server/pipeline.py` / `handlers.py` / `config.py` | 读 `submit.payload.resolution`（`side`/`area`/`scale`/`explicit`），覆盖 `config` 默认；`max_pixels` 超限降级并记日志；无 payload 时用 config 默认；`PROTOCOL_VERSION` 0.5 → 0.6 |
+| 跨进程契约 | `contracts/ipc-protocol.md` | `ipc_version 0.5 → 0.6`；`submit.payload.resolution` 可选字段（§3.4 / §7） |
+
+- **边界**：`tier → Side` 仅用于 QW21edit；upscale 用 `Scale`、outpaint 用 `Explicit`（Step 7 再定），
+  **不引入** `UpscaleResolver` / `OutpaintResolver`（ARCHITECTURE.md §11）。
+
+### 6.5.4 测试结果（冻结）
+
+- `dotnet build ZIV.AI.sln -c Release`：**0 错误 0 警告**。
+- `dotnet test`（按 Z29 只跑受影响类，无 GPU）：`ResolutionPolicyTests`（5）+
+  `ModelProfileRegistryTests`（4）+ `QwenImage21EditToolTests`（12）+ `ExecutorTests`（11）+
+  `ToolRegistryTests`（4）+ `ContractsSmokeTests`（3）→ **39 通过 / 0 失败**。
+- Python 侧 `py_compile` 通过；**未跑 GPU 端到端**（Z29 / Z30）。

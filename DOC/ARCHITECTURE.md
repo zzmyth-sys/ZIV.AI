@@ -431,7 +431,7 @@ ZIV.AI.sln
   2. `SqliteTaskStore`（打开 / 建库 / 迁移）
   3. `PythonProcessManager`（探测端口 / 启动后端，可延迟）
   4. `HttpInferenceClient`（依赖 3）
-  5. `ToolRegistry`（注册工具）
+  5. `ToolRegistry`（注册工具）+ `ModelProfileRegistry`（模型分辨率档位，Step 6.5）
   6. `Planner`（`LlmPlanner` + `FallbackPlanner`）→ `Executor` → `Agent`
   7. `AppContext` 组装 → `new AiEditorWindow(context)`
 - **Python 进程管理**：

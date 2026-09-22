@@ -41,6 +41,45 @@
   段注释。
 - **不引入**：`ILlmClientFactory`、多实现框架等抽象；按场景构造 options 即可。
 
+### 2.1.1 PromptOptimizer 定位（Step 6 登记）
+
+> 登记于 Step 6（Executor）；**仅记录定位与接缝，不实现**（ARCHITECTURE.md §11）。
+
+- **独立层，不是 Planner / Executor 的一部分**：PromptOptimizer 是 pipeline 的**前置步骤**，
+  只负责把用户的简短输入**重写**为更详细、结构化的编辑提示词；它**不生成 `EditPlan`**
+  （那是 Planner）、**不执行步骤**（那是 Executor）、**不改变 IPC 契约**。
+- **实现方式**：调用 `ZivAiEditor.Backend.LocalLlmClient`（`ILlmClient`）重写 prompt；
+  与 Planner 一样，C# 不加载 LLM 运行时（Z17），客户端由 App 层装配。
+- **接入点（二选一，后续 Step 决定）**：
+  1. **pipeline 的 `encode_prompt` 之前**（Python 侧）——在文本条件编码前对 prompt 做重写；
+  2. **C# 侧提交前预处理**——在调用 `Executor.ExecuteAsync` 之前，先经优化器得到重写后的
+     prompt，再交给 Planner / Tool。
+  推荐 C# 侧：不侵入 Python、便于复用 `LocalLlmClient` 与独立 `LlmClientOptions`。
+- **典型用法示例**：用户输入「换背景为茶肆」→ 优化器扩展为
+  「古代中式茶肆室内，木质梁柱与灯笼，暖黄灯光，背景虚化，保留前景人物与服装细节」，
+  再交给 Planner / `QW21edit`。
+- **边界**：不新增契约；不改 Planner / Executor / `IInferenceClient`；不引入 factory
+  （按场景构造 `LlmClientOptions`，`Temperature ≈ 0.7`）。
+
+### 2.1.2 经典 img2img（从输入图 latent 部分去噪）（候选，非当前范围）
+
+> 登记于 Step 6 收尾修正；**仅登记，不实现**（ARCHITECTURE.md §11 反过度设计）。
+
+- **机制**：VAE encode 输入图作为**起始 latent**，`denoise < 1.0` 控制保留程度（部分去噪，
+  保留原图结构）。
+- **与当前 `QW21edit` 的区别**：
+  - 当前**有 mask** 路径 = 输入图 latent + `noise_mask`（局部编辑）；
+  - 当前**无 mask** 路径 = 纯噪声起点（`torch.zeros`）+ `reference_latents` 注入
+    （**参考条件编辑**）；
+  - **经典 img2img** = 输入图 latent 起点 + 部分去噪（保留原图结构）。
+  - 三者都是「编辑」语义的不同实现；`QW21edit` **不包含**经典 img2img。
+- **引入方式**：`pipeline._encode()` 增加显式 mode 分支 + IPC `submit.payload` 增加可选
+  `mode` 字段（属跨进程契约修订，需走修订流程并实测画质 / 显存 / 耗时）。
+- **风险**：Qwen-Image 系列在 ComfyUI 上有**已知未解决问题**
+  （GitHub Issue **#9702** / **#10063**），社区尚未解决。
+- **状态**：**待社区成熟后引入，不阻塞主线**。
+- **关联**：Step 6 的 `QW21edit` 命名与语义均与此区分；无 mask 路径当前行为即参考条件编辑。
+
 ## 3. 优化叠加预期
 
 > 叠加为**乘法估算**，实际受显存、批大小、调度影响，**必须实测**。

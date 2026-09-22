@@ -2,8 +2,12 @@ using System;
 using System.Diagnostics;
 using ZivAiEditor.Agent;
 using ZivAiEditor.Backend;
+using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Inference;
+using ZivAiEditor.Contracts.Models;
 using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Tools;
+using ZivAiEditor.Tools;
 
 namespace ZivAiEditor.App;
 
@@ -22,16 +26,25 @@ internal sealed class AppContext : IDisposable
         IpcInferenceClient client,
         HttpClient llmHttp,
         LocalLlmClient llmClient,
-        IPlanner planner)
+        IPlanner planner,
+        IToolRegistry tools,
+        IExecutor executor,
+        ExecutionQueue executionQueue,
+        IModelProfileRegistry modelProfiles)
     {
         Backend = backend;
         Client = client;
         _llmHttp = llmHttp;
         LlmClient = llmClient;
         Planner = planner;
+        Tools = tools;
+        Executor = executor;
+        _executionQueue = executionQueue;
+        ModelProfiles = modelProfiles;
     }
 
     private readonly HttpClient _llmHttp;
+    private readonly ExecutionQueue _executionQueue;
 
     public PythonProcessManager Backend { get; }
 
@@ -41,6 +54,15 @@ internal sealed class AppContext : IDisposable
     public ILlmClient LlmClient { get; }
 
     public IPlanner Planner { get; }
+
+    /// <summary>Registered edit tools (Step 6: the real <c>ToolRegistry</c>).</summary>
+    public IToolRegistry Tools { get; }
+
+    /// <summary>Multi-step executor over the shared serial queue (Z18).</summary>
+    public IExecutor Executor { get; }
+
+    /// <summary>Model resolution profiles (Step 6.5); the UI maps a tier via <see cref="ResolutionTier"/>.</summary>
+    public IModelProfileRegistry ModelProfiles { get; }
 
     public static AppContext Create()
     {
@@ -56,6 +78,14 @@ internal sealed class AppContext : IDisposable
         var backend = new PythonProcessManager(options);
         var client = new IpcInferenceClient(backend, ownsProcess: true);
 
+        // Step 6: real tool registry + single serial execution queue (Z18).
+        var tools = new ToolRegistry();
+        tools.Register(new QwenImage21EditTool(client));
+
+        var executionQueue = new ExecutionQueue();
+        var executor = new Executor(tools, executionQueue);
+        var modelProfiles = new ModelProfileRegistry();
+
         // LocalLlmClient applies its own per-call timeout, so the shared
         // HttpClient stays timeout-free (single source of truth).
         var llmHttp = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
@@ -63,7 +93,7 @@ internal sealed class AppContext : IDisposable
         // Later extension point: prompt-rewriting / multi-image scenarios can
         // build additional LocalLlmClient instances here with their own
         // LlmClientOptions (e.g. higher temperature). Do not implement those
-        // scenarios in Step 5 (ARCHITECTURE.md §11).
+        // scenarios in Step 6 (ARCHITECTURE.md §11).
         var plannerOptions = new LlmClientOptions
         {
             Endpoint = settings.LlmPlanner.Endpoint,
@@ -76,11 +106,11 @@ internal sealed class AppContext : IDisposable
 
         var plannerLlm = new LocalLlmClient(llmHttp, plannerOptions, ownsHttpClient: false);
         var planner = new ResilientPlanner(
-            new LlmPlanner(plannerLlm, new EmptyToolRegistry()),
+            new LlmPlanner(plannerLlm, tools),
             new FallbackPlanner(),
             ex => Debug.WriteLine($"[planner] degraded to fallback: {ex.Message}"));
 
-        return new AppContext(backend, client, llmHttp, plannerLlm, planner);
+        return new AppContext(backend, client, llmHttp, plannerLlm, planner, tools, executor, executionQueue, modelProfiles);
     }
 
     public void Dispose()
@@ -95,5 +125,6 @@ internal sealed class AppContext : IDisposable
         _llmHttp.Dispose();
         Client.Dispose();
         Backend.Dispose();
+        _executionQueue.Dispose();
     }
 }

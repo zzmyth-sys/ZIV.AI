@@ -15,6 +15,7 @@ never touches the heavy stack.
 
 import gc
 import logging
+import math
 import os
 import random
 import time
@@ -56,26 +57,27 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
     # `clip` (strength_clip) takes effect on the conditioning.
     model, clip = pipeline_hooks.apply_pre_sampling_hooks(model, clip, request)
 
-    mode = config.RESOLUTION_MODE
-    candidates = _resolution_candidates(mode)
+    # Step 6.5: an optional payload `resolution` overrides the config default;
+    # absent -> the config default path (backward compatible with ipc 0.5).
+    specs = _resolution_specs(request, image_path)
     oom_types = _oom_types()
     last_error = None
-    for index, resolution in enumerate(candidates):
+    for index, spec in enumerate(specs):
         try:
             if config.FORCE_OOM and index == 0:
                 raise torch.cuda.OutOfMemoryError("forced OOM (ZIV_AI_FORCE_OOM)")
             return _run_once(
                 model, clip, vae, prompt, image_path, mask_path, output_path,
-                resolution, mode, steps, seed, denoise, started,
+                spec, steps, seed, denoise, started,
                 on_progress, on_preview, poll_cancel,
             )
         except oom_types as exc:
             last_error = exc
             _LOG.warning(
-                "OOM at resolution %d (attempt %d/%d); falling back: %s",
-                resolution, index + 1, len(candidates), exc,
+                "OOM at resolution %s (attempt %d/%d); falling back: %s",
+                _spec_label(spec), index + 1, len(specs), exc,
             )
-            _emit(on_progress, 0, 0, 0.0, "sampling", "oom_fallback:%d" % resolution)
+            _emit(on_progress, 0, 0, 0.0, "sampling", "oom_fallback:%s" % _spec_label(spec))
             _free_vram()
 
     if last_error is not None:
@@ -84,7 +86,7 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
 
 
 def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
-              resolution, mode, steps, seed, denoise, started,
+              spec, steps, seed, denoise, started,
               on_progress, on_preview, poll_cancel):
     import comfy.model_management as mm
     import comfy.sample
@@ -96,7 +98,7 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
 
     # Stage 2: encode the prompt + optional reference image (clip is patched).
     positive, negative, latent_image, mask = encode_prompt(
-        clip, vae, prompt, image_path, mask_path, resolution, mode
+        clip, vae, prompt, image_path, mask_path, spec=spec
     )
 
     previewer = preview_module.get_previewer(model)
@@ -143,14 +145,18 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
         "seed": seed,
         "width": width,
         "height": height,
-        "resolution": resolution,
+        "resolution": spec.get("value", spec.get("width")),
         "duration_ms": int(round((time.time() - started) * 1000)),
     }
 
 
-def encode_prompt(clip, vae, prompt, image_path, mask_path, resolution=None, mode=None):
-    """Pipeline stage: conditioning + latents from the prompt / reference."""
-    return _encode(clip, vae, prompt, image_path, mask_path, resolution, mode)
+def encode_prompt(clip, vae, prompt, image_path, mask_path, resolution=None, mode=None, spec=None):
+    """Pipeline stage: conditioning + latents from the prompt / reference.
+
+    ``spec`` (Step 6.5) is a normalized resolution dict; when omitted the legacy
+    ``resolution`` / ``mode`` arguments are used (backward compatible).
+    """
+    return _encode(clip, vae, prompt, image_path, mask_path, resolution, mode, spec)
 
 
 def sample(model, positive, negative, latent, noise, steps, denoise, mask, seed, callback):
@@ -230,6 +236,160 @@ def _resolution_candidates(mode=None):
     return ordered or [upper]
 
 
+def _resolution_specs(request, image_path):
+    """Normalized resolution candidates for one run (Step 6.5).
+
+    A payload ``resolution`` wins and yields a single spec; otherwise the config
+    default path yields its OOM fallback ladder (backward compatible).
+    """
+    spec = _normalize_payload_resolution(request.get("resolution"), image_path)
+    if spec is not None:
+        return [spec]
+    mode = config.RESOLUTION_MODE
+    return [{"mode": mode, "value": int(v)} for v in _resolution_candidates(mode)]
+
+
+def _normalize_payload_resolution(payload, image_path):
+    """Turn ``submit.payload.resolution`` into a spec, or None to use the default.
+
+    Supported modes: ``side`` / ``area`` / ``scale`` (input long edge × scale) /
+    ``explicit`` (width × height). Values above ``max_pixels`` are clamped.
+    """
+    if not isinstance(payload, dict):
+        return None
+
+    mode = str(payload.get("mode") or "").strip().lower()
+    max_pixels = _positive_int(payload.get("max_pixels"))
+
+    if mode == "side":
+        side = _positive_int(payload.get("side"))
+        if side is None:
+            return None
+        return {"mode": "side", "value": _clamp_side(side, max_pixels)}
+
+    if mode == "area":
+        area = _positive_int(payload.get("area"))
+        if area is None:
+            return None
+        return {"mode": "area", "value": _clamp_area(area, max_pixels)}
+
+    if mode == "scale":
+        try:
+            scale = float(payload.get("scale"))
+        except (TypeError, ValueError):
+            return None
+        if scale <= 0:
+            return None
+        source_side = _source_long_edge(image_path)
+        if source_side is None:
+            _LOG.warning("resolution scale requested but input size is unknown; using default")
+            return None
+        side = _clamp_side(int(round(source_side * scale)), max_pixels)
+        _LOG.info("resolution scale=%.3f on source long edge %d -> side=%d", scale, source_side, side)
+        return {"mode": "side", "value": side}
+
+    if mode == "explicit":
+        width = _positive_int(payload.get("width"))
+        height = _positive_int(payload.get("height"))
+        if width is None or height is None:
+            return None
+        width, height = _clamp_explicit(width, height, max_pixels)
+        return {"mode": "explicit", "width": width, "height": height}
+
+    if mode:
+        _LOG.warning("unknown resolution mode %r; using config default", mode)
+    return None
+
+
+def _positive_int(value):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _clamp_side(side, max_pixels):
+    side = max(32, int(side))
+    if max_pixels:
+        limit = max(32, int(math.isqrt(int(max_pixels))))
+        if side > limit:
+            _LOG.warning(
+                "resolution side %d exceeds max_pixels %d; clamped to %d",
+                side, max_pixels, limit,
+            )
+            side = limit
+    return side
+
+
+def _clamp_area(area, max_pixels):
+    area = max(32 * 32, int(area))
+    if max_pixels and area > max_pixels:
+        _LOG.warning("resolution area %d exceeds max_pixels %d; clamped", area, max_pixels)
+        area = int(max_pixels)
+    return area
+
+
+def _clamp_explicit(width, height, max_pixels):
+    width = max(32, int(width))
+    height = max(32, int(height))
+    if max_pixels and width * height > max_pixels:
+        factor = (float(max_pixels) / float(width * height)) ** 0.5
+        clamped_w = max(32, int(width * factor))
+        clamped_h = max(32, int(height * factor))
+        _LOG.warning(
+            "resolution %dx%d exceeds max_pixels %d; clamped to %dx%d",
+            width, height, max_pixels, clamped_w, clamped_h,
+        )
+        width, height = clamped_w, clamped_h
+    return width, height
+
+
+def _source_long_edge(path):
+    if not path:
+        return None
+    try:
+        from PIL import Image
+
+        with Image.open(path) as image:
+            return max(image.size)
+    except Exception:
+        return None
+
+
+def _snap16(value):
+    return max(32, int(value) // 16 * 16)
+
+
+def _target_size_from_spec(width, height, spec):
+    """Map a source size to a target size for a normalized resolution spec."""
+    mode = spec.get("mode")
+    if mode == "explicit":
+        return _snap16(spec.get("width")), _snap16(spec.get("height"))
+    value = int(spec.get("value"))
+    return _target_size(width, height, value, "area" if mode == "area" else "side")
+
+
+def _size_for_no_source(spec):
+    """Target (width, height) when there is no source image (t2i)."""
+    mode = spec.get("mode")
+    if mode == "explicit":
+        return _snap16(spec.get("width")), _snap16(spec.get("height"))
+    value = int(spec.get("value"))
+    if mode == "area":
+        side = max(32, round((value ** 0.5) / 32) * 32)
+    else:
+        side = max(32, round(value / 32) * 32)
+    return side, side
+
+
+def _spec_label(spec):
+    mode = spec.get("mode")
+    if mode == "explicit":
+        return "%dx%d" % (int(spec.get("width")), int(spec.get("height")))
+    return "%s:%s" % (mode, spec.get("value"))
+
+
 def _oom_types():
     import comfy.model_management as mm
 
@@ -268,12 +428,16 @@ def _free_vram():
         pass
 
 
-def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None):
+def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None, spec=None):
     """Encode prompt + optional source image into conditioning / latents.
 
     Returns ``(positive, negative, latent_samples, denoise_mask)``. With a mask
     the target latent is the encoded source (proper inpaint); without one it is
     an empty latent and the source rides along as reference latents (edit).
+
+    ``spec`` (Step 6.5) is a normalized dict ``{"mode": "side"|"area"|"explicit",
+    "value": int}`` (or ``{"mode": "explicit", "width", "height"}``); when it is
+    omitted, the legacy ``resolution`` / ``mode`` arguments are used.
     """
     import comfy.model_management as mm
     import comfy.utils
@@ -282,19 +446,18 @@ def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None):
 
     if mode is None:
         mode = config.RESOLUTION_MODE
+    if spec is None:
+        default_resolution = config.RESOLUTION_SIDE if mode == "side" else config.MAX_RESOLUTION
+        spec = {"mode": mode, "value": int(resolution or default_resolution)}
 
     source = _load_image_tensor(image_path) if image_path else None
     mask = _load_mask_tensor(mask_path) if mask_path else None
 
     references = []
     images_vl = []
-    default_resolution = config.RESOLUTION_SIDE if mode == "side" else config.MAX_RESOLUTION
-    latent_pixels = int(resolution or default_resolution)
     if source is not None:
         samples = source[:1].movedim(-1, 1)  # [1,3,H,W]
-        width, height = _target_size(
-            samples.shape[3], samples.shape[2], latent_pixels, mode
-        )
+        width, height = _target_size_from_spec(samples.shape[3], samples.shape[2], spec)
         if (width, height) == (samples.shape[3], samples.shape[2]):
             resized = source[:1]
         else:
@@ -326,12 +489,8 @@ def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None):
             latent_h = references[0].shape[2]
             latent_w = references[0].shape[3]
         else:
-            side = (
-                max(32, round(latent_pixels / 32) * 32)
-                if mode == "side"
-                else latent_pixels
-            )
-            latent_h = latent_w = side // 16
+            width, height = _size_for_no_source(spec)
+            latent_h, latent_w = height // 16, width // 16
         latent_samples = torch.zeros(
             [1, 64, latent_h, latent_w], device=mm.intermediate_device()
         )

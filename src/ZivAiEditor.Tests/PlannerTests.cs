@@ -27,7 +27,7 @@ public class PlannerTests
     }
 
     [Fact]
-    public async Task FallbackPlanner_NoMask_Uses_Img2Img_SingleStep()
+    public async Task FallbackPlanner_No_Mask_Produces_Inpaint_Tool()
     {
         var plan = await new FallbackPlanner().PlanAsync(Request());
 
@@ -35,7 +35,7 @@ public class PlannerTests
         Assert.Equal(@"C:\img\main.png", plan.MainImagePath);
         var step = Assert.Single(plan.Steps);
         Assert.Equal(1, step.Order);
-        Assert.Equal(FallbackPlanner.ImageToImageToolName, step.ToolName);
+        Assert.Equal(FallbackPlanner.EditToolName, step.ToolName);
         Assert.Empty(step.DependsOn);
         Assert.Equal("replace the sky with a sunset", step.Parameters["prompt"]);
         Assert.Equal(FallbackPlanner.DefaultSteps, step.Parameters["steps"]);
@@ -43,12 +43,12 @@ public class PlannerTests
     }
 
     [Fact]
-    public async Task FallbackPlanner_WithMask_Uses_Inpaint()
+    public async Task FallbackPlanner_With_Mask_Produces_Inpaint_Tool()
     {
         var plan = await new FallbackPlanner().PlanAsync(Request(@"C:\img\mask.png"));
 
         var step = Assert.Single(plan.Steps);
-        Assert.Equal(FallbackPlanner.InpaintToolName, step.ToolName);
+        Assert.Equal(FallbackPlanner.EditToolName, step.ToolName);
         Assert.NotNull(plan.Mask);
     }
 
@@ -124,7 +124,7 @@ public class PlannerTests
         var plan = await planner.PlanAsync(Request());
 
         var step = Assert.Single(plan.Steps);
-        Assert.Equal(FallbackPlanner.ImageToImageToolName, step.ToolName);
+        Assert.Equal(FallbackPlanner.EditToolName, step.ToolName);
         Assert.Single(degraded);
         Assert.IsType<PlannerException>(degraded[0]);
     }

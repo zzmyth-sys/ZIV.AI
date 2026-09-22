@@ -611,3 +611,150 @@ C# 检测异常」。不含自动重启（Step 4）、`RerunAsync` / `GetTaskAsy
 1. 追加 `DEVLOG.md` 的 Step 5 记录（本步已完成）
 2. 在「验收记录」追加“Step 5 通过，日期：____”（待签）
 3. 进入 Step 6：`Executor`（多步执行 + 重跑）
+
+---
+
+## Step 6（Executor）验收：多步执行 + 进度 + 取消 + 重跑占位 + 串行队列
+
+> **命名说明**：`FROZEN.md` 另有「Step 6（推理管线优化）」段；本段是 `ACCEPTANCE.MD`
+> 规划表所指的 **Step 6 = Executor**。本段与 `DEVLOG.md` 的「Step 6（Executor）」对应。
+
+**目标**：实现 `Executor`（按 `EditPlan` 编排多步、串联中间结果、三级进度、取消、`RerunAsync`
+占位、`ExecutionQueue` 串行），并附带最小真实工具 `InpaintTool` 与真实 `ToolRegistry`，
+完成 App 层装配。不含 upscale / segment / outpaint 工具（Step 7）、`ITaskStore` 持久化、
+队列优先级、UI、PromptOptimizer、GPU 端到端测试（Z29 / Z30）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 改动在 Tools / Agent / Backend / App / Tests；无新增项目引用；Agent/Tools 互不引用 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `IExecutor` / `IEditTool` / `IToolRegistry` / `TaskState` / `StepState` 签名未改 | ✅ |
+| G4 | 未授权修改检查 | Step 0–5 冻结行未改；无契约变更 | ✅ |
+| G5 | 文档已更新 | `FROZEN` / `DEVLOG` / `ACCEPTANCE` / `OPTIMIZATION` 追加 Step 6（Executor） | ✅ |
+| G6 | 便携性未破 | 未引入注册表 / 外部路径配置；输出仍新文件（Z24） | ✅ |
+| G7 | AI 推理进程隔离未破 | `Executor` 不调 `IInferenceClient`；推理只经 Tool → `IInferenceClient`（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 6.1 | 单步成功 | `ExecutorTests.Single_Step_Plan_Executes_Successfully` | `TaskState.Succeeded`；`OutputImagePath` 正确 | ✅ |
+| 6.2 | 多步按序 + 中间传递 | `ExecutorTests.MultiStep_Plan_Executes_In_Order` | 步骤 2 输入 = 步骤 1 输出；执行顺序正确 | ✅ |
+| 6.3 | 三步链路 | `ExecutorTests.MultiStep_Plan_With_Three_Steps_Chains_Outputs` | 链路完整、最终输出正确 | ✅ |
+| 6.4 | 失败保留中间结果 | `ExecutorTests.Step_Failure_Marks_Task_Failed_And_Keeps_Intermediate` | `Failed`；步骤 1 中间结果保留；后续 `Skipped` | ✅ |
+| 6.5 | 取消生效 | `ExecutorTests.Cancel_Stops_Execution` / `External_Token_Cancels_Task` | `Canceled`；后续步骤未执行 | ✅ |
+| 6.6 | 依赖违规 | `ExecutorTests.DependsOn_Violation_Skips_Dependent_Step` | 依赖不存在 → 该步 `Skipped`，任务 `Failed` | ✅ |
+| 6.7 | 重跑占位 | `ExecutorTests.Rerun_Is_Not_Supported` | 抛 `NotSupportedException`（留接口） | ✅ |
+| 6.8 | 工具注册表 | `ToolRegistryTests`（4 例） | 注册 / 查找 / All / 注销 / 同名替换线程安全 | ✅ |
+| 6.9 | InpaintTool 参数转发 | `InpaintToolTests.Execute_Forwards_Parameters_To_InferenceClient` | `ToolInput` → `InpaintRequest` 字段正确 | ✅ |
+| 6.10 | InpaintTool 输出路径（Z24） | `InpaintToolTests.Execute_Returns_OutputPath` / `..._Derives_From_WorkingDirectory` | 新文件路径；缺省按 `WorkingDirectory/{StepId}.png` | ✅ |
+| 6.11 | InpaintTool 进度 | `InpaintToolTests.Execute_Reports_Progress` | `InferenceProgress` 转发为 `StepProgress` | ✅ |
+| 6.12 | 串行队列（Z18） | `ExecutionQueueTests.RunAsync_Never_Runs_Two_Items_Concurrently` | 最大并发 = 1 | ✅ |
+| 6.13 | 取消透传后端 | 代码审查 + `IpcInferenceClient.SubmitInpaintAsync` | `ct` 取消 → 发 `cancel` 帧（干净 token）→ 抛 OCE；签名不变 | ✅ |
+| 6.14 | App 装配 | 查 `AppContext` | 真实 `ToolRegistry` + `InpaintTool` + `ExecutionQueue` + `Executor`；`EmptyToolRegistry` 已删 | ✅ |
+| 6.15 | 构建 / 测试 | `dotnet build` / `dotnet test`（仅受影响类） | 0 错误；Step 6 测试 **21 通过 / 0 失败** | ✅ |
+| 6.16 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+
+### Step 6（Executor）通过标准
+
+- 通用 G1–G8 全过
+- 专属 6.1–6.16 全过
+
+### Step 6（Executor）遗留说明（非阻断）
+
+- `RerunAsync` 需 `ITaskStore` 持久化，后续 Step。
+- `ExecutionQueue` 无优先级（交互优先留待后续）。
+- 注册表当前仅 `inpaint`；`FallbackPlanner` 无 mask 产出的 `img2img` 计划在 Step 7 补工具前
+  会因「no tool registered」失败。
+- `InpaintTool` 不校验 `steps` / `denoise` 值域；越界由后端兜底。
+- `GetTaskAsync` 仍 `NotSupported`。
+- GPU 端到端未跑（`nvidia-smi` = 1587 MiB，未满足 Z30；且未获用户明确同意）。
+- PromptOptimizer 仅登记于 `OPTIMIZATION.md` §2.1，未实现。
+
+### Step 6（Executor）验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 6（Executor）记录（本步已完成）
+2. 在「验收记录」追加“Step 6（Executor）通过，日期：____”（待签）
+3. 进入 Step 7：Tools（`img2img` 等首批工具）
+
+### Step 6（Executor）命名收尾修正（2026-09-22，追加）
+
+> 依据 Qwen-Image-2.1 编辑机制调研与用户裁决：编辑工具命名**统一为 `QW21edit`**
+> （QW21 = Qwen-Image-2.1）。本小节**更新**上文专属清单 6.9–6.10 与遗留说明中的工具命名
+> （旧行不改，以本小节为准）。无契约变更；不改 `python/server/*` / `ipc-protocol.md`。
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 6.17 | 工具命名统一 | 查 `QwenImage21EditTool.cs` | `Name`/`ToolName = "QW21edit"`；Description / Capabilities 符合 6E.6 | ✅ |
+| 6.18 | 注册表命中 | `ToolRegistryTests` / `QwenImage21EditToolTests.Tool_Registers_Under_QW21edit_Only` | `Get("QW21edit")` 命中；`Get("inpaint")` / `Get("img2img")` 返回 null | ✅ |
+| 6.19 | FallbackPlanner 统一 | `PlannerTests.FallbackPlanner_No_Mask_Produces_Inpaint_Tool` / `..._With_Mask_...` | 有/无 mask 均产出 `"QW21edit"` | ✅ |
+| 6.20 | output_path 守卫 | `QwenImage21EditToolTests.QwenImage21EditTool_OutputPath_Equals_MainImage_Falls_Back` | 与主图相同（含大小写/`..`）→ 回退 `WorkingDirectory/{StepId}.png` | ✅ |
+| 6.21 | IPC `op` 不变 | 查 `IpcInferenceClient.cs` | `Op` 仍为 `"inpaint"`（传输层） | ✅ |
+| 6.22 | 构建 / 测试 | `dotnet build` / `dotnet test`（仅受影响类） | 0 错误；**36 通过 / 0 失败** | ✅ |
+| 6.23 | 经典 img2img 未实现 | 查 `OPTIMIZATION.md` §2.1.2 | 仅登记候选（Issue #9702 / #10063），不实现 | ✅ |
+
+**命名收尾后更新说明**：上文「遗留说明」中「注册表当前仅 `inpaint`；无 mask 产出的 `img2img`
+计划会失败」一条**已解决**（有/无 mask 统一 `QW21edit`）；「验收后动作」第 3 条「进入 Step 7：
+Tools（`img2img` 等首批工具）」措辞以本小节为准——Step 7 首批工具为 **`upscale` 等**，
+不再需要单独的 `img2img`（经典 img2img 为候选特性）。
+
+---
+
+## Step 6.5 验收：分辨率策略（ResolutionPolicy + ModelProfile + 三层透传）
+
+**目标**：让用户/UI 能指定输出分辨率（此前写死 `config.RESOLUTION_SIDE=1536`），
+打通 `EditPlan.Resolution → ToolInput.Resolution → InpaintRequest.Resolution →
+IPC submit.payload.resolution → Python`；引入 `ModelProfile` 支持未来模型扩展。
+不含 upscale / outpaint 工具（Step 7）、UI（Step 9）、`IModelProfileProvider`；**不跑 GPU**（Z29/Z30）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ |
+| G2 | 依赖方向没破 | 改动在 Contracts / Backend / Agent / Tools / App / Tests / Python；无新增项目引用 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `IInferenceClient`/`IExecutor`/`IEditTool`/`IToolRegistry` 签名未改；仅新增类型与可选字段 | ✅ |
+| G4 | 未授权修改检查 | Step 0–6 冻结行未改；契约变更走 Step 6.5 冻结节 | ✅ |
+| G5 | 文档已更新 | `FROZEN` / `DEVLOG` / `ACCEPTANCE` / `ARCHITECTURE`§8 / `ipc-protocol` 追加 Step 6.5 | ✅ |
+| G6 | 便携性未破 | 未引入注册表 / 外部路径配置 | ✅ |
+| G7 | AI 推理进程隔离未破 | 分辨率仅经 IPC 传数值；C# 不加载 Python（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 6.5.1 | 新增契约 | 查 `Contracts/Imaging` / `Contracts/Models` | `ResolutionPolicy` / `ResolutionMode` / `ModelProfile` / `AspectPreset` / `ResolutionTier` / `IModelProfileRegistry` 存在且与 6.5.1 一致 | ✅ |
+| 6.5.2 | 三层可选字段 | 查 `InpaintRequest` / `EditPlan` / `ToolInput` | 各新增 `ResolutionPolicy? Resolution`，默认 `null`；既有成员未改 | ✅ |
+| 6.5.3 | Registry 正确 | `ModelProfileRegistryTests` | Qwen-2.1 字段正确（2048/512/16、三档 1024/1536/2048、7 预设）；未知模型返回 null | ✅ |
+| 6.5.4 | 三档翻译 | `ResolutionPolicyTests` | Fast=1024 / Balanced=1536 / HighQuality=2048；`Custom` 抛 `ArgumentException`；`MaxPixels=SafeMaxSide²` | ✅ |
+| 6.5.5 | Executor 透传 | `ExecutorTests` | `Plan.Resolution` → `ToolInput.Resolution`；无则 `null` | ✅ |
+| 6.5.6 | Tool 透传 | `QwenImage21EditToolTests` | `ToolInput.Resolution` → `InpaintRequest.Resolution`；无则 `null` | ✅ |
+| 6.5.7 | IPC 序列化 | 查 `IpcInferenceClient` | `SubmitPayload.Resolution` + `ResolutionPayload`（snake_case）+ `IpcJsonContext` 注册 | ✅ |
+| 6.5.8 | Python 读取 | 查 `pipeline.py` | 读 `payload.resolution`（side/area/scale/explicit），覆盖 config；`max_pixels` 超限降级记日志；无 payload 用 config 默认 | ✅（只读确认） |
+| 6.5.9 | 契约升版 | 查 `contracts/ipc-protocol.md` / `config.py` | `ipc_version 0.6`；§3.4 有 `resolution`；§7 有 0.5→0.6 变更点；`PROTOCOL_VERSION="0.6"` | ✅ |
+| 6.5.10 | 向后兼容 | 代码审查 | 字段缺省 → 行为与 0.5 完全一致（config 默认 1536）；`encode_prompt` 旧签名保留 | ✅ |
+| 6.5.11 | 构建 / 测试 | `dotnet build` / `dotnet test`（受影响类） | 0 错误；**39 通过 / 0 失败** | ✅ |
+| 6.5.12 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+
+### Step 6.5 通过标准
+
+- 通用 G1–G8 全过
+- 专属 6.5.1–6.5.12 全过
+
+### Step 6.5 遗留说明（非阻断）
+
+- upscale / outpaint 未实现（Step 7）；`Scale` / `Explicit` 模式契约与 Python 已就绪，
+  C# 侧 resolver / 工具待 Step 7。
+- `IModelProfileProvider` 未实现（未来扩展点，仅注释）。
+- `wh_ratio` / `ratio_follow`（提示词重写产物）与本步 `ResolutionPolicy` 未打通。
+- UI tier 选择未实现（Step 9）；Python resolution 行为未做 GPU 实测（Z29/Z30）。
+
+### Step 6.5 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 6.5 记录（本步已完成）
+2. 在「验收记录」追加“Step 6.5 通过，日期：____”（待签）
+3. 进入 Step 7：Tools（`upscale` 等首批工具，使用 `Scale` / `Explicit` 模式）

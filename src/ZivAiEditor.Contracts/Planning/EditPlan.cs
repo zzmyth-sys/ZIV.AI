@@ -11,4 +11,7 @@ public sealed class EditPlan
     public MaskSpec? Mask { get; init; }
     public IReadOnlyList<EditStep> Steps { get; init; } = Array.Empty<EditStep>();
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.Now;
+
+    /// <summary>Optional output resolution (Step 6.5); null = backend default.</summary>
+    public ResolutionPolicy? Resolution { get; init; }
 }

@@ -11,4 +11,7 @@ public sealed class ToolInput
     public IReadOnlyDictionary<string, string> Parameters { get; init; }
         = new Dictionary<string, string>();
     public string WorkingDirectory { get; init; } = "";
+
+    /// <summary>Optional output resolution (Step 6.5); null = backend default.</summary>
+    public ResolutionPolicy? Resolution { get; init; }
 }

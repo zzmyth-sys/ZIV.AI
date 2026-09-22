@@ -1,5 +1,7 @@
 namespace ZivAiEditor.Contracts.Inference;
 
+using ZivAiEditor.Contracts.Imaging;
+
 public sealed class InpaintRequest
 {
     public string ImagePath { get; init; } = "";
@@ -14,4 +16,7 @@ public sealed class InpaintRequest
 
     public LoraOptions? Lora { get; init; }
     public OptimizationOptions? Optimizations { get; init; }
+
+    /// <summary>Optional output resolution (Step 6.5); null = backend default.</summary>
+    public ResolutionPolicy? Resolution { get; init; }
 }
