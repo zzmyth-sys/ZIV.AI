@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 
 namespace ZivAiEditor.App;
@@ -11,6 +12,28 @@ internal sealed class BackendSettings
     public string PythonExe { get; init; } = @"D:\devlop\ZIV.AI\Comfyui\python_embeded\python.exe";
 
     public string Script { get; init; } = @"D:\devlop\ZIV.AI\python\server\main.py";
+
+    public LlmPlannerSettings LlmPlanner { get; init; } = new();
+}
+
+/// <summary>
+/// Planner-scoped LLM settings (<c>[llm.planner]</c>). Kept as a distinct type
+/// so later scenarios (prompt rewriting / multi-image) can each get their own
+/// settings block and <c>LlmClientOptions</c> without sharing a class.
+/// </summary>
+internal sealed class LlmPlannerSettings
+{
+    public string Endpoint { get; init; } = "http://127.0.0.1:8080/v1/chat/completions";
+
+    public string? Model { get; init; }
+
+    public double Temperature { get; init; } = 0.1;
+
+    public int MaxTokens { get; init; } = 2048;
+
+    public bool EnableThinking { get; init; }
+
+    public int TimeoutSeconds { get; init; } = 30;
 }
 
 /// <summary>
@@ -28,13 +51,26 @@ internal static class SettingsLoader
         var path = Path.Combine(directory, FileName);
         EnsurePresent(path, directory);
 
-        var values = Parse(File.Exists(path) ? path : null);
+        var sections = ParseSections(File.Exists(path) ? path : null);
+        var backend = Section(sections, "backend");
+        var planner = Section(sections, "llm.planner");
+
         var defaults = new BackendSettings();
+        var plannerDefaults = defaults.LlmPlanner;
         return new BackendSettings
         {
-            PipeName = Get(values, "pipe_name", defaults.PipeName),
-            PythonExe = Get(values, "python_exe", defaults.PythonExe),
-            Script = Get(values, "script", defaults.Script),
+            PipeName = Get(backend, "pipe_name", defaults.PipeName),
+            PythonExe = Get(backend, "python_exe", defaults.PythonExe),
+            Script = Get(backend, "script", defaults.Script),
+            LlmPlanner = new LlmPlannerSettings
+            {
+                Endpoint = Get(planner, "endpoint", plannerDefaults.Endpoint),
+                Model = GetOptional(planner, "model") ?? plannerDefaults.Model,
+                Temperature = GetDouble(planner, "temperature", plannerDefaults.Temperature),
+                MaxTokens = GetInt(planner, "max_tokens", plannerDefaults.MaxTokens),
+                EnableThinking = GetBool(planner, "enable_thinking", plannerDefaults.EnableThinking),
+                TimeoutSeconds = GetInt(planner, "timeout_seconds", plannerDefaults.TimeoutSeconds),
+            },
         };
     }
 
@@ -81,15 +117,15 @@ internal static class SettingsLoader
         return null;
     }
 
-    private static Dictionary<string, string> Parse(string? path)
+    private static Dictionary<string, Dictionary<string, string>> ParseSections(string? path)
     {
-        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var sections = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
         if (path is null || !File.Exists(path))
         {
-            return values;
+            return sections;
         }
 
-        var inBackend = false;
+        Dictionary<string, string>? current = null;
         foreach (var raw in File.ReadAllLines(path))
         {
             var line = raw.Trim();
@@ -100,11 +136,13 @@ internal static class SettingsLoader
 
             if (line[0] == '[')
             {
-                inBackend = line.Trim('[', ']').Trim().Equals("backend", StringComparison.OrdinalIgnoreCase);
+                var name = line.Trim('[', ']').Trim();
+                current = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                sections[name] = current;
                 continue;
             }
 
-            if (!inBackend)
+            if (current is null)
             {
                 continue;
             }
@@ -119,13 +157,48 @@ internal static class SettingsLoader
             var value = line[(separator + 1)..].Trim();
             if (key.Length > 0 && value.Length > 0)
             {
-                values[key] = value;
+                current[key] = value;
             }
         }
 
-        return values;
+        return sections;
     }
+
+    private static Dictionary<string, string> Section(
+        Dictionary<string, Dictionary<string, string>> sections,
+        string name)
+        => sections.TryGetValue(name, out var section) ? section : new Dictionary<string, string>();
 
     private static string Get(Dictionary<string, string> values, string key, string fallback)
         => values.TryGetValue(key, out var value) && value.Length > 0 ? value : fallback;
+
+    private static string? GetOptional(Dictionary<string, string> values, string key)
+        => values.TryGetValue(key, out var value) && value.Length > 0 ? value : null;
+
+    private static int GetInt(Dictionary<string, string> values, string key, int fallback)
+        => values.TryGetValue(key, out var value)
+           && int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : fallback;
+
+    private static double GetDouble(Dictionary<string, string> values, string key, double fallback)
+        => values.TryGetValue(key, out var value)
+           && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : fallback;
+
+    private static bool GetBool(Dictionary<string, string> values, string key, bool fallback)
+    {
+        if (!values.TryGetValue(key, out var value))
+        {
+            return fallback;
+        }
+
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "1" or "true" or "yes" or "on" => true,
+            "0" or "false" or "no" or "off" => false,
+            _ => fallback,
+        };
+    }
 }

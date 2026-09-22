@@ -523,3 +523,91 @@ C# 检测异常」。不含自动重启（Step 4）、`RerunAsync` / `GetTaskAsy
 1. 追加 `DEVLOG.md` 的 Step 4 记录（本步已完成）
 2. 在「验收记录」追加“Step 4 通过，日期：____”（待签）
 3. 进入后续 Step（优化项按 `OPTIMIZATION.md` 逐一实测）
+
+---
+
+## Step 5 验收：Planner（`LlmPlanner` + `FallbackPlanner`）
+
+**目标**：实现 Planner——`LlmPlanner`（LLM 生成计划）、`FallbackPlanner`（确定性兜底）、
+`ResilientPlanner`（Z22 降级链），并新增 `ILlmClient` 契约。不含 `ILlmClient` 具体实现、
+`Executor`（Step 6）、具体工具（Step 7）、UI（Step 9）、PE-I2I；**不跑 GPU 测试**（Z29）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build ZIV.AI.sln -c Release` 0 错误 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 改动在 Contracts（新增 `ILlmClient`）+ Agent + Tests；无新增项目引用 | ✅ Agent 仍只依赖 Contracts |
+| G3 | 接口与 FROZEN 一致 | `IPlanner` / `EditPlan` / `EditStep` / `IInferenceClient` 签名未改；新增 `ILlmClient` 走 Step 5.3.1 | ✅ |
+| G4 | 未授权修改检查 | Step 0–4 冻结行未改；新增契约走 Step 5 冻结节 | ✅ |
+| G5 | 文档已更新 | `FROZEN` / `DEVLOG` / `ACCEPTANCE` 追加 Step 5 | ✅ |
+| G6 | 便携性未破 | 未引入注册表 / 外部路径配置 | ✅ |
+| G7 | AI 推理进程隔离未破 | Planner 不加载 Python / LLM 运行时；`ILlmClient` 由 App 注入（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 5.1 | Fallback 单步计划 | `PlannerTests` | 有主图 → `Steps.Count == 1`；`ToolName` 为 `inpaint`（有 mask）/ `img2img`（无 mask） | ✅ |
+| 5.2 | Fallback 缺主图 | `PlannerTests` | `MainImagePath` 为空 → 抛 `ArgumentException` | ✅ |
+| 5.3 | LlmPlanner 解析有效 JSON | `PlannerTests` | mock `ILlmClient` 返回预置 JSON → 解析为正确 `EditPlan` | ✅ |
+| 5.4 | LlmPlanner 无效输出 | `PlannerTests` | 无效 / 空 JSON / 空 steps / 缺 tool → 抛 `PlannerException` | ✅ |
+| 5.5 | 超时控制 | `PlannerTests` | 超时 → 抛 `PlannerException`（默认 30 s，可注入） | ✅ |
+| 5.6 | 降级链 | `PlannerTests` | `LlmPlanner` 失败 → `ResilientPlanner` 返回 `FallbackPlanner` 计划 | ✅ |
+| 5.7 | 契约冻结 | 对照 `FROZEN.md` 0.3 / 5.3 | 冻结签名一致；`ILlmClient` 仅新增 | ✅ |
+| 5.8 | 构建 / 测试 | `dotnet build` / `dotnet test`（仅 Planner 相关） | 0 错误；全部通过 | ✅ 21 通过 / 0 失败 / 1 跳过 |
+| 5.9 | 无 GPU 负载 | 测试过程 | 未启动 Python 进程、未加载模型（Z29 / Z30） | ✅ |
+| 5.10 | 占位清理 | 查 `ZivAiEditor.Agent` | `PlaceholderPlanner` 已删除 | ✅ |
+
+### Step 5 补完验收：`ILlmClient` 落地（LocalLlmClient + 装配）
+
+> 新增于 Step 5 补完（2026-09-22）。**不改** `ILlmClient` / `IPlanner` / `EditPlan` /
+> `EditStep` 签名；新增实现类与装配，不改 Step 0–4 冻结行。
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 5.11 | `ILlmClient` 有实现 | 查 `ZivAiEditor.Backend` | `LocalLlmClient : ILlmClient` + `LlmClientOptions` 存在 | ✅ |
+| 5.12 | 客户端单元测试 | `LocalLlmClientTests`（mock HTTP） | 6/6 通过：载荷 / 解析 / HTTP 错误 / 超时 / 非法 JSON / options 温度 | ✅ 6 通过 |
+| 5.13 | 分层正确 | 查引用 | `ILlmClient` 在 Contracts；实现 + options 在 Backend；Agent 只经接口 | ✅ |
+| 5.14 | App 装配 | 查 `AppContext` | 构造 `HttpClient` → `LocalLlmClient` → `LlmPlanner` → `ResilientPlanner`，暴露 `IPlanner` | ✅ |
+| 5.15 | 配置段 | 查 `settings.ini` / `SettingsLoader` | `[llm.planner]` 六键解析；模板含预留段注释 | ✅ |
+| 5.16 | 后期接入点 | 查 `OPTIMIZATION.md` §2.1 | 说明复用 `LocalLlmClient` + 不同 `LlmClientOptions` | ✅ |
+| 5.17 | 无新抽象 | 查代码 | 无 `ILlmClientFactory` 等额外抽象（§11） | ✅ |
+| 5.18 | 真实调用 | `PlannerIntegrationTests` + `llmctl` | llama-server（`qwythos-9b`）就绪 → `LlmPlanner` 真实生成计划；未就绪 → 自跳过 | ✅ 通过（`path=llm`，2 用例；见下） |
+
+### Step 5 通过标准
+
+- 通用 G1–G8 全过
+- 专属 5.1–5.10 全过
+- 补完项 5.11–5.18 全过
+
+### Step 5 真实调用验证记录（2026-09-22）
+
+> 用 `C:\AI\llm\启动器\llmctl.exe` 拉起 `qwythos-9b`（llama-server :8080），
+> 跑 `PlannerIntegrationTests`，验证后 `llmctl stop`。
+
+- **环境（Z30）**：启动前 GPU **882 MiB**（近基线，无 ComfyUI）；`health=down`。
+- **启动**：`llmctl start ... qwythos-9b --wait 180` → 健康 **11.3s**，pid=9320；
+  `/v1/models` 200（`id=qwythos-9b`，`n_ctx=65536`）；启动后 GPU **10720 MiB**。
+- **结果**：`PlannerIntegrationTests` **2 通过 / 0 失败**（不再 Skip）：
+  - `ResilientPlanner_Plans_Against_Local_Llm`：**`path=llm`**（未降级），`Steps.Count=1`（`img2img`）。
+  - `LlmPlanner_Handles_Complex_Prompt`：`Steps.Count=1`（`img2img`）。
+  - 多步**解析**能力由 `PlannerTests.LlmPlanner_Parses_MultiStep_Json_With_Order_And_DependsOn` 覆盖。
+  - live LLM 当前只出单步：系统提示词「最少步骤」+ 工具注册表为空（Step 7 提供可组合工具）。
+- **停服务**：`llmctl stop` → `stopped pid 9320`；`health=down`；8080 无 LISTENING；
+  GPU 回落 **847 MiB**。
+
+### Step 5 遗留说明（非阻断）
+
+- live LLM 目前只生成**单步**计划（工具注册表为空 + 提示词要求最少步骤）；多步场景待
+  Step 7 提供可组合工具后复验。
+- `LlmPlanner` 不校验 `steps` / `denoise` 值域，越界由工具 / 后端兜底。
+- `EmptyToolRegistry` 为临时占位，Step 7 落地真实 `ToolRegistry` 后替换。
+- PE-I2I 重写器 / 多图任务未实现（仅预留接缝）。
+
+### Step 5 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 5 记录（本步已完成）
+2. 在「验收记录」追加“Step 5 通过，日期：____”（待签）
+3. 进入 Step 6：`Executor`（多步执行 + 重跑）

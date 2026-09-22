@@ -1,0 +1,31 @@
+; ZIV.AI settings (template)
+; 运行时程序目录下的 settings.ini 由此模板部署（见 DOC/ARCHITECTURE.md §8 Z14）。
+; settings.ini 本身被 .gitignore 忽略；本模板入库，供新环境初始化。
+
+[backend]
+pipe_name = zivai.infer.v1
+python_exe = D:\devlop\ZIV.AI\Comfyui\python_embeded\python.exe
+script = D:\devlop\ZIV.AI\python\server\main.py
+
+; 规划器（Planner）使用的本地 LLM（llama-server，OpenAI 兼容 /v1/chat/completions）。
+; 由 LocalLlmClient 读取；未配置时使用内置默认值。
+[llm.planner]
+endpoint = http://127.0.0.1:8080/v1/chat/completions
+model =
+temperature = 0.1
+max_tokens = 2048
+enable_thinking = false
+timeout_seconds = 30
+
+; --- 预留段（本步不解析，仅说明后期用途）---
+; 后期「提示词重写 / 多图任务」场景复用同一个 LocalLlmClient，
+; 只需在 AppContext 中按场景构造不同的 LlmClientOptions（temperature / max_tokens 等），
+; 无需新建客户端类。详见 DOC/OPTIMIZATION.md §2.1。
+;
+; [llm.prompt_rewriter]
+; endpoint = http://127.0.0.1:8080/v1/chat/completions
+; temperature = 0.7
+;
+; [llm.multi_image]
+; endpoint = http://127.0.0.1:8080/v1/chat/completions
+; temperature = 0.2

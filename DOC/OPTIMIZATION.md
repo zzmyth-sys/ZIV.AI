@@ -26,6 +26,21 @@
 | 2.2 | 多参考图 `<imageN>` 语法 | **已支持** | 多图路径**待实测** |
 | 2.3 | 提示词五层结构 | 使用建议 | 建议 **50–150 词**，分层描述主体 / 场景 / 风格 / 光影 / 约束 |
 
+### 2.1 后期接入点（提示词重写 / 多图任务）
+
+> 登记于 Step 5 补完；**仅记录接缝，不实现场景**（ARCHITECTURE.md §11 反过度设计）。
+
+- **复用同一客户端**：提示词重写（PE-I2I 类）与多图任务规划**不需要新建客户端类**，
+  统一复用 `ZivAiEditor.Backend.LocalLlmClient`（实现 `ILlmClient`）。
+- **差异化配置**：每个场景构造自己的 `LlmClientOptions` 即可——
+  规划用 `Temperature = 0.1`（稳定）、提示词重写用 `0.7`（更有创造性）、多图任务用 `0.2`；
+  `MaxTokens` / `EnableThinking` / `Timeout` 同样按场景调整。
+- **装配点**：`ZivAiEditor.App.AppContext`。当前只注册一个 planner 用实例
+  （`LlmClient` 属性，见 `settings.ini` 的 `[llm.planner]` 段）；后期在此按场景构造额外
+  `LocalLlmClient` 实例，`settings.ini` 预留了 `[llm.prompt_rewriter]` / `[llm.multi_image]`
+  段注释。
+- **不引入**：`ILlmClientFactory`、多实现框架等抽象；按场景构造 options 即可。
+
 ## 3. 优化叠加预期
 
 > 叠加为**乘法估算**，实际受显存、批大小、调度影响，**必须实测**。

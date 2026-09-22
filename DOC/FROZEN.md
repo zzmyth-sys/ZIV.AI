@@ -687,6 +687,79 @@ Step 1 冻结的 7 项目结构与依赖方向**不变**（见 1.1）。Step 2 �
 | `handlers.py` / 心跳 / 空闲卸载 | `IpcIdleUnloadTests` |
 | Backend 契约变更 | `ContractsSmokeTests` + 相关 IPC 用例 |
 | Step 收尾 / 发布前 / 跨模块重构 | **全量** `dotnet test ZIV.AI.sln` |
+| `LlmPlanner` / `FallbackPlanner` / `ResilientPlanner` | `PlannerTests`（无 GPU） |
+| `ILlmClient` 契约 | `ContractsSmokeTests` + `PlannerTests` |
+
+### 5.3 Planner 实现与新增契约（冻结）
+
+> 本小节为 Step 5 的 Planner 落地追加。**不改动 Step 0 0.3 的 `IPlanner` / `EditPlan` /
+> `EditStep` 签名**；唯一新增契约见 5.3.1（`ILlmClient`，走新增说明，不改既有成员）。
+
+#### 5.3.1 新增契约 `ILlmClient`（冻结）
+
+- **文件**：`ZivAiEditor.Contracts/Inference/ILlmClient.cs`
+- **签名**：
+
+```csharp
+public interface ILlmClient : IDisposable
+{
+    Task<string> CompleteAsync(
+        string systemPrompt,
+        string userPrompt,
+        CancellationToken ct = default);
+}
+```
+
+- **定位**：`LlmPlanner` 用于生成 `EditPlan` 的纯文本补全入口；与 `IInferenceClient` 一样，
+  C# **不加载** Python / LLM 运行时（Z17），实现由 App 层装配注入（Z22 可替换）。
+- **性质**：**新增接口**，不修改 Step 0 / Step 1 冻结的任何签名；`IPlanner` / `EditPlan` /
+  `EditStep` **原样不动**。
+- **实现（Step 5 补完）**：`ZivAiEditor.Backend.LocalLlmClient`（HTTP，OpenAI 兼容
+  `/v1/chat/completions`）+ `LlmClientOptions`。见 5.3.2。
+
+#### 5.3.2 实现清单（冻结）
+
+| 类 | 文件 | 职责 |
+|---|---|---|
+| `FallbackPlanner` | `ZivAiEditor.Agent/FallbackPlanner.cs` | 确定性单步兜底：主图缺失抛 `ArgumentException`，否则返回 1 步计划（有 mask → `inpaint`，无 mask → `img2img`），参数 `{prompt, steps:"25", denoise:"1.0"}`；**永不失败**（Z22） |
+| `LlmPlanner` | `ZivAiEditor.Agent/LlmPlanner.cs` | 注入 `ILlmClient` + `IToolRegistry`；构建系统提示词 → 调用 → 解析 JSON 为 `EditPlan`；解析失败 / 空响应 / 超时抛 `PlannerException`；默认超时 **30 s** |
+| `ResilientPlanner` | `ZivAiEditor.Agent/ResilientPlanner.cs` | Z22 降级链：`primary`（LlmPlanner）失败 → 回调 `onDegrade` → 返回 `fallback`（FallbackPlanner）；取消（`ct` 触发）不降级、直接抛 |
+| `LlmClientOptions` | `ZivAiEditor.Backend/LlmClientOptions.cs` | LLM 客户端配置：`Endpoint`（默认 `http://127.0.0.1:8080/v1/chat/completions`）、`Model?`、`Timeout`（30s）、`Temperature`（0.1）、`MaxTokens`（2048）、`EnableThinking`（false） |
+| `LocalLlmClient` | `ZivAiEditor.Backend/LocalLlmClient.cs` | `ILlmClient` 的 HTTP 实现：注入 `HttpClient`；OpenAI 兼容请求（`messages` / `stream=false` / `temperature` / `max_tokens` / `chat_template_kwargs.enable_thinking`）；失败去参重试 1 次（klein 经验）；HTTP 错误 / 超时 / 非法 JSON 抛 `LlmClientException` |
+| `EmptyToolRegistry` | `ZivAiEditor.App/EmptyToolRegistry.cs` | **临时**空 `IToolRegistry`，仅供装配 `LlmPlanner`；Step 7 落地真实 `ToolRegistry` 后替换 |
+
+- **降级链**：`LlmPlanner` 成功 → 用其计划；抛 `PlannerException` → `FallbackPlanner` 接管；
+  `FallbackPlanner` 对合法请求永不失败。
+- **`FallbackPlanner.DefaultSteps = "25"`**：与 `InpaintRequest.Steps` 默认值（FROZEN Step 6.3）
+  对齐，避免两处默认值分叉。
+- **`PlaceholderPlanner` 已删除**（被上述实现取代）。
+- **App 装配（Step 5 补完）**：`AppContext` 构造单例 `HttpClient` + `LocalLlmClient`
+  （planner options 来自 `settings.ini` 的 `[llm.planner]`）→ `LlmPlanner` → `ResilientPlanner`，
+  暴露 `IPlanner`（供 UI 注入）与 planner 作用域的 `ILlmClient`。分层：`ILlmClient` 在
+  Contracts、实现 + options 在 Backend、Agent 只经接口使用。
+- **后期接缝**：提示词重写 / 多图任务复用 `LocalLlmClient` + 各自 `LlmClientOptions`，
+  在 `AppContext` 按场景构造；**不引入** factory / 多实现框架（见 `OPTIMIZATION.md` §2.1）。
+
+#### 5.3.3 测试（冻结）
+
+- **文件**：`ZivAiEditor.Tests/PlannerTests.cs` + `LocalLlmClientTests.cs` + `PlannerIntegrationTests.cs`
+  （无 GPU / 不加载模型，符合 Z29）
+- **用例**：
+  - `PlannerTests`：Fallback 单步（有/无 mask）、Fallback 缺主图抛 `ArgumentException`、
+    LlmPlanner 解析有效 JSON、容忍 fenced JSON、无效 JSON / 空 steps / 缺 tool / 空响应抛
+    `PlannerException`、超时抛 `PlannerException`、**多步 JSON 解析（Order 递增 + `depends_on`）**、
+    ResilientPlanner 降级与主路成功。
+  - `LocalLlmClientTests`：请求载荷（`enable_thinking=false` / `temperature=0.1` / `max_tokens`）、
+    解析有效响应、HTTP 500 抛错、超时抛错、非法 JSON 抛错、options 温度生效。
+  - `PlannerIntegrationTests`：真实 llama-server 调用（**服务可达才真跑，不可达则 2s 内自跳过**；
+    运行前须确认 GPU 空闲，Z30）。
+- **结果（Step 5 补完）**：`dotnet test` 过滤后 **21 通过 / 0 失败 / 1 跳过**
+  （`LocalLlmClientTests` 6 + `PlannerTests` 12 + `ContractsSmokeTests` 3；集成 1 跳过）。
+- **结果（真实调用验证，2026-09-22）**：用 `llmctl` 拉起 `qwythos-9b`（llama-server :8080）后，
+  过滤测试 **24 通过 / 0 失败**（`LocalLlmClientTests` 6 + `PlannerTests` 13 + `ContractsSmokeTests` 3
+  + `PlannerIntegrationTests` 2）；集成用例 **`path=llm`**（LlmPlanner 成功、未降级），
+  `Steps.Count = 1`（`img2img`）；复杂 prompt 亦为单步（工具注册表为空 + 提示词要求最少步骤）。
+  验证后 `llmctl stop`，GPU 由 10720 MiB 回落至 **847 MiB**。
 
 ---
 

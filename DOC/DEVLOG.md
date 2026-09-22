@@ -798,3 +798,222 @@
 - **未修改** `DOC/*.md` 的 Step 0/1/2/3 冻结行（仅追加 Step 4 段与 `InpaintRequest` 修订说明）。
 - **未修改** `C:\AI\ComfyUI_PIC`；未下载模型 / 依赖；Python 侧零新依赖。
 - 环境：Windows 10、PowerShell 7、ComfyUI 便携版 v0.37.0、.NET SDK 10.0.401、RTX 4080 16GB。
+
+---
+
+## [Step 5] - 2026-09-22
+
+### 目标
+
+实现 Planner：`LlmPlanner`（LLM 生成计划）+ `FallbackPlanner`（确定性兜底）+ `ResilientPlanner`
+（Z22 降级链），并新增 `ILlmClient` 契约。范围外：`ILlmClient` 的具体实现（本地 LLM / IPC）、
+`Executor`（Step 6）、具体工具（Step 7）、UI（Step 9）、PE-I2I 重写器、GPU 端到端测试（Z29）。
+
+### 做了什么
+
+- **新增契约**（`ZivAiEditor.Contracts/Inference/ILlmClient.cs`）：`ILlmClient : IDisposable` +
+  `CompleteAsync(systemPrompt, userPrompt, ct)`。**不改** `IPlanner` / `EditPlan` / `EditStep`
+  等冻结签名（走 `FROZEN.md` Step 5.3.1 新增说明）。
+- **`FallbackPlanner`**（`ZivAiEditor.Agent/`）：无依赖，确定性单步计划；主图缺失抛
+  `ArgumentException`；有 mask → `inpaint`、无 mask → `img2img`；参数
+  `{prompt, steps:"25", denoise:"1.0"}`；永不失败。
+- **`LlmPlanner`**：注入 `ILlmClient` + `IToolRegistry`；系统提示词含工具列表（`Name` /
+  `Capabilities` / `Description`）、输出 JSON schema、2 个 few-shot、要求只输出 JSON；
+  解析时容忍 fenced / 包裹文本（切片首 `{` 到末 `}`）；`params` 值统一转字符串（数字 / bool /
+  null 兼容）；失败 / 超时抛 `PlannerException`；默认 **30 s** 超时（`CancellationTokenSource`
+  链接外部 `ct`）。
+- **`ResilientPlanner`**：降级链包装器；`primary` 非取消异常 → `onDegrade` 回调 → `fallback`；
+  外部取消不降级、直接抛。
+- **删除 `PlaceholderPlanner.cs`**（throw-only 占位被取代）。
+- **测试**（`ZivAiEditor.Tests/PlannerTests.cs`，无 GPU）：Fake `ILlmClient` + 空
+  `IToolRegistry`；覆盖 Fallback 单步 / 缺主图、LlmPlanner 有效 JSON / fenced JSON / 无效
+  JSON / 空 steps / 缺 tool / 空响应 / 超时、ResilientPlanner 降级与主路成功；`ContractsSmokeTests`
+  追加 `ILlmClient` 契约用例。
+- **文档**：`FROZEN.md` 追加 Step 5.3（Planner 实现与新增契约）；本记录；`ACCEPTANCE.MD`
+  追加 Step 5 段。
+
+### 实测
+
+- **构建**：`dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- **测试**（按 Z29 只跑受影响类，**不跑 GPU**）：
+  `dotnet test --filter "FullyQualifiedName~PlannerTests|FullyQualifiedName~ContractsSmokeTests"`
+  → **15 通过 / 0 失败**（110 ms）。
+- 未启动 Python 进程、未加载模型、未占用 GPU。
+
+### 遇到的问题与解决
+
+1. **`DependsOn` 类型不匹配（CS0019）**
+   - 现象：`step.DependsOn ?? Array.Empty<string>()` 报「运算符 ?? 无法应用于
+     `List<string>` 和 `string[]`」。
+   - 解决：显式转契约类型 `(IReadOnlyList<string>?)step.DependsOn ?? Array.Empty<string>()`。
+2. **`EditPlan` 没有 Title 字段**
+   - 现象：任务文本提到「字段名与 EditPlan 对齐」，但冻结的 `EditPlan` 只有 `PlanId` /
+     `SourcePrompt` / `MainImagePath` / `ReferenceImagePath` / `Mask` / `Steps` / `CreatedAt`。
+   - 解决：严格按冻结契约构造，**不擅自加字段**（G3）。
+3. **`steps` 默认值口径冲突**
+   - 现象：任务文本示例为 `"40"`，而 `InpaintRequest.Steps` 默认值已由 FROZEN Step 6.3
+     定为 **25**。
+   - 解决：`FallbackPlanner.DefaultSteps = "25"`，与冻结默认值对齐；后续 Executor 映射
+     `InpaintRequest` 时不会分叉。
+4. **降级包装器 vs 内部降级**
+   - 选择独立 `ResilientPlanner`（而非 `LlmPlanner` 内部降级），保持 `LlmPlanner` 纯函数式、
+     可测试、可替换（Z22「Planner 可替换」），也便于 App 层注入日志回调。
+
+### 遗留项
+
+- **`ILlmClient` 无具体实现**：本步只冻结契约；本地 llama-server / IPC 实现待后续。
+- **App 层未接线**：`AppContext` 尚未构造并注入 `IResilientPlanner`（需先有 `ILlmClient`
+  实现，否则会引入未验证依赖）。
+- **`params` 未做值域校验**：`LlmPlanner` 只保证字符串化，不校验 `steps` / `denoise` 是否合法
+  数值；越界由工具 / 后端兜底（Step 7）。
+- PE-I2I 重写器（`OPTIMIZATION.md` §2.1）未引入。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未修改** `DOC/*.md` 的 Step 0–4 冻结行（仅追加 Step 5 段）。
+- **未修改** `C:\AI\ComfyUI_PIC`；**未修改** `pipeline.py` / `handlers.py` / `config.py`；
+  Python 侧零改动。
+- **未修改** `IPlanner` / `EditPlan` / `EditStep` / `IInferenceClient` 等已冻结签名（G3）。
+
+---
+
+## [Step 5 补完] - 2026-09-22
+
+### 目标
+
+落地 `ILlmClient` 的具体实现 `LocalLlmClient`（本地 llama-server，OpenAI 兼容），让
+`LlmPlanner` 真实可用；完成 App 层装配（`AppContext`）；并为后期「提示词重写」「多图任务」
+预留**接缝**（复用同一客户端 + 不同 options），**不实现具体场景**（§11）。
+
+### 环境确认
+
+- `netstat -ano | findstr :8080` → **无监听**；`Get-Process llama-server` → **无进程**；
+  `GET http://127.0.0.1:8080/health` → 不可达。
+- 结论：**本地 LLM 环境未就绪**；真实调用留待后续（`PlannerIntegrationTests` 以
+  `[Fact(Skip=...)]` 就位，运行前须确认 GPU 空闲，Z30）。
+- 参考：klein 启动器 `D:\devlop\klein启动器\llm_client.py`（llama-server :8080，
+  `POST /v1/chat/completions`，必带 `chat_template_kwargs.enable_thinking=False`，
+  失败去参重试 1 次；响应取 `choices[0].message.content`）。
+
+### 做了什么
+
+- **Backend 层**：
+  - 新增 `LlmClientOptions`：`Endpoint` / `Model?` / `Timeout`(30s) / `Temperature`(0.1) /
+    `MaxTokens`(2048) / `EnableThinking`(false)。**场景复用靠构造不同 options**，不新建类。
+  - 新增 `LocalLlmClient : ILlmClient`：注入 `HttpClient`；构造 OpenAI 兼容请求；
+    `EnableThinking=false` 时带 `chat_template_kwargs`；失败**去参重试 1 次**（klein 经验）；
+    HTTP 错误 / 超时 / 非法 JSON / 空 message 抛 `LlmClientException`；`ownsHttpClient` 控制
+    `HttpClient` 释放（默认不释放注入的实例）。JSON 走 **source-gen**（`LocalLlmJsonContext`，
+    SnakeCaseLower + 忽略 null），AOT 友好（App 为 `PublishAot`）。
+- **App 层**：
+  - `SettingsLoader` 重构为**多段解析**（`ParseSections`），新增 `[llm.planner]` 六键
+    （endpoint / model / temperature / max_tokens / enable_thinking / timeout_seconds）；
+    新增 `LlmPlannerSettings`；`BackendSettings` 增加 `LlmPlanner` 属性。缺省回退内置默认。
+  - `AppContext`：构造单例 `HttpClient`（`Timeout = InfiniteTimeSpan`，超时由 `LocalLlmClient`
+    统一负责）→ `LocalLlmClient`（planner options）→ `LlmPlanner`（注入 `ILlmClient` +
+    `EmptyToolRegistry`）→ `ResilientPlanner`；暴露 `IPlanner` 与 `ILlmClient`。`Dispose` 级联释放。
+  - 新增 `EmptyToolRegistry`（临时占位，Step 7 换真实 `ToolRegistry`）；否则 `LlmPlanner`
+    拿到的是 throw-only 的 `PlaceholderToolRegistry`。空注册表下 planner 使用内置
+    `inpaint` / `img2img` 默认工具描述。
+  - `settings.ini` 模板追加 `[llm.planner]` 段 + 预留段注释（`[llm.prompt_rewriter]` /
+    `[llm.multi_image]`，仅注释不解析）。
+- **测试**：新增 `LocalLlmClientTests`（6 用例，mock `HttpMessageHandler`，无 GPU）；
+  新增 `PlannerIntegrationTests`（1 用例，`Skip`）。**未改** Step 5 的 `PlannerTests`。
+- **文档**：`FROZEN.md` Step 5.3 更新为「已落地」（新增 `LlmClientOptions` / `LocalLlmClient` /
+  `EmptyToolRegistry` 行 + App 装配 + 接缝说明）；`ACCEPTANCE.md` 追加 Step 5 补完验收
+  5.11–5.18；`OPTIMIZATION.md` §2.1 追加后期接入点；本记录。
+
+### 实测
+
+- **构建**：`dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- **测试**（按 Z29 只跑受影响类，**不跑 GPU**）：
+  `dotnet test --filter "LocalLlmClientTests|PlannerTests|PlannerIntegrationTests|ContractsSmokeTests"`
+  → **21 通过 / 0 失败 / 1 跳过**（6 + 12 + 3 通过；集成用例跳过）。
+- 未启动 Python 进程、未加载模型、未占用 GPU。
+
+### 遇到的问题与解决
+
+1. **`BuildRequest` 未拿到 prompt（CS0103）**
+   - 现象：`BuildRequest(bool)` 内引用外层的 `systemPrompt` / `userPrompt`，重构后签名不带，
+     编译报「名称不存在」。
+   - 解决：`BuildRequest(string systemPrompt, string userPrompt, bool disableThinking)`，
+     显式传参。
+2. **`PlaceholderToolRegistry` 是 throw-only，不能用于装配**
+   - 现象：`LlmPlanner` 构造要求 `IToolRegistry`，直接 `All` 会抛异常。
+   - 解决：App 层新增临时 `EmptyToolRegistry`（空 `All`）；真实 `ToolRegistry` 留 Step 7。
+     LlmPlanner 对空注册表有内置 `inpaint` / `img2img` 兜底描述。
+3. **AOT 下 JSON 反射风险**
+   - 现象：App 为 `PublishAot`，`JsonSerializer` 反射序列化可能被裁剪。
+   - 解决：`LocalLlmClient` 用 **source-gen**（`LocalLlmJsonContext`），与 Backend 既有
+     `IpcJsonContext` 风格一致；构建 0 警告。
+4. **超时口径双重**
+   - 现象：`HttpClient` 默认 100s 与 options 30s 可能冲突。
+   - 解决：注入的 `HttpClient` 置 `Timeout.InfiniteTimeSpan`，由 `LocalLlmClient` 的
+     linked CTS 统一控制，`OperationCanceledException`（外部未取消）归一为 `LlmClientException`。
+5. **klein 的「去参重试」是否要照搬**
+   - 结论：照搬 1 次（`EnableThinking=false` 时首次带 `chat_template_kwargs`，抛
+     `LlmClientException` 后去掉该参数重试一次）；这是 Qwen3.5 系实测必要的兼容处理，
+     非过度设计。超时不触发重试。
+
+### 后期场景接入点（提示词重写 / 多图任务）
+
+- **复用方式**：两者都复用 `ZivAiEditor.Backend.LocalLlmClient`，**不新建客户端类**；
+  各自构造一份 `LlmClientOptions`：
+  - 提示词重写（PE-I2I 类）：`Temperature ≈ 0.7`（更有创造性）、`MaxTokens` 按需调大。
+  - 多图任务规划：`Temperature ≈ 0.2`、`MaxTokens` 按需调大。
+  - 规划器（当前）：`Temperature = 0.1`（稳定）。
+- **装配点**：`AppContext`。当前只注册 planner 一个实例（`LlmClient` 属性 + `[llm.planner]`
+  段）；后期在此按场景构造额外 `LocalLlmClient`。`settings.ini` 已预留 `[llm.prompt_rewriter]` /
+  `[llm.multi_image]` 段注释。
+- **不引入**：`ILlmClientFactory`、多实现框架等抽象（§11 反过度设计）。
+
+### 遗留项
+
+- **真实调用未验证**：`:8080` 环境未就绪；`PlannerIntegrationTests` 已就位，就绪后去掉
+  `Skip` 运行（**先确认 GPU 空闲，Z30**）。
+- **`EmptyToolRegistry` 临时**：Step 7 落地真实 `ToolRegistry` 后替换。
+- **`LlmPlanner` 不做值域校验**（`steps` / `denoise`），越界由工具 / 后端兜底。
+- **多段 settings 仅解析 `[llm.planner]`**：预留段不解析（按计划）。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本补完**无 GPU 参与**。
+- **未修改** `ILlmClient` / `IPlanner` / `EditPlan` / `EditStep` / `IInferenceClient` 签名。
+- **未修改** `C:\AI\ComfyUI_PIC`、`python/server/*`、`DOC/*.md` 的 Step 0–4 冻结行。
+
+### 真实调用验证（2026-09-22）
+
+> 用 `C:\AI\llm\启动器\llmctl.exe` 拉起 `qwythos-9b`，跑通 `LlmPlanner` 的真实计划生成，
+> 验证后立即停服务（模型串行使用，用完即关）。
+
+- **环境确认（Z30）**：启动前 `nvidia-smi` = **882 MiB / 16376 MiB**（近基线，无 ComfyUI 进程）；
+  `llmctl health` = `down`。
+- **探查**：`llmctl list` → slug `qwythos-9b`（`Qwythos-9B-v2`，ctx=65536，kv=q8_0，ngl=999，
+  reasoning on budget=256）；`server.port = 8080`（与 `settings.ini` 的 `[llm.planner]` endpoint 一致，
+  无需改配置）；`llmctl check` → `no warnings`。
+- **启动**：`llmctl start config\launcher_config.json qwythos-9b --wait 180`
+  → `health OK after 11.3s model=qwythos-9b`，pid=9320（总耗时 13.5s）。
+- **健康**：`GET /v1/models` → 200，`id=qwythos-9b`，`n_ctx=65536`，`n_params=9,197,093,888`，Q6_K。
+- **GPU（Z30）**：启动后 `nvidia-smi` = **10720 MiB**（llama-server pid 9320 占用，约 9.8 GB）；
+  无 ComfyUI 冲突。
+- **`PlannerIntegrationTests`（真实跑通，不再 Skip）**：2 用例均**通过**（见 5.3.3）。
+  - `ResilientPlanner_Plans_Against_Local_Llm`：`[raw] pong`；**`path=llm`**（未降级）；
+    `Steps.Count = 1`，`#1 img2img params=[prompt=古代中式茶肆, steps=25, denoise=1.0]`。
+  - `LlmPlanner_Handles_Complex_Prompt`（复杂 prompt「先转水墨→再换背景→保留人物」）：
+    `Steps.Count = 1`，`#1 img2img params=[prompt=水墨画风格，古代中式茶肆背景，保留前景人物, ...]`。
+  - 结论：**LlmPlanner 真实可用**（LLM 路径成功、无降级）；但**当前只生成单步计划**。
+    原因：① 系统提示词要求「用最少步骤」；② 工具注册表为空（`EmptyToolRegistry`），
+    LLM 只知道 `inpaint` / `img2img` 两个内置默认工具，缺少可组合的多步工具（Step 7）。
+    多步**解析**能力已由 `PlannerTests.LlmPlanner_Parses_MultiStep_Json_With_Order_And_DependsOn`
+    （2 步 + `depends_on` + `Order` 递增）覆盖。
+- **停服务**：`llmctl stop` → `stopped pid 9320`；`health` = `down`；8080 无 LISTENING；
+  `nvidia-smi` 回落 **847 MiB**（近基线）。
+- **测试**：`dotnet build` 0 错误 0 警告；过滤测试 **24 通过 / 0 失败**
+  （`LocalLlmClientTests` 6 + `PlannerTests` 13 + `ContractsSmokeTests` 3 + 集成 2）。
+- **遇到的问题**：
+  1. `PlannerIntegrationTests` 原本 `[Fact(Skip=...)]` 永不真跑 → 改为「服务可达才真跑、
+     不可达则快速自跳过（2s 健康探测）」，既能在就绪时真实验证，又不会拖慢离线全量测试。
+  2. live LLM 对复杂 prompt 仍选单步 → 非缺陷，见上「原因」；多步解析另有单测覆盖。
+- **模板**：新增 `settings.ini.template`（入库；`settings.ini` 仍被 `.gitignore` 忽略），
+  含 `[llm.planner]` 段与预留段注释。
