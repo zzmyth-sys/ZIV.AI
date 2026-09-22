@@ -14,6 +14,12 @@ internal sealed class HttpInferenceClient : IInferenceClient
         CancellationToken ct = default)
         => throw new NotImplementedException();
 
+    public Task<InferenceTaskHandle> SubmitEditAsync(
+        EditRequest request,
+        IProgress<InferenceProgress>? progress = null,
+        CancellationToken ct = default)
+        => throw new NotImplementedException();
+
     public Task<InferenceTask> GetTaskAsync(string taskId, CancellationToken ct = default)
         => throw new NotImplementedException();
 

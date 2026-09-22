@@ -21,6 +21,10 @@ _test_step2/shm_*
 _test_step2/*.png
 _test_step2/diagnose/*.png
 
+# Step 7 e2e 输出（保留脚本与 RESULT.md；排除 PNG / work / 日志）
+_test_step2/e2e_step7/*.png
+_test_step2/e2e_step7/work/
+
 # 运行时生成
 settings.ini
 *.log

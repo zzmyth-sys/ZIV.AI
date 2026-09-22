@@ -24,6 +24,10 @@ public sealed class ResolutionPolicy
     /// <summary>Mode=<see cref="ResolutionMode.Explicit"/>: explicit target height.</summary>
     public int? Height { get; init; }
 
-    /// <summary>Safety ceiling against UI misconfiguration (OOM guard); default 2048².</summary>
-    public int MaxPixels { get; init; } = 4_194_304;
+    /// <summary>
+    /// Safety ceiling for the total pixel count (OOM guard). It is independent of
+    /// the long-edge limit, so the official 16:9 preset (2752×1536 = 4,227,072)
+    /// is not clamped. Default 4,700,000 (Step 7 MaxPixels fix).
+    /// </summary>
+    public int MaxPixels { get; init; } = 4_700_000;
 }

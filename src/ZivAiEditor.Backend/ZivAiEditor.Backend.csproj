@@ -12,4 +12,8 @@
     <ProjectReference Include="..\ZivAiEditor.Contracts\ZivAiEditor.Contracts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="ZivAiEditor.Tests" />
+  </ItemGroup>
+
 </Project>

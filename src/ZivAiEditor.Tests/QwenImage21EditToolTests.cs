@@ -10,7 +10,7 @@ namespace ZivAiEditor.Tests;
 
 /// <summary>
 /// Step 6 <see cref="QwenImage21EditTool"/> tests (no GPU): the tool must
-/// translate a <see cref="ToolInput"/> into an <see cref="InpaintRequest"/>,
+/// translate a <see cref="ToolInput"/> into an <see cref="EditRequest"/>,
 /// forward it to the injected <see cref="IInferenceClient"/>, relay progress,
 /// and report the new output file (Z24).
 /// </summary>
@@ -39,7 +39,8 @@ public class QwenImage21EditToolTests
         var result = await tool.ExecuteAsync(input);
 
         Assert.True(result.Success);
-        var request = Assert.IsType<InpaintRequest>(client.LastRequest);
+        var request = Assert.IsType<EditRequest>(client.LastRequest);
+        Assert.Equal(EditOps.Inpaint, request.Op);
         Assert.Equal(@"C:\img\main.png", request.ImagePath);
         Assert.Equal(@"C:\img\mask.png", request.MaskPath);
         Assert.Equal("teahouse background", request.Prompt);
@@ -140,6 +141,51 @@ public class QwenImage21EditToolTests
     }
 
     [Fact]
+    public async Task QwenImage21EditTool_No_MainImage_WithPrompt_Uses_T2I()
+    {
+        var client = new FakeInferenceClient();
+        var tool = new QwenImage21EditTool(client);
+        var input = new ToolInput
+        {
+            StepId = "s1",
+            MainImagePath = "   ",
+            Mask = new MaskSpec { MaskImagePath = @"C:\img\mask.png" },
+            Parameters = new Dictionary<string, string> { ["prompt"] = "a mountain lake" },
+        };
+
+        var result = await tool.ExecuteAsync(input);
+
+        Assert.True(result.Success);
+        var request = Assert.IsType<EditRequest>(client.LastRequest);
+        Assert.Equal(EditOps.T2I, request.Op);
+        Assert.Null(request.MaskPath);
+        Assert.Null(request.ImagePath);
+    }
+
+    [Fact]
+    public async Task QwenImage21EditTool_T2I_NoWorkingDirectory_Derives_OutputPath()
+    {
+        // T2I has no source image, so the Executor supplies no working directory;
+        // the tool must still return a usable (non-null) output path.
+        var client = new FakeInferenceClient();
+        var tool = new QwenImage21EditTool(client);
+        var input = new ToolInput
+        {
+            StepId = "s1",
+            MainImagePath = "",
+            WorkingDirectory = "",
+            Parameters = new Dictionary<string, string> { ["prompt"] = "a mountain lake" },
+        };
+
+        var result = await tool.ExecuteAsync(input);
+
+        Assert.True(result.Success);
+        var expected = Path.Combine(Path.GetTempPath(), "zivai", "s1.png");
+        Assert.Equal(expected, result.OutputImagePath);
+        Assert.Equal(expected, client.LastRequest!.OutputPath);
+    }
+
+    [Fact]
     public async Task Execute_MissingPrompt_Returns_Failure()
     {
         var client = new FakeInferenceClient();
@@ -218,12 +264,18 @@ public class QwenImage21EditToolTests
 
     private sealed class FakeInferenceClient : IInferenceClient
     {
-        public InpaintRequest? LastRequest { get; private set; }
+        public EditRequest? LastRequest { get; private set; }
 
         public double[] ProgressFractions { get; init; } = Array.Empty<double>();
 
         public Task<InferenceTaskHandle> SubmitInpaintAsync(
             InpaintRequest request,
+            IProgress<InferenceProgress>? progress = null,
+            CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<InferenceTaskHandle> SubmitEditAsync(
+            EditRequest request,
             IProgress<InferenceProgress>? progress = null,
             CancellationToken ct = default)
         {

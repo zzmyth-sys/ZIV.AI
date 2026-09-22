@@ -1,7 +1,7 @@
 # ZIV.AI IPC 传输契约（IPC Protocol）
 
-- 文档状态：**Step 2 冻结**（2026-09-21）；**修订至 ipc_version 0.6**（Step 6.5 修订后）
-- **ipc_version：`0.6`**
+- 文档状态：**Step 2 冻结**（2026-09-21）；**修订至 ipc_version 0.7**（Step 7 修订后）
+- **ipc_version：`0.7`**
 - 用途：定义 C# 前端（`ZivAiEditor.App` / `ZivAiEditor.Backend`）与 Python 推理进程之间的
   **跨进程传输契约**。取代 Step 1 的「OpenAPI 作为跨进程唯一契约」定位（见 `FROZEN.md` Step 2）。
 - 依据：`_test_step2/REPORT.md`（11 项实测）。
@@ -56,6 +56,19 @@
 >   只按字段执行（Z23）。
 > - 属**向后兼容的协议扩展**：新字段可选，旧端忽略即可，缺省行为与 0.5 完全一致。
 > - `mode` 取值：`side`（长边）/ `area`（总像素）/ `scale`（输入长边 × 倍数）/ `explicit`（宽×高）。
+
+> **修订记录（ipc_version 0.6 → 0.7，2026-09-22 · Step 7 修订后）**
+>
+> - **`op` 取值集合收敛为 `t2i` / `inpaint` / `outpaint`**（§3.4）：`img2img` /
+>   `segment` / `upscale` 从未实现，本步明确移除；Segment / Upscale 记为 Step 7.5 候选。
+> - **`submit.payload.image_path` 改为可选**（§3.4）：`op="t2i"` 时缺省 / `null`，
+>   后端走无源图路径（`_size_for_no_source`，纯文本条件 + 零 latent）。
+> - **`submit.payload` 新增可选字段 `anchor`**（§3.4）：`op="outpaint"` 时指定原图在
+>   扩展画布中的位置（9 宫格）；缺省 / `null` = `center`。
+> - **C# 侧契约**：新增 `EditRequest` + `IInferenceClient.SubmitEditAsync`（`FROZEN.md` Step 7）；
+>   `InpaintRequest` / `SubmitInpaintAsync` 保持不变，作为 inpaint-only 兼容入口。
+> - 属**向后兼容的协议扩展**：`op` 缺省仍视为 `inpaint`，`image_path` / `anchor` 可选，
+>   旧端忽略即可；`config.PROTOCOL_VERSION` 同步升 `0.7`。
 
 ---
 
@@ -150,12 +163,16 @@
   "output_path": null,
   "lora": null,
   "optimizations": null,
-  "resolution": null
+  "resolution": null,
+  "anchor": null
 }
 ```
 
-- `op`（消息顶层）取值：`inpaint` / `img2img` / `upscale` / `segment` / `outpaint`
-  （对应 `openapi.yaml` 的端点；`openapi.yaml` 现为 Schema 参考）。
+- `op`（消息顶层）取值：`t2i` / `inpaint` / `outpaint`（Step 7 收敛；缺省视为 `inpaint`）。
+  - `t2i`：文生图，`image_path` 缺省 / `null`，纯文本条件 + 零 latent。
+  - `inpaint`：有 `mask_path` 时局部编辑；无 mask 时参考条件编辑。
+  - `outpaint`：`image_path` 必填，按 `anchor` 扩展画布，`mask_path` 由后端生成。
+- `image_path` 为可选（Step 7）：`t2i` 时为 `null`；其余 op 必填。
 - `mask_path` 为二值 PNG（只含 0 / 255，Z19）；缺省表示整图。
 - 模型路径由**后端配置**提供（绝对路径直传），**不**在 payload 内（见 §6）。
 
@@ -199,6 +216,16 @@
 - **C# 侧翻译**：用户 tier（`Fast`=1024 / `Balanced`=1536 / `HighQuality`=2048，Qwen-2.1）
   在 `ResolutionResolver` 译为绝对 `side` 后发送；**Python 无状态**，只按字段执行（Z23）。
 - **向后兼容**：字段缺失或 `null` 时行为与 **0.5 完全一致**（用 `config` 默认分辨率）。
+
+**可选字段（Step 7 / ipc_version 0.7）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `anchor` | string \| null | `op="outpaint"` 时原图在扩展画布中的位置：`center` / `left` / `right` / `top` / `bottom` / `top-left` / `top-right` / `bottom-left` / `bottom-right`。缺省 / `null` = `center`。 |
+
+- `outpaint` 的目标尺寸由 `resolution`（`mode="explicit"`）给出；后端据此创建画布，
+  把原图按 `anchor` 贴入，并生成覆盖新区域的二值 mask，复用 inpaint 采样路径。
+- **向后兼容**：字段缺失或 `null` 时行为与 **0.6 完全一致**（无 outpaint 调用）。
 
 ### 3.5 `preview` 二进制帧（`0x02`）
 
@@ -262,7 +289,7 @@ C#(server)                                              Python(client)
 
 ## 7. 版本与兼容
 
-- **`ipc_version`：`0.6`**（管道名 `\\.\pipe\zivai.infer.v1` 为**通道版本**，与协议版本独立）。
+- **`ipc_version`：`0.7`**（管道名 `\\.\pipe\zivai.infer.v1` 为**通道版本**，与协议版本独立）。
   `ipc_version 0.1` 为**追溯设定**（原文档无版本字段）。
 - **0.1 → 0.2 变更点**：
   1. **管道方向**：`Python=server / C#=client` → `C#=Server / Python=Client`（C# 掌控 Python 生命周期，启动无竞态）。
@@ -285,7 +312,14 @@ C#(server)                                              Python(client)
   1. **`submit.payload` 新增可选字段** `resolution`（§3.4）：目标输出分辨率
      （`side` / `area` / `scale` / `explicit` + `max_pixels` 安全上限）。C# 侧把用户 tier
      译为绝对数值，Python 无状态执行。**向后兼容**：字段可选，缺省行为与 0.5 完全一致
-     （用 `config` 默认分辨率）；`config.PROTOCOL_VERSION` 同步升 `0.6`。
+      （用 `config` 默认分辨率）；`config.PROTOCOL_VERSION` 同步升 `0.6`。
+- **0.6 → 0.7 变更点**（Step 7）：
+  1. **`op` 取值收敛**为 `t2i` / `inpaint` / `outpaint`（§3.4）；`img2img` / `segment` /
+     `upscale` 从未实现，明确移除（Segment / Upscale 记 Step 7.5 候选）。**向后兼容**：
+     缺省仍视为 `inpaint`。
+  2. **`image_path` 改为可选**：`op="t2i"` 时 `null`，后端走无源图路径。
+  3. **`submit.payload` 新增可选字段 `anchor`**（§3.4）：`outpaint` 的原图 9 宫格位置。
+     **向后兼容**：字段可选，缺省行为与 0.6 一致；`config.PROTOCOL_VERSION` 同步升 `0.7`。
 - 协议变更时升 `ipc_version`（必要时同时升管道名 `v2`），旧前端可并存。
 - `openapi.yaml` 保留为 **Schema 参考**（`ImageEditRequest` / `TaskAccepted` /
   `TaskStatusResponse` 等结构即本协议 payload 的形状来源）。

@@ -23,19 +23,24 @@ from datetime import datetime
 
 import config
 import model_loader
+import outpaint
 import pipeline_hooks
 import preview as preview_module
 
 _LOG = logging.getLogger("zivai.server")
 
 
-def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cancel=None):
+def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cancel=None,
+        mask_binary=True):
     """Run one inpaint / edit request.
 
     ``on_progress(step, total, fraction, stage, message)`` and
     ``on_preview(step, total, jpeg_bytes)`` are optional callbacks invoked from
     the sampler callback (same thread). ``poll_cancel`` is drained once per step
     so a `cancel` frame can raise the interrupt flag mid-sampling (Step 2.4).
+
+    ``mask_binary`` keeps the Z19 rule for user/C# masks (0 / 255); the outpaint
+    path passes ``False`` so its backend-generated feathered mask stays soft.
 
     Retries at lower resolutions on CUDA OOM (Step 4).
     """
@@ -69,7 +74,7 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
             return _run_once(
                 model, clip, vae, prompt, image_path, mask_path, output_path,
                 spec, steps, seed, denoise, started,
-                on_progress, on_preview, poll_cancel,
+                on_progress, on_preview, poll_cancel, mask_binary,
             )
         except oom_types as exc:
             last_error = exc
@@ -85,9 +90,61 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
     raise RuntimeError("no resolution candidate produced output")
 
 
+def run_outpaint(model, clip, vae, request, on_progress=None, on_preview=None, poll_cancel=None):
+    """Run one outpaint request (Step 7 Phase 2).
+
+    Builds a canvas + mask from the source at an anchored position, then derives
+    an explicit-resolution request so the existing inpaint path does the work.
+    """
+    import tempfile
+
+    image_path = request.get("image_path")
+    if not image_path:
+        raise ValueError("outpaint requires image_path")
+
+    spec = _normalize_payload_resolution(request.get("resolution"), image_path)
+    if not spec or spec.get("mode") != "explicit":
+        raise ValueError("outpaint requires an explicit resolution (width/height)")
+
+    target_w = outpaint.snap16(spec.get("width"))
+    target_h = outpaint.snap16(spec.get("height"))
+    anchor = outpaint.normalize_anchor(request.get("anchor"))
+
+    workdir = tempfile.mkdtemp(prefix="zivai_outpaint_")
+    try:
+        canvas_path, mask_path = outpaint.build_outpaint(
+            image_path, target_w, target_h, anchor, workdir
+        )
+        derived = dict(request)
+        derived["image_path"] = canvas_path
+        derived["mask_path"] = mask_path
+        derived["resolution"] = {
+            "mode": "explicit",
+            "width": target_w,
+            "height": target_h,
+            "max_pixels": spec.get("max_pixels"),
+        }
+        return run(
+            model, clip, vae, derived,
+            on_progress=on_progress, on_preview=on_preview, poll_cancel=poll_cancel,
+            mask_binary=False,
+        )
+    finally:
+        _remove_tree(workdir)
+
+
+def _remove_tree(path):
+    import shutil
+
+    try:
+        shutil.rmtree(path, ignore_errors=True)
+    except Exception:
+        pass
+
+
 def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
               spec, steps, seed, denoise, started,
-              on_progress, on_preview, poll_cancel):
+              on_progress, on_preview, poll_cancel, mask_binary=True):
     import comfy.model_management as mm
     import comfy.sample
     from comfy_extras.nodes_model_advanced import ModelSamplingAuraFlow
@@ -98,7 +155,7 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
 
     # Stage 2: encode the prompt + optional reference image (clip is patched).
     positive, negative, latent_image, mask = encode_prompt(
-        clip, vae, prompt, image_path, mask_path, spec=spec
+        clip, vae, prompt, image_path, mask_path, spec=spec, mask_binary=mask_binary
     )
 
     previewer = preview_module.get_previewer(model)
@@ -150,13 +207,15 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
     }
 
 
-def encode_prompt(clip, vae, prompt, image_path, mask_path, resolution=None, mode=None, spec=None):
+def encode_prompt(clip, vae, prompt, image_path, mask_path, resolution=None, mode=None, spec=None,
+                  mask_binary=True):
     """Pipeline stage: conditioning + latents from the prompt / reference.
 
     ``spec`` (Step 6.5) is a normalized resolution dict; when omitted the legacy
     ``resolution`` / ``mode`` arguments are used (backward compatible).
+    ``mask_binary`` is passed through to ``_encode`` (outpaint uses a soft mask).
     """
-    return _encode(clip, vae, prompt, image_path, mask_path, resolution, mode, spec)
+    return _encode(clip, vae, prompt, image_path, mask_path, resolution, mode, spec, mask_binary)
 
 
 def sample(model, positive, negative, latent, noise, steps, denoise, mask, seed, callback):
@@ -428,7 +487,8 @@ def _free_vram():
         pass
 
 
-def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None, spec=None):
+def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None, spec=None,
+            mask_binary=True):
     """Encode prompt + optional source image into conditioning / latents.
 
     Returns ``(positive, negative, latent_samples, denoise_mask)``. With a mask
@@ -451,7 +511,7 @@ def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None, spe
         spec = {"mode": mode, "value": int(resolution or default_resolution)}
 
     source = _load_image_tensor(image_path) if image_path else None
-    mask = _load_mask_tensor(mask_path) if mask_path else None
+    mask = _load_mask_tensor(mask_path, binary=mask_binary) if mask_path else None
 
     references = []
     images_vl = []
@@ -510,14 +570,16 @@ def _load_image_tensor(path):
     return torch.from_numpy(array)[None, ...]  # [1,H,W,3]
 
 
-def _load_mask_tensor(path):
+def _load_mask_tensor(path, binary=True):
     import numpy as np
     import torch
     from PIL import Image
 
     image = Image.open(path).convert("L")
     array = np.asarray(image).astype(np.float32) / 255.0
-    array = (array >= 0.5).astype(np.float32)  # Z19: force binary 0 / 1
+    if binary:
+        array = (array >= 0.5).astype(np.float32)  # Z19: user/C# masks are binary 0 / 1
+    # binary=False keeps the soft 0..1 ramp of a backend-generated outpaint mask.
     return torch.from_numpy(array)[None, ...]  # [1,H,W]
 
 

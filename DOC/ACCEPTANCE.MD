@@ -758,3 +758,81 @@ IPC submit.payload.resolution → Python`；引入 `ModelProfile` 支持未来�
 1. 追加 `DEVLOG.md` 的 Step 6.5 记录（本步已完成）
 2. 在「验收记录」追加“Step 6.5 通过，日期：____”（待签）
 3. 进入 Step 7：Tools（`upscale` 等首批工具，使用 `Scale` / `Explicit` 模式）
+
+> **修订（Step 7）**：上文第 3 条「Step 7 首批工具为 `upscale` 等」以 Step 7 验收为准——
+> 经可行性调研，**本步首批工具为 `QW21outpaint` + T2I**；`upscale` 需独立超分模型，
+> `segment` 走 Qwen-Image-2.1 **原生 RGBA**（无需独立模型）；二者记为 **Step 7.5 候选**，
+> 本步不注册。
+>
+> **更正（2026-09-22）**：本行初稿曾写「`upscale`（及 `segment`）需独立模型」——其中
+> `segment` 部分**有误**，以本更正为准。
+
+---
+
+## Step 7 验收：工具集扩展 + 泛化提交入口 + T2I + MaxPixels 修正
+
+**目标**：① 泛化提交入口（`EditRequest` + `SubmitEditAsync`）② 新增 `QW21outpaint`
+③ 支持 T2I（文生图）④ 修正 `MaxPixels`（16:9 预设不再被 clamp）⑤ Segment / Upscale 记为
+Step 7.5 候选。范围外：UI（Step 9）、独立超分模型 / 后处理抠图模型、GPU 端到端（Z29/Z30）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ |
+| G2 | 依赖方向没破 | 改动在 Contracts / Backend / Agent / Tools / App / Tests / Python；无新增项目引用（仅 Backend 加 `InternalsVisibleTo`） | ✅ |
+| G3 | 接口与 FROZEN 一致 | `SubmitInpaintAsync` / `InpaintRequest` / `IEditTool` / `IToolRegistry` / `IExecutor` 签名未改；`IInferenceClient` **仅新增** `SubmitEditAsync` | ✅ |
+| G4 | 未授权修改检查 | Step 0–6.5 冻结行未改；契约变更走 Step 7 冻结节 | ✅ |
+| G5 | 文档已更新 | `FROZEN` 7.1–7.6 / `DEVLOG` Step 7 / `ACCEPTANCE` Step 7 / `SPEC` §3.1 / `OPTIMIZATION` §7 / `ipc-protocol` 0.7 | ✅ |
+| G6 | 便携性未破 | 未引入注册表 / 外部路径配置 | ✅ |
+| G7 | AI 推理进程隔离未破 | 仅经 IPC 传数值 / 路径；C# 不加载 Python（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 7.1 | 新增契约 | 查 `Contracts/Inference` | `EditRequest`（`Op`/`ImagePath?`/`MaskPath`/`Prompt`/`Steps`/`Seed`/`Denoise`/`OutputPath`/`Resolution`/`Lora`/`Optimizations`/`Anchor`）+ `EditOps` 常量存在 | ✅ |
+| 7.2 | 泛化提交 | 查 `IInferenceClient` / `IpcInferenceClient` | `SubmitEditAsync` 就绪；`SubmitInpaintAsync` 构造 `EditRequest{Op=Inpaint}` 委托、签名/语义不变 | ✅ |
+| 7.3 | IPC 序列化 | `IpcSubmitMapperTests` | op / anchor / null `image_path` 正确映射；`Resolution` 透传 | ✅ |
+| 7.4 | Outpaint 工具 | `QwenImage21OutpaintToolTests` | `CanHandle` 仅 `QW21outpaint`；转发 `Op=outpaint`/`Anchor`/`Resolution`；非 Explicit 分辨率失败且不提交；返回输出路径；进度转发 | ✅ |
+| 7.5 | T2I 分支 | `QwenImage21EditToolTests` | 主图空白 + prompt 非空 → `Op=t2i`、`ImagePath=null`、`MaskPath=null`；有主图 → `Op=inpaint` | ✅ |
+| 7.6 | Planner T2I | `PlannerTests` | `FallbackPlanner` / `LlmPlanner`：无主图 + prompt → T2I 计划；皆空 → `ArgumentException` | ✅ |
+| 7.7 | Python op 分发 | 查 `handlers.py` | `outpaint`→`run_outpaint`；`t2i`/`inpaint`/缺省→`run`；未知→warn+回退；`config.PROTOCOL_VERSION="0.7"` | ✅（只读确认） |
+| 7.8 | Outpaint 几何 | `python/server/test_outpaint.py` | `snap16` / `normalize_anchor`（非法→center）/ `anchor_position` / `build_outpaint`（画布+掩膜）；纯 CPU 无 comfy 依赖；**9 通过 / 0 失败** | ✅ |
+| 7.9 | MaxPixels 修正 | `ResolutionPolicyTests` | `FromTier` 读 `profile.MaxPixels`；`MaxPixels` 独立于 `SafeMaxSide²`；16:9 预设（4,227,072）不超限 | ✅ |
+| 7.10 | 契约升版 | 查 `ipc-protocol.md` / `config.py` | `ipc_version 0.7`；§3.4 op 集合 `t2i`/`inpaint`/`outpaint`、`image_path` 可选、`anchor`；§7 有 0.6→0.7 变更点 | ✅ |
+| 7.11 | SPEC 修订 | 查 `SPEC.md` §3.1 | 主图缺失 + prompt 非空 → T2I；皆空 → 拒绝 | ✅ |
+| 7.12 | App 注册 | 查 `AppContext.cs` | 注册 `QwenImage21EditTool` + `QwenImage21OutpaintTool`；Segment / Upscale 不注册 | ✅ |
+| 7.13 | 构建 / 测试 | `dotnet build` / `dotnet test`（受影响类） | 0 错误 0 警告；**76 通过 / 0 失败** | ✅ |
+| 7.14 | Python 编译 | `python -m py_compile` | 4 个改动文件通过 | ✅ |
+| 7.15 | Python 单测 | `python -m unittest test_outpaint` | outpaint 几何 **9 通过 / 0 失败**（纯 CPU） | ✅ |
+| 7.16 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+
+### Step 7 通过标准
+
+- 通用 G1–G8 全过
+- 专属 7.1–7.15 全过
+
+### Step 7 遗留说明（非阻断）
+
+- **Segment（原生 RGBA）未实现**：Qwen-Image-2.1 **原生支持 RGBA 抠图**（VAE 64 通道含 alpha，
+  去噪直接生成透明度），走 `QW21segment` 复用 `QW21edit` 同管线，**无需独立模型**；登记于
+  `OPTIMIZATION.md` §7.1，作为 **Step 7.5 候选**，可 GPU 实测。
+- **Upscale 未实现**：需独立超分模型（Real-ESRGAN / 4x-UltraSharp），登记于 `OPTIMIZATION.md`
+  §7.3，作为 **Step 7.5 候选**。
+- **对已有 RGB 图抠图（后处理）**：独立抠图模型 BiRefNet / RMBG-2.0，属**独立候选 / 替代路径**
+  （**非 Segment 依赖**，与原生路径不叠加），待真实需求引入（`OPTIMIZATION.md` §7.2）。
+- **（更正）** 原「Segment / Upscale 未实现：需独立模型（BiRefNet / RMBG-2.0；Real-ESRGAN /
+  4x-UltraSharp）」中，**Segment 的「需独立模型」表述有误**，以本节为准。
+- **Python 侧测试覆盖不均**：outpaint 几何已由 `test_outpaint.py`（9 例）覆盖；op 分发与
+  `run_outpaint` 临时目录清理仍仅 `py_compile` + 只读确认。
+- **Outpaint 未 GPU 实测**：画布 / 掩膜对齐、大尺寸 OOM 行为待实测。
+- **`LlmPlanner` 尚不能产出 `QW21outpaint`**：系统提示词仅要求 T2I。
+- UI 未实现（Step 9）。
+
+### Step 7 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 7 记录（本步已完成）
+2. 在「验收记录」追加“Step 7 通过，日期：____”（待签）
+3. 进入 Step 7.5（原生 Segment / 独立超分）或 Step 8，由用户决定

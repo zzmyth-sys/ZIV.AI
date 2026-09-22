@@ -26,6 +26,9 @@ public sealed class ModelProfileRegistry : IModelProfileRegistry
             DisplayName = "Qwen-Image-2.1",
             NativeSide = 2048,
             SafeMaxSide = 2048,
+            // Step 7: total-pixel ceiling independent of SafeMaxSide²; covers the
+            // official 16:9 preset (2752×1536 = 4,227,072).
+            MaxPixels = 4_700_000,
             MinSide = 512,
             MultipleOf = 16,
             TierSides = new Dictionary<ResolutionTier, int>

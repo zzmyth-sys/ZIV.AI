@@ -14,6 +14,12 @@ namespace ZivAiEditor.Agent;
 /// and the backend pick the masked vs reference path automatically, so no
 /// separate img2img tool is needed. This is not classic img2img (which starts
 /// from the source latent); see <c>OPTIMIZATION.md</c>.
+///
+/// Per <c>SPEC.md</c> §3.1 a main image is no longer mandatory: when
+/// <see cref="PlanRequest.MainImagePath"/> is empty but <see cref="PlanRequest.Prompt"/>
+/// is non-empty, the same single <c>QW21edit</c> step is emitted and the tool
+/// selects <c>op="t2i"</c> itself. The request is rejected only when both the
+/// main image and the prompt are empty.
 /// </summary>
 public sealed class FallbackPlanner : IPlanner
 {
@@ -25,10 +31,11 @@ public sealed class FallbackPlanner : IPlanner
         ArgumentNullException.ThrowIfNull(request);
         ct.ThrowIfCancellationRequested();
 
-        if (string.IsNullOrWhiteSpace(request.MainImagePath))
+        if (string.IsNullOrWhiteSpace(request.MainImagePath)
+            && string.IsNullOrWhiteSpace(request.Prompt))
         {
             throw new ArgumentException(
-                "PlanRequest.MainImagePath is required (SPEC.md §3.1: the main image is mandatory).",
+                "PlanRequest requires a main image or a non-empty prompt (SPEC.md §3.1).",
                 nameof(request));
         }
 

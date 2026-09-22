@@ -175,3 +175,72 @@
   `pipeline._release` 手动分时卸载 A/B 对照无收益（19.96 / 18.12 s），已移除。
 - 已知风险：`comfy_aimdo.control.init()` 必须先于 `comfy_aimdo.host_buffer` 的首次 import，
   否则 `host_buffer.lib` 被冻结为 `None`（见 `FROZEN.md` §6.6）。
+
+## 7. 工具能力候选（Step 7.5）
+
+> 登记于 Step 7 可行性调研；**本步不实现、不注册**（ARCHITECTURE.md §11）。
+> Qwen-Image-2.1 **原生支持 RGBA 抠图**（VAE 64 通道含 alpha，去噪直接生成透明度）；
+> **超分无原生能力**，需独立模型。候选列入 **Step 7.5**。
+
+> **更正（2026-09-22 · Segment 定位修正）**：本段初稿曾判定「Segment 去背景：❌ Qwen-Image-2.1
+> 无原生 RGBA / alpha 输出，无法做真正的去背景；需独立模型 BiRefNet（~2.2GB）/ RMBG-2.0
+> （~1.5GB）」。该判定**有误**：Qwen-Image-2.1 的 VAE 为 **64 通道 RGBA**，alpha 通道是潜空间
+> 的一等公民，模型在去噪过程中直接生成透明度；ComfyUI v0.37.0 官方提供「Remove Background」
+> 模板，从采样器出来即为透明 PNG，不需要 matting 模型或背景去除节点。以下按正确认识重写为
+> **两条独立条目**（原生抠图 / 对已有 RGB 图的后处理抠图）；**原判断原文保留于本更正框内**。
+
+### 7.1 Segment（`QW21segment`）—— 原生路径（Step 7.5 候选）
+
+- **机制**：Qwen-Image-2.1 **原生 RGBA 输出**（VAE 64 通道含 alpha），生成时直接输出透明度。
+- **实现**：走 `QW21edit` **同管线**，提示词含 `transparent background` / `RGBA` /
+  `alpha channel`；C# 侧新增 `QW21segment` 工具
+  （`Capabilities=["segment","remove-background","rgba"]`），输出透明背景 PNG。
+- **依赖**：**无需新模型**。
+- **状态**：**Step 7.5 候选**（本轮未实测）。
+- **依据**：ComfyUI v0.37.0 官方「Remove Background」模板。
+
+### 7.2 对已有 RGB 图抠图 —— 后处理路径（待真实需求）
+
+- **机制**：**独立抠图模型**（BiRefNet ~2.2 GB / RMBG-2.0 ~1.5 GB）对**已有的 RGB 图**做分割，
+  输出透明 PNG。
+- **适用**：用户上传一张照片，要抠出主体（**不是**生成时透明）。
+- **依赖**：`models/background_removal/` 权重（当前仅占位文件）；ComfyUI 核心
+  `comfy_extras/nodes_bg_removal.py`（`LoadBackgroundRemovalModel` + `RemoveBackground`）。
+- **定位**：与 7.1 **解决的问题相同**（得到透明背景 PNG），**机制不同**；二者**不叠加**，
+  是**替代路径 / 独立入口**——BiRefNet / RMBG-2.0 **不是** Segment 的依赖。
+- **状态**：待真实需求引入，**非当前范围**。
+
+### 7.3 Upscale 放大（候选）
+
+- **结论**：❌ Qwen-Image-2.1 非超分模型；「编辑指令精细化」本质是**重绘**不是放大。
+  本步 UI 上的替代方案是「高质」tier（用户直接选 2048 出图），不引入伪放大。
+- **ComfyUI 支持**：核心 `comfy_extras/nodes_upscale_model.py`
+  （`UpscaleModelLoader` + `ImageUpscaleWithModel`，含分块 `tiled_scale` + OOM 自动降 tile）。
+- **候选模型**（盘上已有，`C:\AI\ComfyUI_PIC\ComfyUI\models\upscale_models\`）：
+  | 模型 | 倍率 | 显存（估） | 说明 |
+  |---|---|---|---|
+  | Real-ESRGAN x4plus | 4× | ~1–2 GB | 通用超分 |
+  | 4x-UltraSharp | 4× | ~1–2 GB | 锐利，适合插画 |
+  | Real-ESRGAN x2plus | 2× | ~1–2 GB | 低倍率 |
+  | 4x_foolhardy_Remacri | 4× | ~1–2 GB | 摄影向 |
+- **实现路径**：Python 侧 `op="upscale"` 分支调用 `ImageUpscaleWithModel`（可用
+  `Scale` 模式或直接指定倍率）；C# 侧新增 `QW21upscale` 工具（`Capabilities=["upscale"]`）。
+  与生成式编辑不同，超分不采样，可与主模型分时驻留（Z21）。
+
+### 7.4 Outpaint Inpainting ControlNet（候选，未采取）
+
+> 登记于 Step 7 outpaint 对齐官方工作流之后；**本步未采取**，后续有需求再评估。
+
+- **背景**：官方蓝图 `ComfyUI/blueprints/Image Outpainting (Qwen-Image).json` 的完整链路为
+  `ImagePadForOutpaint`（灰 0.5 + feathering）+ `Grow and Blur Mask` + **`ControlNetInpaintingAliMamaApply`**
+  （`Qwen-Image-InstantX-ControlNet-Inpainting.safetensors`）+ KSampler。
+- **Step 7 已采取（方案 A）**：仅对齐**画布填充 + 掩膜羽化/生长**两段，扩图走现有 `noise_mask`
+  软掩膜路径（实测无黑边源图无缝外扩，中心 MAD 1.4 / corr 0.9994）。
+- **未采取**：**Inpainting ControlNet 引导**（官方第三段）。
+- **候选权重**（盘上已有，`C:\AI\ComfyUI_PIC\ComfyUI\models\controlnet\`）：
+  `Qwen-Image-InstantX-ControlNet-Inpainting.safetensors`、
+  `Qwen-Image-ControlNet-Union .safetensors`。
+- **风险 / 前置**：官方蓝图面向 **Qwen-Image v1**（`qwen_image_fp8_e4m3fn` / `qwen_2.5_vl_7b` /
+  `qwen_image_vae`）；我们用的是 **Qwen-Image-2.1**，**无官方 2.1 outpaint 模板**，v1 ControlNet
+  与 2.1 的兼容性**未验证**。若引入需先做**小样实测**（画质 / 显存 / 耗时），再决定是否入管线。
+- **触发条件**：当新区域与原图一致性要求提高、或方案 A 的软掩膜仍不满足时再评估。

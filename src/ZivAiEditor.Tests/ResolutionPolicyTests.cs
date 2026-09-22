@@ -51,6 +51,32 @@ public class ResolutionPolicyTests
 
         var policy = ResolutionResolver.FromTier(ResolutionTier.Balanced, profile);
 
-        Assert.Equal(profile.SafeMaxSide * profile.SafeMaxSide, policy.MaxPixels);
+        Assert.Equal(profile.MaxPixels, policy.MaxPixels);
+    }
+
+    [Fact]
+    public void MaxPixels_Is_Independent_Of_SafeMaxSide()
+    {
+        var profile = Profile();
+
+        Assert.NotEqual(profile.SafeMaxSide * profile.SafeMaxSide, profile.MaxPixels);
+
+        var policy = ResolutionResolver.FromTier(ResolutionTier.Balanced, profile);
+
+        Assert.Equal(profile.MaxPixels, policy.MaxPixels);
+    }
+
+    [Fact]
+    public void Preset_16x9_Does_Not_Exceed_MaxPixels()
+    {
+        var profile = Profile();
+        var preset = profile.Presets.Single(p => p.Name == "16:9");
+        var area = preset.Width * preset.Height;
+
+        Assert.Equal(2752, preset.Width);
+        Assert.Equal(1536, preset.Height);
+        Assert.Equal(4_227_072, area);
+        Assert.True(area <= profile.MaxPixels);
+        Assert.True(area > profile.SafeMaxSide * profile.SafeMaxSide);
     }
 }

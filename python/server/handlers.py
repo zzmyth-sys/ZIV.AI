@@ -118,9 +118,10 @@ def handle_submit(message, frame_io):
     """
     task_id = message.get("task_id") or uuid.uuid4().hex
     payload = message.get("payload") or {}
+    op = str(message.get("op") or "inpaint").strip().lower()
     _set_active(task_id)
     try:
-        _run_submit(frame_io, task_id, payload)
+        _run_submit(frame_io, task_id, payload, op)
     finally:
         _ENGINE.touch()
         _clear_active(task_id)
@@ -141,7 +142,7 @@ def handle_cancel(message, frame_io):
     return "continue"
 
 
-def _run_submit(frame_io, task_id, payload):
+def _run_submit(frame_io, task_id, payload, op="inpaint"):
     try:
         frame_io.write_json({"type": "accepted", "task_id": task_id})
         # Must precede any `import comfy.model_management`: it fixes the
@@ -173,15 +174,7 @@ def _run_submit(frame_io, task_id, payload):
 
         model, clip, vae = _ENGINE.components
         try:
-            result = pipeline.run(
-                model,
-                clip,
-                vae,
-                payload,
-                on_progress=_make_sampling_progress(frame_io, task_id),
-                on_preview=_make_preview(frame_io, task_id),
-                poll_cancel=_make_cancel_poller(frame_io),
-            )
+            result = _dispatch_op(model, clip, vae, payload, op, frame_io, task_id)
         except Exception as exc:
             _write_error(frame_io, task_id, "inference_failed", exc)
             return
@@ -204,6 +197,21 @@ def _run_submit(frame_io, task_id, payload):
             raise
         _release_caches()
         _write_canceled(frame_io, task_id)
+
+
+def _dispatch_op(model, clip, vae, payload, op, frame_io, task_id):
+    """Route ``submit.op`` to the matching pipeline entry (Step 7 Phase 2)."""
+    callbacks = {
+        "on_progress": _make_sampling_progress(frame_io, task_id),
+        "on_preview": _make_preview(frame_io, task_id),
+        "poll_cancel": _make_cancel_poller(frame_io),
+    }
+    if op == "outpaint":
+        return pipeline.run_outpaint(model, clip, vae, payload, **callbacks)
+    if op in ("", "inpaint", "t2i"):
+        return pipeline.run(model, clip, vae, payload, **callbacks)
+    _LOG.warning("unknown op %r; falling back to inpaint", op)
+    return pipeline.run(model, clip, vae, payload, **callbacks)
 
 
 def _configure_pre_sampling_hooks(payload):

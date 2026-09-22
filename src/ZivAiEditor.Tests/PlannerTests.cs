@@ -53,9 +53,22 @@ public class PlannerTests
     }
 
     [Fact]
-    public async Task FallbackPlanner_MissingMainImage_Throws()
+    public async Task FallbackPlanner_MissingMainImage_WithPrompt_Produces_T2I()
     {
-        var request = new PlanRequest { Prompt = "x" };
+        var request = new PlanRequest { Prompt = "a cat" };
+
+        var plan = await new FallbackPlanner().PlanAsync(request);
+
+        Assert.True(string.IsNullOrWhiteSpace(plan.MainImagePath));
+        var step = Assert.Single(plan.Steps);
+        Assert.Equal(FallbackPlanner.EditToolName, step.ToolName);
+        Assert.Equal("a cat", step.Parameters["prompt"]);
+    }
+
+    [Fact]
+    public async Task FallbackPlanner_MissingMainImage_NoPrompt_Throws()
+    {
+        var request = new PlanRequest();
         await Assert.ThrowsAsync<ArgumentException>(() => new FallbackPlanner().PlanAsync(request));
     }
 
@@ -87,6 +100,33 @@ public class PlannerTests
 
         var step = Assert.Single(plan.Steps);
         Assert.Equal("img2img", step.ToolName);
+    }
+
+    [Fact]
+    public async Task LlmPlanner_No_MainImage_WithPrompt_Produces_T2I()
+    {
+        const string json =
+            "{\"steps\":[{\"tool\":\"QW21edit\",\"params\":{\"prompt\":\"a cat\"}}]}";
+        var planner = new LlmPlanner(new FakeLlmClient(json), new EmptyToolRegistry());
+        var request = new PlanRequest { Prompt = "a cat" };
+
+        var plan = await planner.PlanAsync(request);
+
+        Assert.True(string.IsNullOrWhiteSpace(plan.MainImagePath));
+        var step = Assert.Single(plan.Steps);
+        Assert.Equal(FallbackPlanner.EditToolName, step.ToolName);
+        Assert.Equal("a cat", step.Parameters["prompt"]);
+    }
+
+    [Fact]
+    public async Task LlmPlanner_No_MainImage_NoPrompt_Throws()
+    {
+        var llm = new FakeLlmClient("{\"steps\":[{\"tool\":\"QW21edit\",\"params\":{\"prompt\":\"x\"}}]}");
+        var planner = new LlmPlanner(llm, new EmptyToolRegistry());
+
+        await Assert.ThrowsAsync<ArgumentException>(() => planner.PlanAsync(new PlanRequest()));
+
+        Assert.Equal(0, llm.CallCount);
     }
 
     [Theory]
@@ -175,8 +215,11 @@ public class PlannerTests
             _delay = delay;
         }
 
+        public int CallCount { get; private set; }
+
         public async Task<string> CompleteAsync(string systemPrompt, string userPrompt, CancellationToken ct = default)
         {
+            CallCount++;
             if (_delay > TimeSpan.Zero)
             {
                 await Task.Delay(_delay, ct);

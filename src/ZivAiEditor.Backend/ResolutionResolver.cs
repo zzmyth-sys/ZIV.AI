@@ -8,9 +8,9 @@ namespace ZivAiEditor.Backend;
 /// <see cref="ResolutionPolicy"/> using a <see cref="ModelProfile"/> (the C#
 /// layer owns the tier → number translation; Python is stateless — Z23).
 ///
-/// Only the side-based tier mapping lives here. Upscale (Scale mode) and
-/// outpaint (Explicit mode) build their own policies when those tools land in
-/// Step 7 — no UpscaleResolver / OutpaintResolver yet (ARCHITECTURE.md §11).
+/// Only the side-based tier mapping lives here. Outpaint takes an Explicit
+/// policy directly from its caller; upscale (Scale mode) remains a Step 7.5
+/// candidate — no UpscaleResolver / OutpaintResolver (ARCHITECTURE.md §11).
 /// </summary>
 public static class ResolutionResolver
 {
@@ -36,7 +36,9 @@ public static class ResolutionResolver
         {
             Mode = ResolutionMode.Side,
             Side = side,
-            MaxPixels = profile.SafeMaxSide * profile.SafeMaxSide,
+            // Step 7 MaxPixels fix: read the profile's pixel ceiling instead of
+            // deriving it from SafeMaxSide² (which clamped the 16:9 preset).
+            MaxPixels = profile.MaxPixels,
         };
     }
 }

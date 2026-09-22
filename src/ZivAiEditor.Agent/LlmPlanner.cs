@@ -12,6 +12,10 @@ namespace ZivAiEditor.Agent;
 /// LLM-backed planner: it asks an injected <see cref="ILlmClient"/> to turn the
 /// user prompt plus the available tool list into a JSON <c>EditPlan</c>.
 ///
+/// An input request is valid when it carries either a main image or a non-empty
+/// prompt (SPEC.md §3.1): with no main image the planner must emit a single-step
+/// T2I plan using <c>QW21edit</c>.
+///
 /// Per Z22 this planner is <b>allowed to fail</b>: a parse error, a malformed or
 /// empty response, or a timeout throws <see cref="PlannerException"/>, and the
 /// caller (e.g. <see cref="ResilientPlanner"/>) falls back to
@@ -38,10 +42,11 @@ public sealed class LlmPlanner : IPlanner
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (string.IsNullOrWhiteSpace(request.MainImagePath))
+        if (string.IsNullOrWhiteSpace(request.MainImagePath)
+            && string.IsNullOrWhiteSpace(request.Prompt))
         {
             throw new ArgumentException(
-                "PlanRequest.MainImagePath is required (SPEC.md §3.1: the main image is mandatory).",
+                "PlanRequest requires a main image or a non-empty prompt (SPEC.md §3.1).",
                 nameof(request));
         }
 
@@ -188,6 +193,7 @@ public sealed class LlmPlanner : IPlanner
         sb.AppendLine();
         sb.AppendLine("Rules:");
         sb.AppendLine("- Use \"QW21edit\" for edits, with or without a mask.");
+        sb.AppendLine("- When no main image is provided, produce a single-step T2I plan using \"QW21edit\" whose params contain only the prompt (no \"image_path\").");
         sb.AppendLine("- Prefer the fewest steps that satisfy the request.");
         sb.AppendLine("- Parameter values must be JSON strings.");
         sb.AppendLine("- Respond with ONLY a JSON object, no prose and no markdown fences.");
@@ -199,6 +205,8 @@ public sealed class LlmPlanner : IPlanner
         sb.AppendLine("{\"steps\":[{\"tool\":\"QW21edit\",\"params\":{\"prompt\":\"replace the sky with a sunset\",\"steps\":\"25\",\"denoise\":\"1.0\"}}]}");
         sb.AppendLine("Example 2 - prompt \"make it look like an oil painting\", no mask:");
         sb.AppendLine("{\"steps\":[{\"tool\":\"QW21edit\",\"params\":{\"prompt\":\"make it look like an oil painting\",\"steps\":\"25\",\"denoise\":\"1.0\"}}]}");
+        sb.AppendLine("Example 3 - prompt \"a cat on a windowsill\", no main image (T2I):");
+        sb.AppendLine("{\"steps\":[{\"tool\":\"QW21edit\",\"params\":{\"prompt\":\"a cat on a windowsill\",\"steps\":\"25\",\"denoise\":\"1.0\"}}]}");
         return sb.ToString();
     }
 

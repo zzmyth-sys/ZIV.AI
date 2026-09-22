@@ -222,8 +222,38 @@ public sealed class IpcInferenceClient : IInferenceClient
         }
     }
 
-    public async Task<InferenceTaskHandle> SubmitInpaintAsync(
+    public Task<InferenceTaskHandle> SubmitInpaintAsync(
         InpaintRequest request,
+        IProgress<InferenceProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var edit = new EditRequest
+        {
+            Op = EditOps.Inpaint,
+            ImagePath = request.ImagePath,
+            MaskPath = request.MaskPath,
+            Prompt = request.Prompt,
+            Steps = request.Steps,
+            Seed = request.Seed,
+            Denoise = request.Denoise,
+            OutputPath = request.OutputPath,
+            Resolution = request.Resolution,
+            Lora = request.Lora,
+            Optimizations = request.Optimizations,
+            Anchor = null,
+        };
+
+        return SubmitEditAsync(edit, progress, ct);
+    }
+
+    /// <summary>
+    /// Generalized single-inference submit (Step 7). The <see cref="EditRequest.Op"/>
+    /// selects text-to-image / inpaint / outpaint; everything else is shared.
+    /// </summary>
+    public async Task<InferenceTaskHandle> SubmitEditAsync(
+        EditRequest request,
         IProgress<InferenceProgress>? progress = null,
         CancellationToken ct = default)
     {
@@ -252,23 +282,7 @@ public sealed class IpcInferenceClient : IInferenceClient
                 timeout.CancelAfter(Process.Options.ModelLoadTimeoutMs);
                 var token = timeout.Token;
 
-                var submit = new SubmitRequest(
-                    Type: "submit",
-                    RequestId: requestId,
-                    TaskId: taskId,
-                    Op: "inpaint",
-                    Payload: new SubmitPayload(
-                        ImagePath: request.ImagePath,
-                        MaskPath: request.MaskPath,
-                        Prompt: request.Prompt,
-                        Steps: request.Steps,
-                        Seed: request.Seed,
-                        Denoise: request.Denoise,
-                        OutputPath: request.OutputPath,
-                        Lora: request.Lora,
-                        Optimizations: request.Optimizations,
-                        Resolution: MapResolution(request.Resolution)));
-
+                var submit = IpcSubmitMapper.BuildSubmitRequest(requestId, taskId, request);
                 var json = JsonSerializer.Serialize(submit, IpcJsonContext.Default.SubmitRequest);
                 try
                 {
@@ -752,19 +766,6 @@ public sealed class IpcInferenceClient : IInferenceClient
             Seed = (long)ReadDouble(root, "seed"),
         };
 
-    /// <summary>Maps the contract <see cref="ResolutionPolicy"/> onto the IPC payload (snake_case).</summary>
-    private static ResolutionPayload? MapResolution(ResolutionPolicy? policy)
-        => policy is null
-            ? null
-            : new ResolutionPayload(
-                Mode: policy.Mode.ToString().ToLowerInvariant(),
-                Side: policy.Side,
-                Area: policy.Area,
-                Scale: policy.Scale,
-                Width: policy.Width,
-                Height: policy.Height,
-                MaxPixels: policy.MaxPixels);
-
     private static HealthStatus MapHealth(JsonElement root)
     {
         var models = new List<ModelStatus>();
@@ -859,9 +860,10 @@ internal sealed record SubmitPayload(
     string? OutputPath,
     LoraOptions? Lora,
     OptimizationOptions? Optimizations,
-    ResolutionPayload? Resolution);
+    ResolutionPayload? Resolution,
+    string? Anchor);
 
-/// <summary>Optional <c>submit.payload.resolution</c> (Step 6.5 / ipc_version 0.6).</summary>
+/// <summary>Optional <c>submit.payload.resolution</c> (Step 6.5 / ipc_version 0.7).</summary>
 internal sealed record ResolutionPayload(
     string? Mode,
     int? Side,

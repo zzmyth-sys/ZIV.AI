@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Inference;
 using ZivAiEditor.Contracts.Planning;
 using ZivAiEditor.Contracts.Tools;
@@ -8,52 +9,49 @@ using TaskStatus = ZivAiEditor.Contracts.Enums.TaskStatus;
 namespace ZivAiEditor.Tools;
 
 /// <summary>
-/// Qwen-Image-2.1 image-edit tool. It forwards a single edit request to the
-/// injected <see cref="IInferenceClient"/> and reports the resulting image.
+/// Qwen-Image-2.1 outpainting tool (Step 7). It expands the source canvas and
+/// forwards a single <see cref="EditRequest"/> with
+/// <see cref="EditOps.Outpaint"/> to the injected <see cref="IInferenceClient"/>.
 ///
-/// The tool only orchestrates the request/response; all GPU work happens in the
-/// Python backend behind <see cref="IInferenceClient"/> (Z17). The op is chosen
-/// from the input: with a non-empty <see cref="ToolInput.MainImagePath"/> it is
-/// <see cref="EditOps.Inpaint"/> — a mask makes the backend do a masked local
-/// edit, no mask makes it a reference-conditioned edit (zero latent +
-/// <c>reference_latents</c>; this is <b>not</b> classic img2img, which starts
-/// from the source latent — see <c>OPTIMIZATION.md</c>). Without a main image the
-/// non-empty prompt selects <see cref="EditOps.T2I"/> (text-to-image).
+/// The backend pastes <see cref="ToolInput.MainImagePath"/> at
+/// <c>anchor</c> (9-grid, default <c>center</c>) and generates the new region
+/// from <c>prompt</c>. The target canvas must be explicit
+/// (<see cref="ResolutionMode.Explicit"/>); without it the tool fails without
+/// submitting.
 ///
 /// Output always targets a new file (Z24): an explicit <c>output_path</c>
 /// parameter wins, otherwise the path is derived from
 /// <see cref="ToolInput.WorkingDirectory"/> and the step id so multi-step plans
 /// can chain intermediates.
 /// </summary>
-public sealed class QwenImage21EditTool : IEditTool
+public sealed class QwenImage21OutpaintTool : IEditTool
 {
     /// <summary>Stable tool name written into <see cref="EditStep.ToolName"/> (QW21 = Qwen-Image-2.1).</summary>
-    public const string ToolName = "QW21edit";
+    public const string ToolName = "QW21outpaint";
 
     private const string DefaultSteps = "25";
     private const string DefaultSeed = "-1";
     private const string DefaultDenoise = "1.0";
+    private const string DefaultAnchor = "center";
 
     private readonly IInferenceClient _client;
 
-    public QwenImage21EditTool(IInferenceClient client)
+    public QwenImage21OutpaintTool(IInferenceClient client)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
     }
 
     public string Name => ToolName;
 
-    public string Description => "Qwen-Image-2.1 图像编辑（有 mask 时局部编辑；无 mask 时参考条件编辑）";
+    public string Description => "Qwen-Image-2.1 扩图（按 anchor 扩展画布，prompt 描述扩展内容）";
 
     public IReadOnlyList<string> Capabilities { get; } =
-        new[] { "edit", "inpaint", "reference-edit", "background-replace" };
+        new[] { "outpaint", "expand", "extend-canvas" };
 
     public bool CanHandle(EditStep step)
     {
         ArgumentNullException.ThrowIfNull(step);
 
-        // No legacy "inpaint" / "img2img" aliasing: those were the old C# tool
-        // names and are not registered any more.
         return string.Equals(step.ToolName, ToolName, StringComparison.Ordinal);
     }
 
@@ -68,29 +66,30 @@ public sealed class QwenImage21EditTool : IEditTool
         var parameters = input.Parameters;
 
         var prompt = GetString(parameters, "prompt") ?? "";
-        if (string.IsNullOrWhiteSpace(prompt))
-        {
-            return Failure(input.StepId, "QW21edit requires a non-empty 'prompt' parameter.", started.Elapsed);
-        }
+        var anchor = GetString(parameters, "anchor") ?? DefaultAnchor;
 
-        var op = string.IsNullOrWhiteSpace(input.MainImagePath)
-            ? EditOps.T2I
-            : EditOps.Inpaint;
+        var resolution = input.Resolution;
+        if (resolution is null || resolution.Mode != ResolutionMode.Explicit)
+        {
+            return Failure(
+                input.StepId,
+                "QW21outpaint requires an explicit resolution (ResolutionMode.Explicit).",
+                started.Elapsed);
+        }
 
         var outputPath = ToolOutputPath.Resolve(parameters, input);
         var request = new EditRequest
         {
-            Op = op,
-            // t2i has no source image: send null, not a blank path, so the
-            // backend takes its no-source branch.
-            ImagePath = op == EditOps.T2I ? null : input.MainImagePath,
-            MaskPath = op == EditOps.Inpaint ? input.Mask?.MaskImagePath : null,
+            Op = EditOps.Outpaint,
+            ImagePath = input.MainImagePath,
+            MaskPath = null,
             Prompt = prompt,
             Steps = GetInt(parameters, "steps", int.Parse(DefaultSteps, CultureInfo.InvariantCulture)),
             Seed = GetLong(parameters, "seed", long.Parse(DefaultSeed, CultureInfo.InvariantCulture)),
             Denoise = GetDouble(parameters, "denoise", double.Parse(DefaultDenoise, CultureInfo.InvariantCulture)),
             OutputPath = outputPath,
-            Resolution = input.Resolution,
+            Resolution = resolution,
+            Anchor = anchor,
         };
 
         var stepProgress = progress is null

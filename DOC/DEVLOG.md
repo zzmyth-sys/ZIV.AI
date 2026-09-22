@@ -1336,3 +1336,132 @@ InpaintRequest.Resolution → IPC submit.payload.resolution → Python`。范围
 - **未修改** `IInferenceClient` / `IExecutor` / `IEditTool` / `IToolRegistry` 签名；
   `InpaintRequest` / `EditPlan` / `ToolInput` **只加可选字段**。
 - **未修改** `C:\AI\ComfyUI_PIC`；未跑 `dotnet test` 全量（Z29）。
+
+---
+
+## [Step 7] - 2026-09-22
+
+### 目标
+
+工具集扩展：从单一 `QW21edit` 扩展到「编辑 + 扩图 + T2I」三类；引入泛化提交入口
+（`EditRequest` + `IInferenceClient.SubmitEditAsync`）；修正 `MaxPixels`（16:9 预设不再被
+clamp）。范围外：Segment / Upscale 工具（Step 7.5）、UI（Step 9）、GPU 端到端
+（Z29/Z30）。分两阶段：Phase 1 契约冻结（主会话独占）；Phase 2 实现（light-rip Large，
+子代理串行实现 + 独立验证）。
+
+> **更正（2026-09-22）**：本「目标」段初稿曾写「Segment / Upscale 工具（**需独立模型**，
+> Step 7.5）」——其中 Segment 部分**有误**：Qwen-Image-2.1 原生支持 RGBA 抠图，**无需独立
+> 模型**。详见下方「可行性调研结论」更正框。
+
+### 可行性调研结论
+
+| 工具 | 能否用 Qwen-Image-2.1 原生 | 本步处置 | 依据 |
+|---|---|---|---|
+| Segment 去背景 | ❌ 无原生 RGBA / alpha 输出 | **不注册**，Step 7.5 候选 | ComfyUI v0.37.0 核心有 `nodes_bg_removal.py`（`LoadBackgroundRemovalModel` + `RemoveBackground`），但 `models/background_removal/` **无权重**（仅占位文件） |
+| Upscale 放大 | ❌ 非超分模型；「编辑指令精细化」本质是重绘 | **不注册**，Step 7.5 候选 | 盘上已有 Real-ESRGAN x2plus/x4plus、4x-UltraSharp、4x_foolhardy_Remacri；ComfyUI 核心有 `ImageUpscaleWithModel` |
+| Outpaint 扩图 | ✅ 标准 inpaint 变体 | **实现** `QW21outpaint` | `pipeline._encode` masked 路径（源 latent + noise_mask）已支持 |
+| T2I 文生图 | ✅ 无源图路径 | **实现**（作为 `EditRequest` 的一种 op） | `pipeline._size_for_no_source` 已就绪 |
+
+- **不引入独立超分 / 分割模型**（硬约束）；候选登记于 `OPTIMIZATION.md` §7。
+
+> **更正（2026-09-22 · Segment 定位）**：上表「Segment 去背景：❌ 无原生 RGBA / alpha 输出」
+> 为**误判**，已修正。Qwen-Image-2.1 的 VAE 为 **64 通道 RGBA**，alpha 通道是潜空间的一等公民，
+> 去噪过程直接生成透明度；ComfyUI v0.37.0 官方有「Remove Background」模板，采样器输出即
+> 透明 PNG。因此 **Segment 走原生路径**（`QW21segment`，复用 `QW21edit` 同管线，提示词含
+> `transparent background` / `RGBA` / `alpha channel`，**无需独立模型**）；
+> **BiRefNet / RMBG-2.0 改定位**为「对**已有 RGB 图**的**后处理抠图**」，是**替代路径 /
+> 独立入口**，**不与 Qwen-Image-2.1 叠加**，也**不是 Segment 的依赖**。
+> 详见 `OPTIMIZATION.md` §7.1 / §7.2。上表原文不改，以本更正为准。
+
+### 做了什么
+
+- **Phase 1 契约（主会话独占）**：
+  - 新增 `Contracts/Inference/EditRequest.cs`（Op 默认 `inpaint`；`ImagePath` 可空；含
+    `Anchor`、`Lora`、`Optimizations`；类级 XML doc 写明 op/字段约束）。
+  - 新增 `Contracts/Inference/EditOps.cs`（`T2I`/`Inpaint`/`Outpaint` 常量，替代硬编码）。
+  - `IInferenceClient` 新增 `SubmitEditAsync`（`SubmitInpaintAsync` / `InpaintRequest` 原样保留）。
+  - `ModelProfile.MaxPixels`（默认 `4_700_000`）；`ResolutionResolver.FromTier` 改读
+    `profile.MaxPixels`；`ResolutionPolicy.MaxPixels` 默认 `4_194_304 → 4_700_000`；
+    `ModelProfileRegistry` Qwen-2.1 设 `4_700_000`。
+  - `contracts/ipc-protocol.md` 0.6 → **0.7**；`SPEC.md` §3.1 修订（T2I）。
+- **Phase 2 实现（light-rip Large，子代理）**：
+  - **Block A（Backend）**：`IpcSubmitMapper`（internal static）+ `SubmitEditAsync` 真实实现；
+    `SubmitInpaintAsync` 委托；`InternalsVisibleTo`。
+  - **Block B（Tools）**：`QwenImage21OutpaintTool`（`QW21outpaint`）；`QwenImage21EditTool`
+    增 T2I 分支（`ImagePath=null`）；抽出 `ToolOutputPath`。
+  - **Block C（Agent）**：`FallbackPlanner` / `LlmPlanner` 守卫放宽（皆空才抛）；`LlmPlanner`
+    系统提示词加 T2I 规则。
+  - **Block D（Python，与 B/C 并行）**：`outpaint.py`（纯 CPU 几何）；`pipeline.run_outpaint`；
+    `handlers` op 分发；`PROTOCOL_VERSION` 0.7；非法 anchor → center。
+  - **App**：`AppContext` 注册 `QwenImage21OutpaintTool`。
+- **测试**：`EditRequestTests`、`IpcSubmitMapperTests`、`QwenImage21OutpaintToolTests`；
+  扩展 `QwenImage21EditToolTests`（T2I + 输出路径兜底）、`PlannerTests`（T2I ×2）、
+  `ResolutionPolicyTests`（MaxPixels 独立 + 16:9 预设）。
+- **文档**：`FROZEN` Step 7（7.1–7.6）；`SPEC` §3.1；`ACCEPTANCE` Step 7；
+  `OPTIMIZATION` §7；本记录。
+
+### 实测
+
+- `dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（按 Z29 只跑受影响类，**无 GPU**）→ **76 通过 / 0 失败**。
+- Python `py_compile`（4 文件）通过；`python -m unittest test_outpaint`（纯 CPU，无 comfy 依赖）
+  → **9 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）；outpaint 画布合成 / `run_outpaint` 委派为只读确认。
+
+### 遇到的问题与解决
+
+1. **T2I 在 LLM 可用时走不通（工作前审查 P0）**：`LlmPlanner` 与 `FallbackPlanner` 都有
+   「主图必填」守卫，只改 `FallbackPlanner` 时 LLM 正常则无主图仍抛。经用户裁决选 A：
+   **同时放宽 `LlmPlanner`**（无主图 + prompt 非空 → 允许；皆空 → 抛），并更新其系统提示词。
+2. **T2I 空白路径缺陷（Block B 自曝）**：初版把空白 `MainImagePath` 原样传给 `EditRequest.ImagePath`，
+   Python `if image_path` 会把空白当路径 `Image.open` 失败。改为 `Op=T2I` 时 `ImagePath=null`。
+3. **T2I / outpaint 输出路径为 null（工作后审查 P2.1/P2.2）**：`Executor.ResolveWorkingDirectory`
+   主图为空时返回 `""` → 工具输出路径为 null。`ToolOutputPath` 增加 `%TEMP%/zivai/{StepId}.png`
+   兜底（Python 会遵循请求路径，故回填路径与磁盘一致）。
+4. **`IpcInferenceClient` 序列化不可测（工作前审查 P1.2）**：载荷构造为 `internal` 且需活管道。
+   抽出 `IpcSubmitMapper` + `InternalsVisibleTo`，使 op/anchor/null image_path 映射可单测。
+
+### 遗留项
+
+- **Segment（原生 RGBA）未实现**（Step 7.5）：走 `QW21segment` 复用 `QW21edit` 同管线，
+  **无需独立模型**；见 `OPTIMIZATION.md` §7.1。
+- **Upscale 未实现**（Step 7.5）：需独立超分模型（Real-ESRGAN x4plus / 4x-UltraSharp
+  1–2GB）；见 `OPTIMIZATION.md` §7.3。
+- **对已有 RGB 图抠图（后处理）**：独立模型 BiRefNet ~2.2GB / RMBG-2.0 ~1.5GB，属独立候选 /
+  替代路径（非 Segment 依赖），待真实需求；见 `OPTIMIZATION.md` §7.2。
+- **Python 侧测试覆盖不均**：outpaint 几何已由 `python/server/test_outpaint.py`（9 例，纯 CPU）
+  覆盖；但 op 分发（`handlers._dispatch_op`）与 `run_outpaint` 临时目录清理仍仅 `py_compile` +
+  只读确认，属本次改动最薄弱处。
+- **Outpaint 未 GPU 实测**：画布 / 掩膜对齐、大尺寸 OOM 行为待实测（Z30 确认空闲后）。
+- **`LlmPlanner` 系统提示词只提 `QW21edit`**：`QW21outpaint` 已注册但 LLM 尚不能主动产出，
+  符合本步范围（提示词仅要求 T2I）。
+- **`GetTaskAsync` 仍 `NotSupported`**；`RerunAsync` 仍需持久化。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未修改** Step 0–6.5 冻结行的既有成员；`InpaintRequest` / `IEditTool` / `IToolRegistry` /
+  `IExecutor` 签名未改；`IInferenceClient` 仅**新增** `SubmitEditAsync`。
+- **未修改** `C:\AI\ComfyUI_PIC`。
+
+### GPU 端到端验证（2026-09-22 追加）
+
+- 装配真实栈（`PythonProcessManager → IpcInferenceClient → Tools → Executor`）跑三条路径，
+  **全部 PASS**：T2I（1536×1536）、Outpaint（2048×1280）、原生 RGBA（1024×1024，透明 68.3%）。
+  峰值 12929 MiB、结束后回基线；源图 SHA256 前后一致（Z24）。详见
+  `_test_step2/e2e_step7/RESULT.md`。
+- **原生 RGBA 实测确认**：`op="t2i"` + RGBA 提示词 → PNG `mode=RGBA`，alpha min 0 / max 255 /
+  mean 81、透明 68.3% —— 印证 Qwen-Image-2.1 原生 alpha（VAE 保留 4 通道）。
+
+### Outpaint 对齐官方工作流（2026-09-22 追加）
+
+- 用户指出应先看官方工作流。查 `ComfyUI/blueprints/Image Outpainting (Qwen-Image).json`：
+  官方用 `ImagePadForOutpaint`（**灰 0.5 填充** + `feathering`）、`Grow and Blur Mask`
+  （`GrowMask(20)` + `ImageBlur(31)`）、`InstantX Inpainting ControlNet`（v1）。
+- 原实现为「黑填充 + 硬二值掩膜、无羽化、无 ControlNet」→ 接缝硬。
+- **方案 A（已实施 + 复测）**：`outpaint.py` 改灰 0.5 填充 + 软掩膜（feathering 40 / grow 20 /
+  blur 31）；`pipeline._load_mask_tensor(binary=False)` 放行后端 outpaint 软掩膜（Z19 仅约束
+  C# 用户掩膜）。**无黑边源图**上扩图**无缝外扩**（中心 MAD 1.4 / corr 0.9994）；含 letterbox
+  黑边的源图仍呈「框中景」——**输入所致**。`test_outpaint.py` 11 通过。
+- **未采用方案 B**（InstantX ControlNet）：官方 v1 ControlNet 与 2.1 兼容性未验证，登记为候选
+  `OPTIMIZATION.md` §7.4，后续有需求再评估。

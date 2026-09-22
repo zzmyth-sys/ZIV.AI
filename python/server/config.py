@@ -21,7 +21,7 @@ MODEL_NAME = "qwen-image-2.1"
 PIPE_NAME = "zivai.infer.v1"
 PIPE_PATH = r"\\.\pipe\zivai.infer.v1"
 
-PROTOCOL_VERSION = "0.6"
+PROTOCOL_VERSION = "0.7"
 BACKEND_VERSION = "0.4.0"
 
 CONNECT_TIMEOUT_S = 15.0

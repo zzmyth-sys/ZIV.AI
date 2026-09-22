@@ -79,8 +79,11 @@ internal sealed class AppContext : IDisposable
         var client = new IpcInferenceClient(backend, ownsProcess: true);
 
         // Step 6: real tool registry + single serial execution queue (Z18).
+        // Step 7: add the outpainting tool; Segment / Upscale stay unregistered
+        // (they need independent models — Step 7.5 candidates).
         var tools = new ToolRegistry();
         tools.Register(new QwenImage21EditTool(client));
+        tools.Register(new QwenImage21OutpaintTool(client));
 
         var executionQueue = new ExecutionQueue();
         var executor = new Executor(tools, executionQueue);
