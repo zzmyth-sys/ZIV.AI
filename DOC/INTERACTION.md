@@ -85,6 +85,10 @@
 > （`ICommandParser` / `IExecutor` / `ISessionExporter` / `EditSession`），不直接调
 > `IpcInferenceClient`。契约与冻结记录见 `FROZEN.md` Step 9A。URL 协议、LLM 意图理解、
 > `@图片N` 仍后置（与 ZIV 侧实际联调为 Step 9B）。
+>
+> **收尾修正（2026-09-22）**：聊天流「生成中…」气泡已接通**渐进预览**——App 层订阅
+> `IpcInferenceClient.PreviewReceived`（`0x02` JPEG 帧）→ 以 `byte[]` 转给 UI 更新气泡内
+> `Image`；状态栏在解析失败 / 完成后复位为「就绪」。详见 `FROZEN.md` 9A.8。
 
 ## 6. 不在本期范围
 

@@ -1395,3 +1395,73 @@ public interface ILlmClient : IDisposable
   `SessionExporter`；本步的 CLI / 单实例属 App 平台层，测试必须能引用 App。
 - **性质**：仅项目配置与 TFM；不改契约 / 签名 / 行为 / 依赖方向。`App` 通过
   `InternalsVisibleTo("ZivAiEditor.Tests")` 暴露 `internal SingleInstance`。
+
+### 9A.8 收尾修正：状态栏复位 + 生成中预览接线（2026-09-22）
+
+> 本小节为**只增**修订，**不改动 Step 0–9A 已冻结行**。修复 Step 9A UI 的两个缺陷；
+> **无契约变更**（`Contracts` 零改动、`IInferenceClient` / `IProgress<T>` 签名不变），
+> 不改 Python / Tool / Executor / Backend 逻辑。
+
+- **缺陷 1（状态栏不复位）**：`MainWindow.SetBusy(false)` 只恢复控件、不重置状态文本，
+  解析失败后停留「处理中…」。改为 `SetStatus(busy ? "处理中…" : "就绪")`。
+- **缺陷 2（生成中预览未接通）**：`IpcInferenceClient.PreviewReceived`（Step 2.3 的
+  `0x02` JPEG 帧）在生产路径无人订阅。接线方案 **C**（ARCHITECTURE §6「跨模块接线发生在
+  App」）：
+  - `AppContext` 订阅 `client.PreviewReceived` → 暴露 `event Action<byte[]> PreviewReceived`
+    （只传 JPEG 字节；UI 不引用 `PreviewFrame` / `IpcInferenceClient`，符合 §4）；
+  - `App.axaml.cs` 订阅该事件 → `Dispatcher.UIThread.Post` → `MainWindow.ShowPreview(byte[])`；
+  - `MainWindow` 在 pending 气泡内挂一个 `Image`，`ShowPreview` 直接更新其 `Source`
+    （不重建聊天流，避免闪烁）；
+  - `ChatMessage` 新增 `IsPending`（UI 自有类型，**非契约**），标记「生成中…」气泡。
+  - **未选方案 A / B**：把二进制 JPEG 塞进冻结的文本进度契约（`TaskProgress` /
+    `StepProgress` / `InferenceProgress`）需改 1–3 个契约 + Backend + Tool + Executor，
+    改动大且语义扭曲（preview 是独立事件，不在 `IProgress` 回调内）。
+- **顺带修复**：`MainWindow.RenderChat` 每次重建前释放旧 `Bitmap`（`ReleaseBitmaps`），
+  消除先前每次消息变更累积 bitmap 的泄漏。
+- **验证**：`dotnet build` 0 错误 0 警告；`dotnet test`（非 GPU 全量）**109 通过 / 0 失败**
+  （新增 `Submit_Marks_Pending_Bubble_While_Executing`）；真机验证生成中预览已显示。
+- **提交**：`bb5593f`。
+
+---
+
+## Step 9C.1（日期：2026-09-22）
+
+> **新增说明（Step 9C.1 · 图像预览窗口）**
+>
+> 本段为 Step 9C.1 **只增**记录。目标：为当前会话图像提供独立大图预览窗口（适配 / 滚轮
+> 锚点缩放 / 左键拖拽 / 双击切换 / Esc），点击聊天流图片打开。**不改动 Step 0–9A 已冻结行**；
+> **无契约变更**（`Contracts` 零新增、零修改）。UI 窗口由 App 层承载，缩放 / 平移纯逻辑
+> 下沉 `ZivAiEditor.UI`。
+
+### 9C.1.1 新增第三方依赖（冻结）
+
+- **包**：`UVtools.AvaloniaControls` **5.0.1**（`AdvancedImageBox`：平移 / 缩放 / 光标图像框）。
+- **声明**：版本写入 `src/Directory.Packages.props`（CPM）；`ZivAiEditor.App.csproj` 的
+  `PackageReference` **不带版本号**；仅在 **App 层**引用（`AdvancedImageBox` 的 ControlTheme
+  经 `App.axaml` 的 `StyleInclude` 合并）。
+- **兼容性**：5.0.1 依赖 `Avalonia 12.1.1`，与仓库现有 `Avalonia 12.1.1` 一致；
+  `dotnet restore` 无版本冲突（**不降级** Avalonia / 其他 ZIV.AI 包）。
+- **裁决依据**：Step 9C.1 启动裁决「主选 `UVtools.AvaloniaControls` 的 `AdvancedImageBox`；
+  若与 Avalonia 12.1.1 依赖冲突，改用 `PanAndZoom` 的 `ZoomBorder`」。实测 5.0.1 无冲突，
+  故采用主选，**未使用**备选。
+
+### 9C.1.2 新增 UI 类型（冻结 · 非契约）
+
+| 类型 | 文件 | 归属 | 说明 |
+|---|---|---|---|
+| `ImageViewModel` | `ZivAiEditor.UI/Imaging/ImageViewModel.cs` | UI（net8.0，无 Avalonia） | 缩放 / 平移状态与视口 ↔ 图像坐标映射；适配比例、锚点缩放、平移钳制 |
+| `ImagePreview` | `ZivAiEditor.App/Controls/ImagePreview.axaml(.cs)` | App（`Window`） | 大图预览窗口；自绘无边框 chrome（同 `MainWindow`）；以 `AdvancedImageBox` 渲染，输入驱动 `ImageViewModel` |
+
+- **`Contracts` 零新增、零修改**：`IInferenceClient` / `IEditTool` / `IToolRegistry` /
+  `IExecutor` / `IPlanner` 与 6 个模型签名**未改**。
+- **`MainWindow`**：布局恢复 Step 9A 两栏（历史节点 + 聊天流）；聊天流图片新增点击 → 打开
+  `ImagePreview`。**不新增契约**。
+
+### 9C.1.3 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（按 Z29，**无 GPU**）：`ImageViewModelTests` **11 通过 / 0 失败**；
+  非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **120 通过 / 0 失败**。
+- **无头实测**（`Avalonia.Headless` + `UseSkia`，真实位图 1020×543，视口 800×600，模拟输入）：
+  初始适配 78%；滚轮 → 94%（锚点保持）；拖拽 → 偏移钳制；双击 78% ↔ 100%；单击不变；Esc 关闭。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步不加载模型。

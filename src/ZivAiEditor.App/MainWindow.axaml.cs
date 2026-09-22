@@ -13,6 +13,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using ZivAiEditor.Agent;
+using ZivAiEditor.App.Controls;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.UI;
 using ZivAiEditor.UI.Chat;
@@ -37,6 +38,7 @@ public partial class MainWindow : Window
 
     private SessionViewModel _vm = null!;
     private ISessionExporter _exporter = null!;
+    private ImagePreview? _imagePreview;
     private CancellationTokenSource? _cts;
     private bool _closing;
     private bool _suppressHistorySelection;
@@ -271,6 +273,42 @@ public partial class MainWindow : Window
         ScrollToEnd();
     }
 
+    /// <summary>
+    /// Opens (or reuses) the standalone large-image preview window for
+    /// <paramref name="path"/> (Step 9C.1). A single window instance is kept: a second
+    /// click loads the new image into the same window, preserving its position / size.
+    /// </summary>
+    private void OpenImagePreview(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
+        {
+            SetStatus("图像不存在，无法预览");
+            return;
+        }
+
+        if (_imagePreview is null)
+        {
+            var preview = new ImagePreview();
+            preview.Closed += (_, _) =>
+            {
+                if (ReferenceEquals(_imagePreview, preview))
+                {
+                    _imagePreview = null;
+                }
+            };
+
+            _imagePreview = preview;
+            preview.Show(this);
+        }
+        else if (_imagePreview.WindowState == WindowState.Minimized)
+        {
+            _imagePreview.WindowState = WindowState.Normal;
+        }
+
+        _imagePreview.LoadImage(path);
+        _imagePreview.Activate();
+    }
+
     private Control BuildMessage(ChatMessage message)
     {
         var panel = new StackPanel { Spacing = 4, MaxWidth = 420 };
@@ -335,14 +373,25 @@ public partial class MainWindow : Window
         {
             var bitmap = new Bitmap(path);
             _bitmaps.Add(bitmap);
-            panel.Children.Add(new Image
+
+            // Clicking a chat image opens the standalone large-image preview window.
+            var image = new Image
             {
                 Source = bitmap,
                 MaxWidth = 320,
                 MaxHeight = 320,
                 Stretch = Stretch.Uniform,
                 HorizontalAlignment = HorizontalAlignment.Left,
-            });
+                Cursor = new Cursor(StandardCursorType.Hand),
+            };
+            image.PointerPressed += (_, e) =>
+            {
+                e.Handled = true;
+                OpenImagePreview(path);
+            };
+            ToolTip.SetTip(image, "点击查看大图");
+
+            panel.Children.Add(image);
         }
         catch (Exception ex)
         {

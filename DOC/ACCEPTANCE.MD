@@ -958,3 +958,81 @@ JSON payload）；`SPEC.md` §3.4 / §7 授权修订。范围外：URL 协议注
 1. 追加 `DEVLOG.md` 的 Step 9A 记录（本步已完成）
 2. 在「验收记录」追加“Step 9A 通过，日期：____”（待签）
 3. 进入 Step 9B（与 ZIV 侧联调：按钮 + `settings.ini` 配置 exe 路径），由用户决定
+
+### Step 9A 收尾修正验收（2026-09-22）
+
+> 修复 Step 9A UI 的两个缺陷；**无契约变更**，不改 Python / Tool / Executor / Backend 逻辑。
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9A.12 | 状态栏复位 | 查 `MainWindow.SetBusy` | `SetBusy(false)` → 状态文本「就绪」 | ✅ |
+| 9A.13 | 预览接线 | 查 `AppContext` / `App.axaml.cs` / `MainWindow` | `PreviewReceived` → `byte[]` → pending `Image`；UI 不引用 Backend 类型 | ✅ |
+| 9A.14 | 契约不变 | 查 `Contracts` | 零新增 / 零修改；`IInferenceClient` / `IProgress<T>` 签名不变 | ✅ |
+| 9A.15 | 构建 / 测试 | `dotnet build` / `dotnet test`（非 GPU 全量） | 0 错误 0 警告；**109 通过 / 0 失败** | ✅ |
+| 9A.16 | 真机预览 | 用户执行一次编辑 | 生成中气泡显示渐进预览图 | ✅ 用户确认 |
+
+---
+
+## Step 9C.1 验收：图像预览窗口（适配 / 缩放 / 拖拽 / 双击 / 点击打开）
+
+**目标**：为当前会话图像提供**独立大图预览窗口**——默认适配窗口、滚轮锚点缩放、
+左键拖拽平移、双击切换适配 / 100%、Esc 退出；点击聊天流图片打开。缩放 / 平移状态与
+坐标映射下沉 `ZivAiEditor.UI`（net8.0，可单测），渲染控件在 `ZivAiEditor.App`。
+范围外：遮罩绘制、ZIV 联调（Step 9B）、GPU 端到端（Z29 / Z30）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 仅 App 新增 NuGet 包（非项目引用）；UI 新增纯逻辑类型；无反向 / 循环依赖 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `Contracts` 零新增、零修改；5 接口 + 6 模型签名未改 | ✅ |
+| G4 | 未授权修改检查 | Step 0–9A 冻结行未改；新增走 Step 9C.1 冻结节 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `FROZEN` 追加 Step 9C.1 | ✅ |
+| G6 | 便携性未破 | 无注册表 / 外部路径配置；图片按传入路径读取 | ✅ |
+| G7 | AI 推理进程隔离未破 | 预览仅本地解码文件，不加载 Python / 不 P/Invoke（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.1.1 | 依赖解析 | `dotnet restore` + `project.assets.json` | `UVtools.AvaloniaControls/5.0.1` + `Avalonia/12.1.1`，无 `NU1107` / `NU1605` | ✅ |
+| 9C.1.2 | CPM 规范 | 查 `Directory.Packages.props` / `App.csproj` | 版本在 CPM；`PackageReference` 无版本号 | ✅ |
+| 9C.1.3 | 纯逻辑下沉 | 查 `ZivAiEditor.UI/Imaging/ImageViewModel.cs` | net8.0；无 Avalonia 依赖 | ✅ |
+| 9C.1.4 | 适配比例 | `ImageViewModelTests` | 取两轴较小比例、保持宽高比；含横 / 竖图 | ✅ |
+| 9C.1.5 | 缩放锚点 | `ImageViewModelTests` | 缩放前后鼠标下的图像点不变 | ✅ |
+| 9C.1.6 | 平移边界 | `ImageViewModelTests` | 偏移钳制到 `[0, 缩放尺寸-视口]`，不露白 | ✅ |
+| 9C.1.7 | 控件渲染 | 无头实测 | `AdvancedImageBox` 主题生效（模板已应用）；真实位图 1020×543 | ✅ |
+| 9C.1.8 | 滚轮缩放 | 无头实测（模拟输入） | 78% → 94%，锚点保持 | ✅ |
+| 9C.1.9 | 拖拽平移 | 无头实测 | 偏移随拖动更新并钳制 | ✅ |
+| 9C.1.10 | 双击切换 | 无头实测 | 78% ↔ 100% 双向切换；单击不变 | ✅ |
+| 9C.1.11 | 点击打开大图 | 查 `MainWindow.AddPreview` / `OpenImagePreview` | 聊天流图片可点击 → 独立预览窗口 | ✅（代码审查 + 窗口实例化验证） |
+| 9C.1.12 | Esc 退出 | 无头实测 | Esc 关闭窗口 | ✅ |
+| 9C.1.13 | Z9 资源释放 | 查 `ImagePreview` | `Bitmap` 在替换 / 关闭时 `Dispose`；过期异步结果丢弃 | ✅ |
+| 9C.1.14 | Z11 不阻塞 UI | 查 `ImagePreview.LoadAsync` | 解码在后台线程，UI 线程只赋值 | ✅ |
+| 9C.1.15 | Z8 文件行数 | 查新增 / 修改文件 | 均 < 600 行 | ✅ |
+| 9C.1.16 | 构建 / 测试 | `dotnet build` / `dotnet test`（受影响类） | 0 错误 0 警告；`ImageViewModelTests` 11 通过；非 GPU 全量 120 通过 | ✅ |
+| 9C.1.17 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.1.18 | 启动 / 无残留 | 启动 exe + 进程表 | 窗口正常、无新 Python 进程；结束无残留 | ✅ |
+| 9C.1.19 | 真机交互 | 用户执行一次真机验收 | 打开预览窗口后滚轮 / 拖拽 / 双击 / Esc 均正常 | ⏳ 待用户确认 |
+| 9C.1.20 | 窗体样式复用 | 查 `ImagePreview.axaml` + 无头实测 | `WindowDecorations=None` + 自绘标题栏（同主窗体），非默认 Win32 | ✅ |
+| 9C.1.21 | 窗口复用 | 无头实测（连续两次打开） | 返回同一 `ImagePreview` 实例，标题随新图更新 | ✅ |
+
+### Step 9C.1 通过标准
+
+- 通用 G1–G8 全过
+- 专属 9C.1.1–9C.1.18 全过；9C.1.19 由用户真机确认
+
+### Step 9C.1 遗留说明（非阻断）
+
+- **AOT publish 未复验**：`AdvancedImageBox` 主题含 `ElementName` 反射绑定，
+  `dotnet publish`（ILC）下需复验（登记于 `RELEASE-CHECKLIST`）。
+- **遮罩坐标映射未接入**：`ImageViewModel.ViewportToImage` 已就绪，遮罩 UI（SPEC §3.9）后续使用。
+- **与 ZIV 实际联调未做**（Step 9B）。
+
+### Step 9C.1 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 9C.1 记录（本步已完成）
+2. 在「验收记录」追加“Step 9C.1 通过，日期：____”（待签）
+3. 进入 Step 9B / 后续 Step，由用户决定

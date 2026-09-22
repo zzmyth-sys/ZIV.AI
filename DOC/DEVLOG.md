@@ -1644,3 +1644,138 @@ GPU 端到端（Z29 / Z30）。
 - **未修改** Step 0–8 冻结行的既有成员；`Contracts` 零新增；`IInferenceClient` /
   `IEditTool` / `IToolRegistry` / `IExecutor` / `IPlanner` 签名未改。
 - **未修改** `C:\AI\ComfyUI_PIC`、`python/server/*`、`contracts/ipc-protocol.md`。
+
+---
+
+## [Step 9A · 收尾修正] - 2026-09-22
+
+### 目标
+
+修复 Step 9A UI 的两个缺陷：① 状态栏不复位（解析失败后停留「处理中…」）
+② 生成中预览未接通（`IpcInferenceClient.PreviewReceived` 无人订阅）。**不改契约**。
+
+### 做了什么
+
+- **状态栏**：`MainWindow.SetBusy` 末尾改为 `SetStatus(busy ? "处理中…" : "就绪")`。
+- **预览接线（方案 C，ARCHITECTURE §6）**：
+  - `AppContext`：构造函数订阅 `client.PreviewReceived`，暴露
+    `public event Action<byte[]>? PreviewReceived`（仅 JPEG 字节，UI 不引用 Backend 类型）。
+  - `App.axaml.cs`：`_context.PreviewReceived += bytes => Dispatcher.UIThread.Post(() =>
+    window.ShowPreview(bytes))`。
+  - `MainWindow`：`ShowPreview(byte[])` 解码 JPEG → 更新 pending 气泡内 `Image.Source`
+    （不重建聊天流）；`RenderChat` 为 `IsPending` 消息创建该 `Image` 目标；
+    新增 `ReleaseBitmaps()`，`RenderChat` 重建前释放旧 bitmap。
+  - `UI/Chat/SessionViewModel.cs`：`ChatMessage` 新增 `IsPending`；「生成中…」气泡标记。
+- **测试**：`SessionViewModelTests` 新增 `DeferredExecutor`（挂起直到 `Complete`）+
+  `Submit_Marks_Pending_Bubble_While_Executing`。
+
+### 关键决策
+
+- **选方案 C**：零契约改动；订阅点在 App 层（§6），UI 只收 `byte[]`（§4）。
+  方案 A（`TaskProgress` 加 `PreviewBytes`）/ B（`StepProgress` 加字段）都需改冻结契约 +
+  Backend + Tool + Executor，且把二进制帧塞进文本进度语义扭曲。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（按 Z29，非 GPU 全量，排除 `Ipc*` / `PlannerIntegration`）→
+  **109 通过 / 0 失败**（较修复前 +1）。
+- **真机验证**：用户确认生成中气泡已显示渐进预览图（GPU，用户手动执行）。
+
+### 遗留项
+
+- 预览 JPEG 按全尺寸解码，显示端仅用 `MaxWidth/MaxHeight=320` 约束；如需省内存可改
+  `Bitmap.DecodeToWidth`。
+- 状态栏修复的真机观察由用户确认，未单独复测（逻辑为单点改动）。
+
+### 备注
+
+- 未改 `Contracts` / `python/server/*` / Tool / Executor / Backend 逻辑；未跑 GPU 端到端
+  测试（真机预览验证除外）。
+- 提交 `bb5593f`。
+
+---
+
+## [Step 9C.1] - 2026-09-22
+
+### 目标
+
+为当前会话的图像提供**大图预览窗口**：默认「适配窗口」，滚轮缩放（以鼠标位置为锚点），
+左键拖拽平移，双击切换「适配窗口 / 100%」，Esc 退出；点击聊天流里的图片即可打开该窗口。
+缩放 / 平移状态与坐标映射下沉 `ZivAiEditor.UI`（net8.0，可单测）；渲染控件在
+`ZivAiEditor.App`。范围外：遮罩绘制、与 ZIV 实际联调（Step 9B）、GPU 端到端（Z29 / Z30）。
+
+### 做了什么
+
+- **依赖（CPM）**：`src/Directory.Packages.props` 加 `UVtools.AvaloniaControls` **5.0.1**；
+  `ZivAiEditor.App.csproj` 加无版本号的 `PackageReference`；`App.axaml` 合并
+  `avares://UVtools.AvaloniaControls/Controls.axaml`（`AdvancedImageBox` 的 ControlTheme）。
+- **纯逻辑（`ZivAiEditor.UI`，无 Avalonia 依赖）**：`Imaging/ImageViewModel.cs` ——
+  适配缩放比例（取两轴比例较小者，含宽高比）、锚点缩放（缩放前后鼠标下的图像点不变）、
+  平移边界钳制、`ViewportToImage` / `ImageToViewport` 坐标映射。
+- **App 控件**：`Controls/ImagePreview.axaml(.cs)` —— 独立 `Window`（标题「大图预览」），
+  内含 `AdvancedImageBox`；输入事件驱动 `ImageViewModel`，再把 `Zoom` / `Offset` 写回控件。
+- **主窗体**：`MainWindow` **恢复 Step 9A 的两栏布局**（历史节点 + 聊天流）；
+  聊天流中的图片（起始图 / 完成图）可点击 → `OpenImagePreview(path)` 打开预览窗口。
+- **测试**：`ImageViewModelTests` 11 例（适配比例、锚点不变、平移钳制、坐标映射、
+  双击切换、缩放上下限）。
+- **文档**：`DEVLOG` / `ACCEPTANCE` 追加 Step 9C.1；`FROZEN` 追加只增段（依赖与新增 UI 类型）。
+
+### 关键决策
+
+1. **预览为独立窗口，不嵌入主窗体**（用户裁决）：由**点击聊天流图片**打开；
+   主窗体布局保持 Step 9A 原样。
+2. **预览窗口单实例复用**：`MainWindow` 只保留一个 `ImagePreview` 实例；再次点击图片时
+   向同一窗口 `LoadImage` 新图并 `Activate`（保留窗口位置 / 大小），窗口被关闭后才新建。
+3. **复用主窗体的自绘无边框样式**：`ImagePreview` 采用与 `MainWindow` 相同的
+   `WindowDecorations="None"` + `ExtendClientAreaToDecorationsHint` + 透明背景 + 自绘标题栏
+   （最小化 / 最大化 / 关闭 + 边缘 resize 条 + ZIV 配色），**不用**默认 Win32 标题栏。
+4. **模型权威、控件只渲染**：禁用 `AdvancedImageBox` 的原生 wheel / pan
+   （`ZoomWithMouseWheelBehaviour=None`、`PanWithMouseButtons=None`、`AutoPan=False`、
+   `AutoCenter=True`），全部缩放 / 平移由 `ImageViewModel` 计算后写回 `Zoom` / `Offset`，
+   使交互数学可单测。
+5. **双击判定自实现**（300 ms 窗口）：单击不动作；避免与拖拽平移冲突。
+6. **Z11 / Z9**：位图解码在 `Task.Run` 后台线程；`Bitmap` 在替换 / 关闭窗口时 `Dispose`；
+   以「代次」计数丢弃过期的异步加载结果。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（按 Z29，**无 GPU**）：`ImageViewModelTests` **11 通过 / 0 失败**；
+  非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **120 通过 / 0 失败**。
+- **无头实测**（`Avalonia.Headless` + `UseSkia`，真实位图 `source_crop.png` 1020×543，
+  视口 800×600，模拟真实输入）：
+  - 初始**适配 78%**（min(800/1020, 600/543)=0.784）；
+  - **滚轮上滚** → 94%，X 偏移 38.37，锚点保持（图像点不动）；
+  - **拖拽** (+120,+80) → 偏移钳制到 (0,0)（拖到边界不露白）；
+  - **双击 #1** → 78%（适配）、**双击 #2** → 100%；**单击**不变；
+  - **Esc** 关闭窗口。
+- **exe 启动**：`ZivAiEditor.App.exe --image <png>` 窗口标题 `ZIV.AI Editor`、响应正常、
+  **未拉起 Python 进程**（`AppContext.Create` 不启动后端）、未占用 GPU；结束后**无残留进程**。
+- **依赖解析**：`UVtools.AvaloniaControls/5.0.1` + `Avalonia/12.1.1`，`dotnet restore` 无
+  `NU1107` / `NU1605` 等冲突。
+
+### 遇到的问题与解决
+
+1. **Avalonia 12 重命名**：`Window.SystemDecorations` 已过时且枚举不存在 → 改用
+   `WindowDecorations`（与主窗体 `WindowDecorations="None"` 一致）。
+2. **无头默认绘制返回假位图**：`UseHeadlessDrawing=true` 下 `Bitmap.Size` 为 1×1，
+   导致适配比例失真；验证时改用 `UseHeadlessDrawing=false + UseSkia()` 得到真实尺寸
+   （仅验证用途，**不改产品代码**）。
+3. **预览落点返工**：初版把预览区嵌入主窗体，经用户裁决改为**独立窗口 + 点击图片打开**；
+   主窗体布局恢复 Step 9A，`MinWidth` 恢复 760。
+
+### 遗留项
+
+- **未做 AOT publish 验证**：`AdvancedImageBox` 主题含 `ElementName` 反射绑定，
+  `dotnet publish`（ILC）下需复验；已登记 `RELEASE-CHECKLIST` 关注点。
+- **坐标映射暂未接入遮罩**：`ImageViewModel.ViewportToImage` 已就绪，遮罩 UI（SPEC §3.9）
+  后续 Step 使用。
+- **与 ZIV 实际联调未做**（Step 9B）。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未修改** Step 0–9A 冻结行的既有成员；`Contracts` 零新增、零修改；
+  `IInferenceClient` / `IEditTool` / `IToolRegistry` / `IExecutor` / `IPlanner` 签名未改。
+- **未修改** `C:\AI\ComfyUI_PIC`、`python/server/*`、`contracts/ipc-protocol.md`。

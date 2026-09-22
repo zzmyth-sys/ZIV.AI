@@ -11,5 +11,7 @@
   </Application.Resources>
   <Application.Styles>
     <FluentTheme />
+    <!-- AdvancedImageBox theme (UVtools.AvaloniaControls) for the image preview. -->
+    <StyleInclude Source="avares://UVtools.AvaloniaControls/Controls.axaml" />
   </Application.Styles>
 </Application>
