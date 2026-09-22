@@ -30,6 +30,10 @@ public partial class App : Application
                 options);
             desktop.MainWindow = window;
 
+            // Backend preview frames (0x02) → pending bubble, marshalled to the UI thread.
+            _context.PreviewReceived += bytes =>
+                Dispatcher.UIThread.Post(() => window.ShowPreview(bytes));
+
             // A second instance forwards its request through the pipe; marshal to the UI thread.
             if (SingleInstance is not null)
             {

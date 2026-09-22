@@ -41,6 +41,12 @@ public partial class MainWindow : Window
     private bool _closing;
     private bool _suppressHistorySelection;
 
+    /// <summary>The live preview Image inside the pending bubble, if any.</summary>
+    private Image? _pendingPreviewImage;
+
+    /// <summary>The bitmap currently shown in the pending bubble (owned; disposed on replace).</summary>
+    private Bitmap? _pendingPreviewBitmap;
+
     /// <summary>Designer-only constructor; the runtime path uses the injected one.</summary>
     public MainWindow()
     {
@@ -255,6 +261,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        ReleaseBitmaps();
         stream.Children.Clear();
         foreach (var message in _vm.Messages)
         {
@@ -293,6 +300,21 @@ public partial class MainWindow : Window
         if (message.ImagePath is { Length: > 0 } path)
         {
             AddPreview(panel, path);
+        }
+
+        if (message.IsPending)
+        {
+            // The live preview target; ShowPreview fills it as 0x02 frames arrive.
+            var preview = new Image
+            {
+                MaxWidth = 320,
+                MaxHeight = 320,
+                Stretch = Stretch.Uniform,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                IsVisible = false,
+            };
+            _pendingPreviewImage = preview;
+            panel.Children.Add(preview);
         }
 
         return new Border
@@ -386,10 +408,7 @@ public partial class MainWindow : Window
             send.IsEnabled = !busy;
         }
 
-        if (busy)
-        {
-            SetStatus("处理中…");
-        }
+        SetStatus(busy ? "处理中…" : "就绪");
     }
 
     private void SetStatus(string text)
@@ -408,6 +427,48 @@ public partial class MainWindow : Window
         }
 
         Dispatcher.UIThread.Post(() => scroll.ScrollToEnd(), DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// Renders a live preview JPEG (a backend <c>0x02</c> frame) into the pending
+    /// bubble. Called on the UI thread by the App wiring; ignored when no bubble is
+    /// pending or the bytes cannot be decoded. Does not rebuild the chat stream, so
+    /// frequent frames only update one Image (no flicker).
+    /// </summary>
+    public void ShowPreview(byte[] jpegBytes)
+    {
+        if (_pendingPreviewImage is null || jpegBytes is null || jpegBytes.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            using var stream = new MemoryStream(jpegBytes);
+            var bitmap = new Bitmap(stream);
+            _pendingPreviewBitmap?.Dispose();
+            _pendingPreviewBitmap = bitmap;
+            _pendingPreviewImage.Source = bitmap;
+            _pendingPreviewImage.IsVisible = true;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[preview] {ex.Message}");
+        }
+    }
+
+    /// <summary>Disposes every decoded bitmap and forgets the pending preview target.</summary>
+    private void ReleaseBitmaps()
+    {
+        foreach (var bitmap in _bitmaps)
+        {
+            try { bitmap.Dispose(); } catch { }
+        }
+
+        _bitmaps.Clear();
+        _pendingPreviewImage = null;
+        try { _pendingPreviewBitmap?.Dispose(); } catch { }
+        _pendingPreviewBitmap = null;
     }
 
     private async void OnClosing(object? sender, WindowClosingEventArgs e)
@@ -472,12 +533,7 @@ public partial class MainWindow : Window
 
     private void DisposeBitmaps()
     {
-        foreach (var bitmap in _bitmaps)
-        {
-            try { bitmap.Dispose(); } catch { }
-        }
-
-        _bitmaps.Clear();
+        ReleaseBitmaps();
         _cts?.Dispose();
     }
 }

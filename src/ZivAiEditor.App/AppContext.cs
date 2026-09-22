@@ -38,6 +38,10 @@ internal sealed class AppContext : IDisposable
     {
         Backend = backend;
         Client = client;
+
+        // App-layer wiring (ARCHITECTURE §6): surface backend preview frames
+        // (0x02, JPEG) as plain bytes so the UI never references Backend types (§4).
+        client.PreviewReceived += frame => PreviewReceived?.Invoke(frame.JpegBytes);
         _llmHttp = llmHttp;
         LlmClient = llmClient;
         Planner = planner;
@@ -79,6 +83,13 @@ internal sealed class AppContext : IDisposable
 
     /// <summary>Exports the session on close (Step 8); the UI asks the user in Step 9.</summary>
     public ISessionExporter SessionExporter { get; }
+
+    /// <summary>
+    /// Raised for every backend preview frame (<c>0x02</c>, JPEG bytes) so the App
+    /// can push it into the UI's pending bubble. The UI receives only
+    /// <see cref="byte"/>[] — no Backend type crosses the boundary (§4).
+    /// </summary>
+    public event Action<byte[]>? PreviewReceived;
 
     public static AppContext Create()
     {

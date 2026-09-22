@@ -51,6 +51,30 @@ public class SessionViewModelTests
             => Task.FromResult(false);
     }
 
+    /// <summary>An executor that stays in flight until <see cref="Complete"/> is called.</summary>
+    private sealed class DeferredExecutor : IExecutor
+    {
+        private readonly TaskCompletionSource<TaskState> _completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<TaskState> ExecuteAsync(
+            EditPlan plan,
+            IProgress<TaskProgress>? progress = null,
+            CancellationToken ct = default)
+            => _completion.Task;
+
+        public void Complete(TaskState state) => _completion.TrySetResult(state);
+
+        public Task<TaskState> RerunAsync(
+            string taskId,
+            IProgress<TaskProgress>? progress = null,
+            CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<bool> CancelAsync(string taskId, CancellationToken ct = default)
+            => Task.FromResult(false);
+    }
+
     [Fact]
     public async Task Submit_Appends_Node_And_Refreshes_History()
     {
@@ -107,5 +131,32 @@ public class SessionViewModelTests
 
         Assert.Empty(vm.History);
         Assert.Empty(vm.Messages);
+    }
+
+    [Fact]
+    public async Task Submit_Marks_Pending_Bubble_While_Executing()
+    {
+        var session = new EditSession();
+        var executor = new DeferredExecutor();
+        var vm = new SessionViewModel(session, ParserWithoutFile(), executor);
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        var submit = vm.SubmitAsync("/去水印");
+
+        // While the executor is in flight the bubble is flagged pending (the App
+        // renders live preview frames into it).
+        Assert.Contains(vm.Messages, m => m.IsPending);
+
+        executor.Complete(new TaskState
+        {
+            TaskId = Guid.NewGuid().ToString("N"),
+            Status = TaskStatus.Succeeded,
+            Plan = new EditPlan(),
+            OutputImagePath = Output,
+        });
+        await submit;
+
+        Assert.DoesNotContain(vm.Messages, m => m.IsPending);
+        Assert.Contains(vm.Messages, m => m.ImagePath == Output);
     }
 }

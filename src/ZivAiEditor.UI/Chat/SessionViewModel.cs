@@ -24,6 +24,12 @@ public sealed class ChatMessage
     public string? ImagePath { get; init; }
 
     public bool IsError { get; init; }
+
+    /// <summary>
+    /// True for the in-flight "生成中…" bubble. The App layer renders live
+    /// preview frames (0x02 IPC frames) into this bubble while the executor runs.
+    /// </summary>
+    public bool IsPending { get; init; }
 }
 
 /// <summary>One entry in the history list, carrying its tree depth for indentation.</summary>
@@ -137,7 +143,7 @@ public sealed class SessionViewModel
 
         // The pending bubble is replaced in place once the executor returns.
         var pendingIndex = Messages.Count;
-        Messages.Add(new ChatMessage { Role = ChatRole.Assistant, Text = "生成中…" });
+        Messages.Add(new ChatMessage { Role = ChatRole.Assistant, Text = "生成中…", IsPending = true });
         IsBusy = true;
 
         var parentId = _session.CurrentNodeId;
