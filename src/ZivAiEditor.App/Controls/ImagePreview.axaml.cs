@@ -2,10 +2,8 @@ using System;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Chrome;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using UVtools.AvaloniaControls;
@@ -35,7 +33,7 @@ public partial class ImagePreview : Window
     private TextBlock? _emptyLabel;
     private Border? _zoomBadge;
     private TextBlock? _zoomText;
-    private TextBlock? _titleText;
+    private ChromeTitleBar? _chrome;
 
     private Bitmap? _bitmap;
     private string? _path;
@@ -78,9 +76,9 @@ public partial class ImagePreview : Window
         }
 
         Title = $"ZIV.AI - 大图预览 - {System.IO.Path.GetFileName(path)}";
-        if (_titleText is not null)
+        if (_chrome is not null)
         {
-            _titleText.Text = Title;
+            _chrome.TitleText = Title;
         }
 
         _ = LoadAsync(path, generation);
@@ -144,9 +142,12 @@ public partial class ImagePreview : Window
         _emptyLabel = this.FindControl<TextBlock>("PART_Empty");
         _zoomBadge = this.FindControl<Border>("PART_ZoomBadge");
         _zoomText = this.FindControl<TextBlock>("PART_ZoomText");
-        _titleText = this.FindControl<TextBlock>("PART_TitleText");
 
-        InitChrome();
+        _chrome = this.FindControl<ChromeTitleBar>("PART_Chrome");
+        if (_chrome is not null)
+        {
+            ChromeBehavior.Init(this, _chrome);
+        }
 
         if (_box is not null)
         {
@@ -167,71 +168,6 @@ public partial class ImagePreview : Window
         Closed += (_, _) => Cleanup();
 
         ShowEmpty("暂无图像");
-    }
-
-    /// <summary>Wires the self-drawn chrome (same pattern as MainWindow; Z4).</summary>
-    private void InitChrome()
-    {
-        var titleBar = this.FindControl<Border>("PART_TitleBar");
-        var btnMinimize = this.FindControl<Button>("PART_BtnMinimize");
-        var btnMaximize = this.FindControl<Button>("PART_BtnMaximize");
-        var btnClose = this.FindControl<Button>("PART_BtnClose");
-
-        if (titleBar is not null)
-        {
-            WindowDecorationProperties.SetElementRole(titleBar, WindowDecorationsElementRole.TitleBar);
-        }
-
-        SetRole(btnMinimize, WindowDecorationsElementRole.MinimizeButton);
-        SetRole(btnMaximize, WindowDecorationsElementRole.MaximizeButton);
-        SetRole(btnClose, WindowDecorationsElementRole.CloseButton);
-
-        if (btnMinimize is not null)
-        {
-            btnMinimize.Click += (_, _) => WindowState = WindowState.Minimized;
-        }
-
-        if (btnMaximize is not null)
-        {
-            btnMaximize.Click += (_, _) => WindowState =
-                WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
-        }
-
-        if (btnClose is not null)
-        {
-            btnClose.Click += (_, _) => Close();
-        }
-
-        PropertyChanged += (_, e) =>
-        {
-            if (e.Property == WindowStateProperty)
-            {
-                UpdateMaximizeIcon();
-            }
-        };
-
-        UpdateMaximizeIcon();
-    }
-
-    private static void SetRole(Button? button, WindowDecorationsElementRole role)
-    {
-        if (button is not null)
-        {
-            WindowDecorationProperties.SetElementRole(button, role);
-        }
-    }
-
-    private void UpdateMaximizeIcon()
-    {
-        var icon = this.FindControl<Avalonia.Controls.Shapes.Path>("PART_IconMaximize");
-        if (icon is null)
-        {
-            return;
-        }
-
-        icon.Data = Geometry.Parse(WindowState == WindowState.Maximized
-            ? "M0 3H7V10H0Z M3 0H10V7H3Z"
-            : "M0 0H10V10H0Z");
     }
 
     private double ViewportWidth() => _box?.Viewport.Width ?? 0;

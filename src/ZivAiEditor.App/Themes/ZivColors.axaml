@@ -12,5 +12,7 @@
   <SolidColorBrush x:Key="ZivButtonPressedBrush" Color="#22FFFFFF" />
   <SolidColorBrush x:Key="ZivCloseHoverBrush" Color="#C42B1C" />
   <SolidColorBrush x:Key="ZivClosePressedBrush" Color="#B0241A" />
+  <SolidColorBrush x:Key="ZivCanvasBackgroundBrush" Color="#161616" />
+  <SolidColorBrush x:Key="ZivOverlayBrush" Color="#99000000" />
 
 </ResourceDictionary>

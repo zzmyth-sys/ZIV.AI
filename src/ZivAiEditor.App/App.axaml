@@ -13,5 +13,6 @@
     <FluentTheme />
     <!-- AdvancedImageBox theme (UVtools.AvaloniaControls) for the image preview. -->
     <StyleInclude Source="avares://UVtools.AvaloniaControls/Controls.axaml" />
+    <StyleInclude Source="avares://ZivAiEditor.App/Styles/ChromeStyles.axaml" />
   </Application.Styles>
 </Application>

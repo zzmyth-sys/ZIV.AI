@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ZivAiEditor.App.Controls.ChromeResizeBorders">
+  <!-- Resize strips: WindowDecorations=None removes the OS border, these carry the roles. -->
+  <Panel>
+    <Border Width="6" HorizontalAlignment="Left" Background="Transparent"
+            WindowDecorationProperties.ElementRole="ResizeW" />
+    <Border Width="6" HorizontalAlignment="Right" Background="Transparent"
+            WindowDecorationProperties.ElementRole="ResizeE" />
+    <Border Height="6" VerticalAlignment="Top" Background="Transparent"
+            WindowDecorationProperties.ElementRole="ResizeN" />
+    <Border Height="6" VerticalAlignment="Bottom" Background="Transparent"
+            WindowDecorationProperties.ElementRole="ResizeS" />
+    <Border Width="14" Height="14" HorizontalAlignment="Left" VerticalAlignment="Top" Background="Transparent"
+            WindowDecorationProperties.ElementRole="ResizeNW" />
+    <Border Width="14" Height="14" HorizontalAlignment="Right" VerticalAlignment="Top" Background="Transparent"
+            WindowDecorationProperties.ElementRole="ResizeNE" />
+    <Border Width="14" Height="14" HorizontalAlignment="Left" VerticalAlignment="Bottom" Background="Transparent"
+            WindowDecorationProperties.ElementRole="ResizeSW" />
+    <Border Width="14" Height="14" HorizontalAlignment="Right" VerticalAlignment="Bottom" Background="Transparent"
+            WindowDecorationProperties.ElementRole="ResizeSE" />
+  </Panel>
+</UserControl>

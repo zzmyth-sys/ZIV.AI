@@ -1,0 +1,50 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctrl="clr-namespace:ZivAiEditor.App.Controls"
+             x:Class="ZivAiEditor.App.Controls.ChromeTitleBar">
+  <Border x:Name="PART_ShadowWrapper" CornerRadius="8">
+    <Border.Effect>
+      <DropShadowEffect BlurRadius="8" OffsetX="0" OffsetY="1" Opacity="0.28" Color="Black" />
+    </Border.Effect>
+    <Border x:Name="PART_ChromeRoot"
+            Background="{StaticResource ZivBackgroundBrush}"
+            CornerRadius="8"
+            ClipToBounds="True">
+      <Grid>
+        <DockPanel>
+          <Border x:Name="PART_TitleBar"
+                  DockPanel.Dock="Top"
+                  Height="40"
+                  Background="{StaticResource ZivTitleBarBrush}">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <TextBlock x:Name="PART_TitleText"
+                         Grid.Column="0"
+                         Margin="12,0"
+                         VerticalAlignment="Center"
+                         Foreground="{StaticResource ZivTextBrush}"
+                         FontWeight="SemiBold"
+                         TextTrimming="CharacterEllipsis"
+                         Text="ZIV.AI Editor" />
+              <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                <Button x:Name="PART_BtnMinimize" Classes="tb">
+                  <Path Classes="winIcon" Stretch="None" Data="M0 5H10" Stroke="{StaticResource ZivTextBrush}" />
+                </Button>
+                <Button x:Name="PART_BtnMaximize" Classes="tb">
+                  <Path x:Name="PART_IconMaximize" Classes="winIcon"
+                        Data="M0 0H10V10H0Z" Stroke="{StaticResource ZivTextBrush}" />
+                </Button>
+                <Button x:Name="PART_BtnClose" Classes="tb close">
+                  <Path Classes="winIcon" Data="M0 0L10 10M10 0L0 10" Stroke="{StaticResource ZivTextBrush}" />
+                </Button>
+              </StackPanel>
+            </Grid>
+          </Border>
+
+          <ContentPresenter x:Name="PART_Body" />
+        </DockPanel>
+
+        <ctrl:ChromeResizeBorders />
+      </Grid>
+    </Border>
+  </Border>
+</UserControl>

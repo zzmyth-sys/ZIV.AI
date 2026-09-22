@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Chrome;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -66,7 +65,11 @@ public partial class MainWindow : Window
         _vm = new SessionViewModel(session, commandParser, executor);
 
         InitializeComponent();
-        InitChrome();
+        if (this.FindControl<ChromeTitleBar>("PART_Chrome") is { } chrome)
+        {
+            ChromeBehavior.Init(this, chrome);
+        }
+
         InitChat();
 
         _vm.Messages.CollectionChanged += (_, _) => RenderChat();
@@ -107,71 +110,6 @@ public partial class MainWindow : Window
         }
 
         SetStatus("已接收新的编辑请求");
-    }
-
-    private void InitChrome()
-    {
-        var titleBar = this.FindControl<Border>("PART_TitleBar");
-        var btnMinimize = this.FindControl<Button>("PART_BtnMinimize");
-        var btnMaximize = this.FindControl<Button>("PART_BtnMaximize");
-        var btnClose = this.FindControl<Button>("PART_BtnClose");
-
-        // Avalonia 12 chrome roles: treat the self-drawn elements as the real caption.
-        if (titleBar is not null)
-        {
-            WindowDecorationProperties.SetElementRole(titleBar, WindowDecorationsElementRole.TitleBar);
-        }
-
-        SetRole(btnMinimize, WindowDecorationsElementRole.MinimizeButton);
-        SetRole(btnMaximize, WindowDecorationsElementRole.MaximizeButton);
-        SetRole(btnClose, WindowDecorationsElementRole.CloseButton);
-
-        if (btnMinimize is not null)
-        {
-            btnMinimize.Click += (_, _) => WindowState = WindowState.Minimized;
-        }
-
-        if (btnMaximize is not null)
-        {
-            btnMaximize.Click += (_, _) => WindowState =
-                WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
-        }
-
-        if (btnClose is not null)
-        {
-            btnClose.Click += (_, _) => Close();
-        }
-
-        PropertyChanged += (_, e) =>
-        {
-            if (e.Property == WindowStateProperty)
-            {
-                UpdateMaximizeIcon();
-            }
-        };
-
-        UpdateMaximizeIcon();
-    }
-
-    private static void SetRole(Button? button, WindowDecorationsElementRole role)
-    {
-        if (button is not null)
-        {
-            WindowDecorationProperties.SetElementRole(button, role);
-        }
-    }
-
-    private void UpdateMaximizeIcon()
-    {
-        var icon = this.FindControl<Avalonia.Controls.Shapes.Path>("PART_IconMaximize");
-        if (icon is null)
-        {
-            return;
-        }
-
-        icon.Data = Geometry.Parse(WindowState == WindowState.Maximized
-            ? "M0 3H7V10H0Z M3 0H10V7H3Z"
-            : "M0 0H10V10H0Z");
     }
 
     private void InitChat()
