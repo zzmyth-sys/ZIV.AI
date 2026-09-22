@@ -2,9 +2,166 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="ZivAiEditor.App.MainWindow"
         Title="ZIV.AI Editor"
-        Width="960"
-        Height="640">
-  <TextBlock HorizontalAlignment="Center"
-             VerticalAlignment="Center"
-             Text="ZIV.AI Editor — Step 1 skeleton" />
+        Width="1040"
+        Height="700"
+        MinWidth="760"
+        MinHeight="500"
+        ExtendClientAreaToDecorationsHint="True"
+        WindowDecorations="None"
+        TransparencyLevelHint="Transparent"
+        TransparencyBackgroundFallback="#FF1A1A1A"
+        Background="Transparent">
+
+  <Window.Styles>
+    <!-- Self-drawn title-bar buttons (same 32x32 hit area as ZIV). -->
+    <Style Selector="Button.tb">
+      <Setter Property="Width" Value="32" />
+      <Setter Property="Height" Value="32" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.tb:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{StaticResource ZivButtonHoverBrush}" />
+    </Style>
+    <Style Selector="Button.tb:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{StaticResource ZivButtonPressedBrush}" />
+    </Style>
+    <Style Selector="Button.tb.close:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{StaticResource ZivCloseHoverBrush}" />
+    </Style>
+    <Style Selector="Button.tb.close:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{StaticResource ZivClosePressedBrush}" />
+    </Style>
+
+    <Style Selector="Path.winIcon">
+      <Setter Property="Width" Value="10" />
+      <Setter Property="Height" Value="10" />
+      <Setter Property="Stretch" Value="Uniform" />
+      <Setter Property="StrokeThickness" Value="1" />
+      <Setter Property="StrokeLineCap" Value="Round" />
+      <Setter Property="StrokeJoin" Value="Round" />
+    </Style>
+
+    <Style Selector="ListBoxItem">
+      <Setter Property="Padding" Value="10,6" />
+      <Setter Property="CornerRadius" Value="4" />
+    </Style>
+  </Window.Styles>
+
+  <Border x:Name="PART_ShadowWrapper" CornerRadius="8">
+    <Border.Effect>
+      <DropShadowEffect BlurRadius="8" OffsetX="0" OffsetY="1" Opacity="0.28" Color="Black" />
+    </Border.Effect>
+    <Border x:Name="PART_ChromeRoot"
+            Background="{StaticResource ZivBackgroundBrush}"
+            CornerRadius="8"
+            ClipToBounds="True">
+      <Grid>
+        <DockPanel>
+          <!-- Self-drawn title bar -->
+          <Border x:Name="PART_TitleBar"
+                  DockPanel.Dock="Top"
+                  Height="40"
+                  Background="{StaticResource ZivTitleBarBrush}">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <TextBlock Grid.Column="0"
+                         Margin="12,0"
+                         VerticalAlignment="Center"
+                         Foreground="{StaticResource ZivTextBrush}"
+                         FontWeight="SemiBold"
+                         Text="ZIV.AI Editor" />
+              <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                <Button x:Name="PART_BtnMinimize" Classes="tb">
+                  <Path Classes="winIcon" Stretch="None" Data="M0 5H10" Stroke="{StaticResource ZivTextBrush}" />
+                </Button>
+                <Button x:Name="PART_BtnMaximize" Classes="tb">
+                  <Path x:Name="PART_IconMaximize" Classes="winIcon"
+                        Data="M0 0H10V10H0Z" Stroke="{StaticResource ZivTextBrush}" />
+                </Button>
+                <Button x:Name="PART_BtnClose" Classes="tb close">
+                  <Path Classes="winIcon" Data="M0 0L10 10M10 0L0 10" Stroke="{StaticResource ZivTextBrush}" />
+                </Button>
+              </StackPanel>
+            </Grid>
+          </Border>
+
+          <!-- Bottom input + status -->
+          <Border DockPanel.Dock="Bottom" Background="{StaticResource ZivTitleBarBrush}" Padding="12,10">
+            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+              <TextBox x:Name="PART_Input"
+                       Grid.Row="0"
+                       Grid.Column="0"
+                       MinHeight="40"
+                       AcceptsReturn="False"
+                       PlaceholderText="输入编辑指令，例如 /换背景 茶肆 或 把天空换成日落"
+                       Background="#2A2A2A"
+                       Foreground="{StaticResource ZivTextBrush}"
+                       BorderBrush="#3A3A3A" />
+              <Button x:Name="PART_BtnSend"
+                      Grid.Row="0"
+                      Grid.Column="1"
+                      Margin="8,0,0,0"
+                      MinWidth="72"
+                      Height="40"
+                      Background="#3A6DF0"
+                      Foreground="White"
+                      Content="发送" />
+              <TextBlock x:Name="PART_Status"
+                         Grid.Row="1"
+                         Grid.Column="0"
+                         Grid.ColumnSpan="2"
+                         Margin="0,6,0,0"
+                         Foreground="{StaticResource ZivTextSecondaryBrush}"
+                         Text="就绪"
+                         TextTrimming="CharacterEllipsis" />
+            </Grid>
+          </Border>
+
+          <Grid ColumnDefinitions="240,*">
+            <!-- History node list (tree, ParentNodeId indentation) -->
+            <Border Grid.Column="0" Background="#202020" BorderBrush="#2E2E2E" BorderThickness="0,0,1,0">
+              <Grid RowDefinitions="Auto,*">
+                <TextBlock Grid.Row="0"
+                           Margin="12,10"
+                           Foreground="{StaticResource ZivTextSecondaryBrush}"
+                           Text="历史节点" />
+                <ListBox x:Name="PART_HistoryList"
+                         Grid.Row="1"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         SelectionMode="Single" />
+              </Grid>
+            </Border>
+
+            <!-- Chat stream -->
+            <ScrollViewer x:Name="PART_ChatScroll" Grid.Column="1" Padding="12">
+              <StackPanel x:Name="PART_ChatStream" Spacing="8" />
+            </ScrollViewer>
+          </Grid>
+        </DockPanel>
+
+        <!-- Resize strips: WindowDecorations=None removes the OS border, these carry the roles. -->
+        <Border Width="6" HorizontalAlignment="Left" Background="Transparent"
+                WindowDecorationProperties.ElementRole="ResizeW" />
+        <Border Width="6" HorizontalAlignment="Right" Background="Transparent"
+                WindowDecorationProperties.ElementRole="ResizeE" />
+        <Border Height="6" VerticalAlignment="Top" Background="Transparent"
+                WindowDecorationProperties.ElementRole="ResizeN" />
+        <Border Height="6" VerticalAlignment="Bottom" Background="Transparent"
+                WindowDecorationProperties.ElementRole="ResizeS" />
+        <Border Width="14" Height="14" HorizontalAlignment="Left" VerticalAlignment="Top" Background="Transparent"
+                WindowDecorationProperties.ElementRole="ResizeNW" />
+        <Border Width="14" Height="14" HorizontalAlignment="Right" VerticalAlignment="Top" Background="Transparent"
+                WindowDecorationProperties.ElementRole="ResizeNE" />
+        <Border Width="14" Height="14" HorizontalAlignment="Left" VerticalAlignment="Bottom" Background="Transparent"
+                WindowDecorationProperties.ElementRole="ResizeSW" />
+        <Border Width="14" Height="14" HorizontalAlignment="Right" VerticalAlignment="Bottom" Background="Transparent"
+                WindowDecorationProperties.ElementRole="ResizeSE" />
+      </Grid>
+    </Border>
+  </Border>
 </Window>

@@ -899,3 +899,62 @@ Step 7.5 候选。范围外：UI（Step 9）、独立超分模型 / 后处理抠
 > **修订（2026-09-22）**：8.x 中原描述「SessionExporter 在 App 层」与
 > 「Tests 引用 App / net8.0-windows」已修正为 Agent 层 / net8.0。
 > 详见 FROZEN 8R。
+
+---
+
+## Step 9A 验收：CLI 入口 + 单实例 + UI 层（聊天流 + 历史节点列表）
+
+**目标**：落地 `DOC/INTERACTION.md` 的 UI 层——聊天流 + 历史节点列表、关闭询问导出；
+对外 CLI 入口（`--image` / `--prompt` / `--mask`，AOT 友好）；单实例（Mutex + Named Pipe，
+JSON payload）；`SPEC.md` §3.4 / §7 授权修订。范围外：URL 协议注册、LLM 意图理解、
+`@图片N` 多图、与 ZIV 实际联调（Step 9B）、GPU 端到端（Z29 / Z30）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 新增 UI（`LaunchOptions` / `SessionViewModel`）+ App（`SingleInstance` / UI）；UI 只经契约访问 Agent | ✅ |
+| G3 | 接口与 FROZEN 一致 | `Contracts` 零新增；`IInferenceClient` / `IEditTool` / `IToolRegistry` / `IExecutor` / `IPlanner` 签名未改 | ✅ |
+| G4 | 未授权修改检查 | Step 0–8 冻结行未改；`SPEC` §3.4 / §7 修订走 Step 9A 冻结节 | ✅ |
+| G5 | 文档已更新 | `FROZEN` Step 9A / `DEVLOG` Step 9A / `ACCEPTANCE` Step 9A / `INTERACTION` 状态 / `SPEC` 修订 | ✅ |
+| G6 | 便携性未破 | 无新增注册表 / 外部路径配置；会话导出目录由用户选 | ✅ |
+| G7 | AI 推理进程隔离未破 | UI 不直接调 `IpcInferenceClient`；推理经 `IExecutor` → Tool（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9A.1 | CLI 解析 | `LaunchOptionsTests` | `--image` / `--prompt` / `--mask` 正确解析；无参数 / 缺值 / 未知参数 → 空 / 忽略，不退出 | ✅ 4 通过 |
+| 9A.2 | 单实例 | `SingleInstanceTests` | 首实例持有 Mutex；重复唤起经 Pipe 转发 payload；空 payload 不转发 | ✅ 2 通过 |
+| 9A.3 | 聊天流 | `SessionViewModelTests` | 输入 → 执行 → 节点新增 → 历史刷新；失败显示错误且不建节点 | ✅ 4 通过 |
+| 9A.4 | 切换上下文 | `SessionViewModelTests.Navigate_Switches_Current_And_Rebuilds_Chat` | `NavigateTo` 切换当前节点并重建聊天 | ✅ |
+| 9A.5 | 配色一致 | 查 `Themes/ZivColors.axaml` | 8 个常量与 ZIV `MainWindow.axaml` 一致 | ✅ |
+| 9A.6 | UI 只经契约 | 查 `SessionViewModel.cs` | 只用 `ICommandParser` / `IExecutor` / `EditSession`；无 `IpcInferenceClient` | ✅ |
+| 9A.7 | 关闭询问 | 查 `MainWindow.OnClosing` / `ConfirmDialog` | 会话非空弹窗；「是」→ 选目录 → `ExportAsync`；失败不阻塞 | ✅（代码审查） |
+| 9A.8 | SPEC 修订 | 查 `SPEC.md` §3.4 / §7 | §3.4 改为「聊天流 + 历史节点列表」；§7 评审项改为 App 层措辞 | ✅ |
+| 9A.9 | AOT 友好 | 查 `Program.cs` / `LaunchOptions` | 无 `System.CommandLine`、无反射；JSON 源生成 | ✅ |
+| 9A.10 | 构建 / 测试 | `dotnet build` / `dotnet test`（受影响类） | 0 错误 0 警告；新增 **10 通过 / 0 失败**；非 GPU 全量 **108 通过 / 0 失败** | ✅ |
+| 9A.11 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+
+### Step 9A 通过标准
+
+- 通用 G1–G8 全过
+- 专属 9A.1–9A.11 全过
+
+### Step 9A 遗留说明（非阻断）
+
+- **URL 协议注册未实现**（后置）。
+- **LLM 意图理解 / `@图片N` 多图未实现**（后置）。
+- **与 ZIV 实际联调未做**（Step 9B）。
+- **遮罩 UI 未实现**：`--mask` 已解析，UI 无绘制入口。
+- **会话导入未实现**：导出后可手动保存，导入留后续 Step。
+- **Tests TFM 回到 `net8.0-windows`**：为测 App 平台层（`SingleInstance`），见 `FROZEN` 9A.7；
+  本步修订 8R.2 的 TFM 部分（8R 针对可下移的 `SessionExporter`）。
+
+### Step 9A 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 9A 记录（本步已完成）
+2. 在「验收记录」追加“Step 9A 通过，日期：____”（待签）
+3. 进入 Step 9B（与 ZIV 侧联调：按钮 + `settings.ini` 配置 exe 路径），由用户决定

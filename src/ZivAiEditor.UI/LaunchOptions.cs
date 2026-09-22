@@ -1,0 +1,92 @@
+using System.Text.Json.Serialization;
+
+namespace ZivAiEditor.UI;
+
+/// <summary>
+/// Startup request for the editor: either the parsed CLI arguments or the payload
+/// handed over by a second instance through the single-instance pipe (Z27). Every
+/// field is optional — an empty request starts an empty session.
+///
+/// Parsing is intentionally lenient: an unknown flag or a flag without a value is
+/// ignored so the app still starts with a default session (Step 9A requirement;
+/// Z28: no external dependency, no exit on bad input). The type has no Avalonia
+/// dependency, so it can be unit-tested without a UI thread.
+/// </summary>
+public sealed class LaunchOptions
+{
+    /// <summary>Main image to edit; <c>null</c> starts an empty / T2I-first session.</summary>
+    public string? ImagePath { get; init; }
+
+    /// <summary>Initial prompt to prefill the input box.</summary>
+    public string? Prompt { get; init; }
+
+    /// <summary>Optional mask path (reserved; masking UI is a later step).</summary>
+    public string? MaskPath { get; init; }
+
+    /// <summary>True when no field carries a value.</summary>
+    public bool IsEmpty
+        => string.IsNullOrEmpty(ImagePath)
+           && string.IsNullOrEmpty(Prompt)
+           && string.IsNullOrEmpty(MaskPath);
+
+    /// <summary>
+    /// Parses <c>--image &lt;path&gt;</c> / <c>--prompt &lt;text&gt;</c> /
+    /// <c>--mask &lt;path&gt;</c>. Hand-written and reflection-free (AOT-friendly);
+    /// never throws.
+    /// </summary>
+    public static LaunchOptions Parse(string[]? args)
+    {
+        string? image = null;
+        string? prompt = null;
+        string? mask = null;
+
+        if (args is { Length: > 0 })
+        {
+            for (var i = 0; i < args.Length; i++)
+            {
+                switch (args[i])
+                {
+                    case "--image":
+                        image = NextValue(args, ref i) ?? image;
+                        break;
+                    case "--prompt":
+                        prompt = NextValue(args, ref i) ?? prompt;
+                        break;
+                    case "--mask":
+                        mask = NextValue(args, ref i) ?? mask;
+                        break;
+                }
+            }
+        }
+
+        return new LaunchOptions { ImagePath = image, Prompt = prompt, MaskPath = mask };
+    }
+
+    /// <summary>
+    /// Consumes the token after a flag. A missing / empty value or another flag is
+    /// treated as "no value" (the flag is dropped) rather than a parse failure.
+    /// </summary>
+    private static string? NextValue(string[] args, ref int index)
+    {
+        if (index + 1 >= args.Length)
+        {
+            return null;
+        }
+
+        var value = args[index + 1];
+        if (string.IsNullOrWhiteSpace(value) || value.StartsWith("--", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        index++;
+        return value;
+    }
+}
+
+/// <summary>Source-generated JSON for the single-instance payload (AOT-friendly).</summary>
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower)]
+[JsonSerializable(typeof(LaunchOptions))]
+public partial class LaunchOptionsJsonContext : JsonSerializerContext
+{
+}

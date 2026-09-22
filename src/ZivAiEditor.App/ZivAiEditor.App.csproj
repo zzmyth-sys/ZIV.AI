@@ -33,4 +33,12 @@
     <None Include="..\..\Template\commands.json" Link="Template\commands.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- Step 9A: let the test project exercise the App-layer single-instance guard
+       (Mutex + Named Pipe live only in the App platform layer, Z4). -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>ZivAiEditor.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
 </Project>

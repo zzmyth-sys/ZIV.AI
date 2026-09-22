@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -15,6 +15,8 @@
     <ProjectReference Include="..\ZivAiEditor.Agent\ZivAiEditor.Agent.csproj" />
     <ProjectReference Include="..\ZivAiEditor.Tools\ZivAiEditor.Tools.csproj" />
     <ProjectReference Include="..\ZivAiEditor.Backend\ZivAiEditor.Backend.csproj" />
+    <ProjectReference Include="..\ZivAiEditor.UI\ZivAiEditor.UI.csproj" />
+    <ProjectReference Include="..\ZivAiEditor.App\ZivAiEditor.App.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />

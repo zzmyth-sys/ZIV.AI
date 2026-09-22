@@ -1,6 +1,6 @@
 # ZIV.AI 对话式交互设计（INTERACTION）
 
-- 文档状态：**逻辑层已实现（Step 8）；UI 待 Step 9**（非冻结草案）
+- 文档状态：**逻辑层 + UI 已实现（Step 8 + Step 9A）**（非冻结草案）
 - 用途：记录对话式交互模型与关键决策，避免遗忘
 - 关联：[`ARCHITECTURE.md`](ARCHITECTURE.md)（分层）· [`SPEC.md`](SPEC.md)（Planner / Executor / Tool）·
   [`FROZEN.md`](FROZEN.md)（Z17–Z30）· [`OPTIMIZATION.md`](OPTIMIZATION.md)（文档风格参考）
@@ -78,6 +78,14 @@
 > 契约与冻结记录见 `FROZEN.md` Step 8。`/扩图` 由 `width`/`height` 参数翻译为
 > `ResolutionPolicy{Explicit}`（`QW21outpaint` 要求）。UI、LLM 意图理解、`@图片N` 仍后置。
 
+> **实现状态（Step 9A）**：UI 层已落地——`SessionViewModel`（聊天流 + 历史节点列表）与
+> `LaunchOptions`（CLI 参数解析）在 `ZivAiEditor.UI`；`SingleInstance`（Mutex + Named Pipe）、
+> 自绘 chrome 主窗口（`MainWindow`）、关闭询问对话框（`ConfirmDialog`）在 `ZivAiEditor.App`；
+> `Themes/ZivColors.axaml` 配色与 ZIV 一致。UI **只经契约访问 Agent 层**
+> （`ICommandParser` / `IExecutor` / `ISessionExporter` / `EditSession`），不直接调
+> `IpcInferenceClient`。契约与冻结记录见 `FROZEN.md` Step 9A。URL 协议、LLM 意图理解、
+> `@图片N` 仍后置（与 ZIV 侧实际联调为 Step 9B）。
+
 ## 6. 不在本期范围
 
 - LLM 意图理解（Skill 系统）
@@ -90,5 +98,6 @@
 
 - ~~`commands.json` 的具体命令集。~~ **已定（Step 8）**：初始 4 条（`/换背景` `/去水印`
   `/去物体` `/扩图`），见 `Template/commands.json` 与 `FROZEN.md` 8.2；后续可增补。
-- 历史节点的 UI 展示形式（列表 / 时间轴 / 缩略图）——**留 Step 9**。
-- 保存目录的默认值——**留 Step 9**（`ISessionExporter` 接受调用方传入目录）。
+- ~~历史节点的 UI 展示形式（列表 / 时间轴 / 缩略图）~~ **已定（Step 9A）**：左栏**列表** +
+  按 `ParentNodeId` **树形缩进**；点击节点切换当前上下文。
+- ~~保存目录的默认值~~ **已定（Step 9A）**：关闭时弹窗询问，由用户经系统文件夹选择器指定。

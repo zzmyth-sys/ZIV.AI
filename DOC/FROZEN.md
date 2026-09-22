@@ -1305,3 +1305,93 @@ public interface ILlmClient : IDisposable
 - `dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
 - `dotnet test`（按 Z29，**无 GPU**，排除 `Ipc*` / `PlannerIntegration`）→ **98 通过 / 0 失败**
   （含 `SessionExporterTests` 3 例，经 Agent 引用覆盖）。
+
+---
+
+## Step 9A（日期：2026-09-22）
+
+> **修订说明（Step 9A · CLI 入口 + 单实例 + UI 层）**
+>
+> 本段为 Step 9A 追加。目标：① 对外 CLI 入口（`--image` / `--prompt` / `--mask`，AOT 友好
+> 手写解析）② 单实例（Mutex + Named Pipe，JSON payload）③ UI 层（聊天流 + 历史节点列表 +
+> 关闭询问导出）④ `SPEC.md` §3.4 / §7 授权修订。**不改动 Step 0–8 已冻结行的既有成员**；
+> **无契约变更**（`Contracts` 零新增、零修改）。UI 全部放 ZIV.AI 侧（App 层承载），
+> ZIV 侧只提供一个按钮调用（实际联调留 Step 9B）。
+
+### 9A.1 CLI 参数约定（冻结）
+
+| 参数 | 含义 | 缺省行为 |
+|---|---|---|
+| `--image <path>` | 主图路径（设为会话根 `EditSession.RootImagePath`） | 空会话（可手动导入或直接 T2I） |
+| `--prompt <text>` | 初始提示词（预填输入框） | 空 |
+| `--mask <path>` | 遮罩路径（后置） | 空 |
+
+- 手写解析（AOT 友好，**不用** `System.CommandLine`）；解析失败 / 未知参数 / 缺值 →
+  **不退出**，用默认会话启动（无参数时行为与之前一致）。
+- 类型：`ZivAiEditor.UI/LaunchOptions.cs`（`ImagePath` / `Prompt` / `MaskPath` + `Parse`），
+  JSON 走源生成（`LaunchOptionsJsonContext`）。
+
+### 9A.2 单实例协议（冻结）
+
+- Mutex 名：`Local\ZIV.AI.SingleInstance.{sid}.{session}`（用户 SID + 会话 id）。
+- Named Pipe 名同名；**单行 UTF-8 JSON payload**（snake_case：`image_path` / `prompt` /
+  `mask_path`）。
+- 首次启动：创建 Mutex + Pipe Server → 正常启动。
+- 重复唤起：连接已有 Pipe → 发送 payload → 退出（不显示窗口）。
+- 主进程收到 `PathReceived` 事件 → 激活窗口 + 加载新请求（`MainWindow.ApplyLaunchRequest`）。
+- **与 Python 后端 IPC（`contracts/ipc-protocol.md`）无关**（Z23：允许 C# 不校验
+  `ipc_version`；本 IPC 不参与推理传输）。
+- 类型：`ZivAiEditor.App/SingleInstance.cs`（`internal`，`InternalsVisibleTo("ZivAiEditor.Tests")`）。
+
+### 9A.3 配色资源字典（冻结）
+
+- 文件：`ZivAiEditor.App/Themes/ZivColors.axaml`（由 `App.axaml` 合并）。
+- 常量（从 ZIV `MainWindow.axaml` 抄，**不引用 ZIV 控件**）：背景 `#1A1A1A`、标题栏
+  `#252525`、主文字 `#DDDDDD`、次级文字 `#AAAAAA`、按钮 hover `#33FFFFFF`、pressed
+  `#22FFFFFF`、关闭 hover `#C42B1C`、关闭 pressed `#B0241A`。
+
+### 9A.4 SPEC 授权修订（冻结）
+
+- `SPEC.md` §3.4：UI 范围「任务卡片流」→ **「聊天流 + 历史节点列表」**（以
+  `INTERACTION.md` 为准）。
+- `SPEC.md` §7 评审清单原「`ZIV.sln` 未被改动；`D:\devlop\ZIV` 下无本步修改」→
+  「ZIV 侧改动限 App 层（插件入口），不动共享库（`ZIV.Core` / `ZIV.Imaging`）；ZIV.AI 不
+  反向依赖 `ZIV.App` / 不加载 ZIV 托管程序集（Z27 / Z28 不变）」。
+
+### 9A.5 实现清单（冻结）
+
+| 类 / 改动 | 文件 | 职责 |
+|---|---|---|
+| `LaunchOptions`（新增） | `UI/LaunchOptions.cs` | CLI 解析 + 单实例 payload；AOT 源生成 JSON |
+| `SessionViewModel`（新增） | `UI/Chat/SessionViewModel.cs` | 聊天流 + 历史节点（Agent 契约驱动，无 Avalonia） |
+| `SingleInstance`（新增） | `App/SingleInstance.cs` | Mutex + Named Pipe；`PathReceived` 事件 |
+| `ZivColors.axaml`（新增） | `App/Themes/ZivColors.axaml` | 配色资源字典 |
+| `MainWindow`（重写） | `App/MainWindow.axaml(.cs)` | 自绘 chrome + 历史列表 + 聊天流 + 关闭询问 |
+| `ConfirmDialog`（新增） | `App/ConfirmDialog.axaml(.cs)` | 自绘「保存本次会话？」对话框 |
+| `Program` / `App`（修改） | `App/Program.cs` / `App.axaml.cs` | CLI 解析 + 单实例接线 + UI 依赖注入 |
+| `AppContext`（不变） | `App/AppContext.cs` | 已暴露 `Session` / `CommandParser` / `Executor` / `SessionExporter` |
+
+- **UI 只经契约访问 Agent 层**：`SessionViewModel` 只用 `ICommandParser` / `IExecutor` /
+  `EditSession`（Step 8 冻结）；不直接调 `IpcInferenceClient`（Z17 / ARCHITECTURE §4）。
+- **关闭询问**：会话非空时弹窗；「是」→ `IStorageProvider` 选目录 →
+  `ISessionExporter.ExportAsync`；「否」→ 直接关闭；弹窗 / 导出失败不阻塞关闭
+  （INTERACTION §4；不自动恢复）。
+- **范围外**：URL 协议注册、LLM 意图理解、`@图片N` 多图、与 ZIV 实际联调（Step 9B）。
+
+### 9A.6 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（按 Z29 只跑受影响类，**无 GPU**）：`LaunchOptionsTests`（4）+
+  `SingleInstanceTests`（2）+ `SessionViewModelTests`（4）→ **10 通过 / 0 失败**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **108 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步 UI 层不直接跑推理。
+
+### 9A.7 Tests 依赖修订（取代 8R.2 的 TFM 部分）
+
+- **`ZivAiEditor.Tests` 的 TFM 由 `net8.0` 改为 `net8.0-windows`**，并新增对
+  `ZivAiEditor.UI` / `ZivAiEditor.App` 的 `ProjectReference`。
+- **理由**：Step 9A 需测 App **平台层**逻辑（`SingleInstance`：Mutex + Named Pipe，Z4 要求
+  平台 API 只在 App 层，**无法下移**）。8R.2 的「Tests 恢复 `net8.0`」是针对可下移的
+  `SessionExporter`；本步的 CLI / 单实例属 App 平台层，测试必须能引用 App。
+- **性质**：仅项目配置与 TFM；不改契约 / 签名 / 行为 / 依赖方向。`App` 通过
+  `InternalsVisibleTo("ZivAiEditor.Tests")` 暴露 `internal SingleInstance`。

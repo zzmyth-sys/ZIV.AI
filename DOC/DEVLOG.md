@@ -1573,3 +1573,74 @@ clamp）。范围外：Segment / Upscale 工具（Step 7.5）、UI（Step 9）�
 
 - 只增不改：Step 0–7 冻结行、Step 8 原文均未动；修正记录见 `FROZEN.md` 8R。
 - 未修改 `C:\AI\ComfyUI_PIC`。
+
+---
+
+## [Step 9A] - 2026-09-22
+
+### 目标
+
+落地 `DOC/INTERACTION.md` 的 **UI 层** + 对外 CLI 入口 + 单实例：聊天流 + 历史节点列表、
+关闭询问导出、`--image` / `--prompt` / `--mask` 参数、Mutex + Named Pipe 单实例。
+范围外：URL 协议注册、LLM 意图理解、`@图片N` 多图、与 ZIV 实际联调（Step 9B）、
+GPU 端到端（Z29 / Z30）。
+
+### 做了什么
+
+- **UI 层（`ZivAiEditor.UI`，net8.0，可测纯逻辑）**：
+  - `LaunchOptions.cs`：手写 CLI 解析（AOT 友好，不用 `System.CommandLine`）+ 单实例
+    payload；JSON 源生成（`LaunchOptionsJsonContext`）。
+  - `Chat/SessionViewModel.cs`：`ChatMessage` / `HistoryItem` / `SessionViewModel`；经
+    `ICommandParser` → `IExecutor` → `EditSession.AppendNode` 驱动聊天流与历史树；
+    `NavigateTo` 切换上下文并重建聊天。
+- **App 层（平台接线）**：
+  - `SingleInstance.cs`：Mutex `Local\ZIV.AI.SingleInstance.{sid}.{session}` + Named Pipe，
+    单行 UTF-8 JSON payload；`PathReceived` 事件；与 Python 后端 IPC 无关。
+  - `Themes/ZivColors.axaml`：从 ZIV 抄的配色常量；`App.axaml` 合并。
+  - `MainWindow.axaml(.cs)`：自绘 chrome（ZIV 模式）+ 左栏历史节点 + 主区聊天流 +
+    底部输入；关闭询问导出。
+  - `ConfirmDialog.axaml(.cs)`：自绘「保存本次会话？」对话框。
+  - `Program.cs` / `App.axaml.cs`：CLI 解析 + 单实例接线 + UI 依赖注入。
+- **测试**：`LaunchOptionsTests`（4）/ `SingleInstanceTests`（2）/ `SessionViewModelTests`（4）。
+- **文档**：`FROZEN` Step 9A（9A.1–9A.7）；`SPEC` §3.4 / §7 修订；`ACCEPTANCE` Step 9A；
+  `INTERACTION` 状态更新；本记录。
+
+### 关键决策
+
+1. **UI 落点**：UI 窗口在 App 层承载（Step 1 起如此，`UiPlaceholder` 说明「UI 窗口暂由 App
+   承载」），可测纯逻辑下沉 `ZivAiEditor.UI`。
+2. **CLI / 单实例可测性**：`SingleInstance` 属 Z4 平台层（Mutex + Named Pipe）无法下移，
+   故 `Tests` 引用 `App` 并把 TFM 改为 `net8.0-windows`（修订 8R.2 的 TFM 部分，见
+   `FROZEN.md` 9A.7）；`App` 加 `InternalsVisibleTo`。
+3. **AOT**：不用 `System.CommandLine`；JSON 全部源生成；聊天流 / 历史列表用 code-behind
+   构建控件，避免编译绑定类型问题。
+4. **关闭询问**：Avalonia 无内置 MessageBox → 自绘 `ConfirmDialog`；选目录用
+   `IStorageProvider.OpenFolderPickerAsync`；空会话不弹窗直接关闭；失败不阻塞关闭。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（按 Z29 只跑受影响类，**无 GPU**）→ 新增 3 类 **10 通过 / 0 失败**；
+  非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **108 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步无 GPU 参与。
+
+### 遇到的问题与解决
+
+1. **可访问性不一致**：`App.SingleInstance` 声明为 `public` 但 `SingleInstance` 是
+   `internal` → CS0053；属性改为 `internal`。
+2. **`TextBox.Watermark` 过时**：Avalonia 12 改名为 `PlaceholderText` → 修正（消除警告）。
+
+### 遗留项
+
+- **URL 协议注册未实现**（后置）：本步只做 CLI + 单实例。
+- **LLM 意图理解 / `@图片N` 多图未实现**（后置）。
+- **与 ZIV 实际联调未做**（Step 9B）：ZIV 侧按钮 + `settings.ini` 配置 exe 路径。
+- **遮罩 UI 未实现**：`--mask` 已解析但 UI 无绘制入口（后置）。
+- **会话导入未实现**：导出后可手动保存，导入留后续 Step。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未修改** Step 0–8 冻结行的既有成员；`Contracts` 零新增；`IInferenceClient` /
+  `IEditTool` / `IToolRegistry` / `IExecutor` / `IPlanner` 签名未改。
+- **未修改** `C:\AI\ComfyUI_PIC`、`python/server/*`、`contracts/ipc-protocol.md`。

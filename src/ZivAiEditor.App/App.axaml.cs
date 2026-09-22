@@ -1,6 +1,8 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Threading;
+using ZivAiEditor.UI;
 
 namespace ZivAiEditor.App;
 
@@ -8,14 +10,33 @@ public partial class App : Application
 {
     private AppContext? _context;
 
+    /// <summary>Set by <see cref="Program"/> after setup; <c>null</c> in the designer.</summary>
+    internal SingleInstance? SingleInstance { get; set; }
+
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            var options = LaunchOptions.Parse(desktop.Args);
+
             _context = AppContext.Create();
-            desktop.MainWindow = new MainWindow(_context.Client);
+            var window = new MainWindow(
+                _context.Session,
+                _context.CommandParser,
+                _context.Executor,
+                _context.SessionExporter,
+                options);
+            desktop.MainWindow = window;
+
+            // A second instance forwards its request through the pipe; marshal to the UI thread.
+            if (SingleInstance is not null)
+            {
+                SingleInstance.PathReceived += request =>
+                    Dispatcher.UIThread.Post(() => window.ApplyLaunchRequest(request));
+            }
+
             desktop.Exit += (_, _) => _context?.Dispose();
         }
 
