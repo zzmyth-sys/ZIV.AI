@@ -2006,3 +2006,53 @@ Agent 编排，应下沉至 Agent；涉及 `IExecutor` 设计变更，单独立�
   既有行为，本步未改。
 - **9C.4 裁切接口**：本步完成后，裁切结果可直接 `AppendNode(当前节点 id, 裁切输出, "裁切")` 进会话，
   **无需再改底座**。
+
+---
+
+## Step 9C.4（日期：2026-09-23）
+
+> **修订说明（Step 9C.4 · 裁切工具（内裁））**
+>
+> 本段为 Step 9C.4 **只增**记录。目标：在 `ImagePreview` 实现 PS 风格矩形内裁，确认后生成新文件
+> （Z24）并进会话。**不改动 Step 0–9C.6 已冻结行**；本段为**纯追加**（文件尾部）。
+> **无冻结契约变更**——`IEditSession` / `IEditSessionWriter` 签名零修改；本步新增类型均**非契约**。
+
+### 9C.4.1 新增类型（冻结 · 非契约）
+
+| 类型 | 文件 | 说明 |
+|---|---|---|
+| `CropState`（类） | `ZivAiEditor.UI/Editing/CropState.cs` | 纯逻辑裁切状态（无 Avalonia）：图像像素矩形、8 手柄 + Move、边界钳制、`MinSize=16`、状态机 |
+| `CropHandle`（枚举） | 同上 | `None` / `Move` / `TopLeft` / `Top` / `TopRight` / `Right` / `BottomRight` / `Bottom` / `BottomLeft` / `Left` |
+| `ImageCropper`（静态类） | `ZivAiEditor.UI/Imaging/ImageCropper.cs` | `ResolveOutputPath(string?, DateTimeOffset)` + `CropAsync(...)`；复用 ZIV.Imaging `SkiaCodec` + `SKImage.Subset` |
+| `CropOverlay`（控件） | `ZivAiEditor.App/Controls/CropOverlay.axaml(.cs)` | 自绘叠加（框外暗化 + 边框 + 8 手柄），`IsHitTestVisible=false` |
+| `CropCompletedEventArgs`（类） | `ZivAiEditor.App/Controls/ImagePreview.Crop.cs` | `SourceImagePath` / `OutputPath` |
+| `ImagePreview.CropCompleted`（事件） | 同上 | 裁切完成事件（App 订阅后进会话） |
+
+### 9C.4.2 `SessionViewModel` 新增方法（冻结 · 非契约）
+
+- `public void AppendEditNode(string sourceImagePath, string outputPath, string command)` ——
+  非 AI 编辑结果（裁切）入会话：父节点按 `ImagePath` 匹配（忽略大小写）→ 回退 `CurrentNodeId` →
+  `_writer.AppendNode` → `RefreshHistory`。**不涉及契约接口变更**。
+
+### 9C.4.3 ZIV.Imaging 复用（冻结 · 非契约）
+
+- 裁剪走 **Option A**：`SkiaCodec.LoadThumbnail(path, int.MaxValue)`（全尺寸解码）→
+  `SKImage.Subset(SKRectI)`（Skia 原语，ZIV.Imaging 无裁切原语）→ `SkiaCodec.SaveAsync`（编码）。
+- **NativeAOT 验证**：`dotnet publish`（App，`PublishAot=true`）成功，输出含
+  `Magick.Native-Q16-HDRI-OpenMP-x64.dll`；Magick 路径 AOT 可用。
+- **不改** `ZIV.Imaging` / `ZIV.Core` 共享库（Z26）。
+
+### 9C.4.4 落盘规则（冻结 · 非契约）
+
+- `<源图目录>/<stem>_crop_<yyyyMMdd_HHmmss>.png`；同名冲突追加 `_1.._N`；源图路径空 →
+  `<程序目录>/output/`。镜像 Python `_resolve_output_path`（仅 `_ai_` → `_crop_`）；
+  **绝不覆盖源文件**（Z24 / SPEC §3.9）。
+
+### 9C.4.5 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：受影响类 `CropStateTests` / `ImageCropperTests` /
+  `SessionViewModelTests` / `ToolStateMachineTests` / `ImageViewModelTests` / `CompareStateTests`
+  **83 通过 / 0 失败**；非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **214 通过 / 0 失败**
+  （9C.6 基线 175，本步 +39）。
+- `dotnet publish`（App，NativeAOT）成功；**未跑 GPU**（Z29 / Z30）。

@@ -138,6 +138,7 @@ public partial class ImagePreview : Window
         _model.SetViewport(ViewportWidth(), ViewportHeight());
         _model.SetImage(bitmap.Size.Width, bitmap.Size.Height);
         ApplyModel();
+        RefreshCropBounds();
 
         if (_emptyLabel is not null)
         {
@@ -187,6 +188,8 @@ public partial class ImagePreview : Window
         {
             _toolbar.Attach(_tools);
         }
+
+        InitCrop();
 
         // Right-slot title-bar buttons (reset view / compare). Marked "User" so the OS
         // treats them as client content inside the caption area.
@@ -277,6 +280,7 @@ public partial class ImagePreview : Window
         UpdateZoomBadge();
         HideScrollBars();
         _overlay?.InvalidateVisual();
+        _cropOverlay?.InvalidateVisual();
 
         // The scroll-bar range follows the new zoom one layout pass later; re-apply
         // the offset then so the anchored position survives the range update.
@@ -364,6 +368,13 @@ public partial class ImagePreview : Window
 
         e.Handled = true;
 
+        // Esc exits crop mode first, then compare mode; a further Esc closes the window.
+        if (IsCropActive)
+        {
+            ExitCropMode();
+            return;
+        }
+
         // Esc exits compare mode first (single image); a second Esc closes the window.
         if (_compareState.IsCompareMode)
         {
@@ -403,6 +414,13 @@ public partial class ImagePreview : Window
         _pressPoint = e.GetPosition(_box);
         _lastPanPoint = _pressPoint;
 
+        // Crop mode owns the pointer: build / move / resize the selection (no pan).
+        if (IsCropActive)
+        {
+            CropOnPressed(_pressPoint, e);
+            return;
+        }
+
         // In compare mode a press near the divider starts a divider drag instead of a pan.
         if (_compareState.IsCompareMode && IsNearDivider(_pressPoint.X))
         {
@@ -420,12 +438,23 @@ public partial class ImagePreview : Window
 
     private void OnMoved(object? sender, PointerEventArgs e)
     {
-        if (_box is null || !_pressed)
+        if (_box is null)
         {
             return;
         }
 
         var point = e.GetPosition(_box);
+
+        if (IsCropActive)
+        {
+            CropOnMoved(point);
+            return;
+        }
+
+        if (!_pressed)
+        {
+            return;
+        }
 
         if (_draggingDivider)
         {
@@ -450,7 +479,18 @@ public partial class ImagePreview : Window
 
     private void OnReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_box is null || !_pressed)
+        if (_box is null)
+        {
+            return;
+        }
+
+        if (IsCropActive)
+        {
+            CropOnReleased(e);
+            return;
+        }
+
+        if (!_pressed)
         {
             return;
         }

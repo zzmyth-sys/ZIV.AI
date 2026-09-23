@@ -1,0 +1,10 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ZivAiEditor.App.Controls.CropOverlay">
+  <!-- Self-drawn crop overlay (Step 9C.4). Render() darkens everything outside the
+       selection rectangle and draws its border + 8 handles, all through the shared
+       ImageViewModel transform so the frame stays pixel-aligned through pan / zoom.
+       It is hit-test-invisible: the ImagePreview routes pointer input. No template
+       children are needed. -->
+  <Grid />
+</UserControl>

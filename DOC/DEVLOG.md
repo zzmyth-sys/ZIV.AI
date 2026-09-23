@@ -2750,3 +2750,149 @@ root 节点进入 `GetHistory()` 后被 `SessionExporter` 自动拷为 `{rootNod
   **未改** chrome 三控件 / `EditorToolbar` / `CompareState` / `ToolStateMachine` / 图片导入 UI /
   分辨率选择器。
 - `FROZEN.md` 尾部追加 9C.6 修订说明（**不改已冻结行**）；`ACCEPTANCE.MD` 追加 Step 9C.6 验收段。
+
+---
+
+## [Step 9C.4] - 2026-09-23
+
+### 目标
+
+**裁切工具（内裁）**：在 `ImagePreview` 窗口实现 PS 风格矩形裁切 —— 工具栏「裁切」进入
+`ToolMode.Crop` → 拖拽建框 / 拖动框 / 8 手柄缩放 → 框外暗化 → 确认生成**新文件**（Z24）并
+`AppendNode` 进会话；取消 / Esc 退出。**本步只做内裁**，外扩留 9C.4-B。
+流程：前置只读调查 → 用户裁决 → 实施 → 独立复审 → 验证。
+
+### 前置只读调查结论
+
+- **ZIV.Imaging 无 Crop 原语**（全仓 `grep Crop` → 0）。可复用：`SkiaCodec.LoadThumbnail(path,
+  maxDimension)→SKImage?`（`SkiaCodec_Decode.cs:275`）、`LoadMetadataAsync` / `Load`
+  （`SkiaCodec_Decode.cs:19/121`）、`SaveAsync(SKImage?, dest, PhotoTransform?, quality, ct, icc)`
+  （`SkiaCodec_Encode.cs:19`）；`SkiaCodec_Transform` 只有 flip/rotate/invert/scale，**无裁切**。
+- **尺寸获取**：`ImageViewModel.ImageWidth/ImageHeight`（`ImageViewModel.cs:38/44`）为解码后源图
+  自身像素尺寸，可直接用；`ViewportToImage` / `ImageToViewport` 可复用。
+- **落盘规则**：Python `_resolve_output_path`（`python/server/pipeline.py:625`）为
+  `<源目录>/<stem>_ai_<timestamp>.png`；C# 侧裁切不走 Python，路径由本步定义。
+- **进会话**：`AppendNode` 是 `IEditSessionWriter` 成员（`IEditSessionWriter.cs:26`）；
+  `SessionViewModel` 持 `_writer`。9C.6 后 root 已实体化，首个编辑节点挂 root。
+- **预览处理**：确认后切到新文件、退出裁切模式。
+
+### 裁决（用户）
+
+- **A**：裁剪实现走 **Option A**（ZIV.Imaging `SkiaCodec` + `SKImage.Subset`）；
+  **AOT 前置验证**：`dotnet publish`（不跑 GPU）验证 Magick 路径可用，失败切 SkiaSharp 直连。
+- **B**：父节点 = **源图对应节点 + 回退当前节点**（`ImagePath` 匹配，忽略大小写；再回退
+  `CurrentNodeId`）。
+- **C**：确认后**预览切到新文件**。
+- **D**：落盘 `<源图目录>/<stem>_crop_<yyyyMMdd_HHmmss>.png`，冲突 `_1..`，源图空 → 程序目录
+  `output/`，绝不覆盖源文件。
+- 补充：裁切激活时**自动退出对比模式**；落盘失败**退出裁切 + 提示 + 不进会话**（不静默）；
+  `command = "裁切"`；进入裁切**初始全图框**。
+
+### 做了什么
+
+- **`ZivAiEditor.UI/Editing/CropState.cs`（新增，纯逻辑无 Avalonia）**：图像像素坐标裁切框；
+  8 手柄 + Move 命中（容差传入，图像像素）；边界钳制；最小尺寸 `MinSize=16`；状态机
+  `IsActive`/`HasRect`/`IsDragging`/`DragHandle`；`Enter`/`Exit`/`SetFullRect`/`BeginDrag`/
+  `UpdateDrag`/`EndDrag`/`HitTest`/`TryGetPixelRect`。缩放用**按下时的原始边**计算，保证稳定。
+- **`ZivAiEditor.UI/Imaging/ImageCropper.cs`（新增，可单测）**：`ResolveOutputPath`（裁决 D 规则 +
+  冲突避让）；`CropAsync` = `SkiaCodec.LoadThumbnail(path,int.MaxValue)` 全尺寸解码 →
+  `SKRectI.Intersect` 钳制 → `SKImage.Subset` → `SkiaCodec.SaveAsync` 落盘。失败返回 `null`。
+- **`ZivAiEditor.App/Controls/CropOverlay.axaml(.cs)`（新增）**：`Control.Render` 自绘；框外四带
+  暗化（`#99000000`）；2px 白描边 + 8 手柄（10px 方块 + 蓝描边）；`IsHitTestVisible=false`。
+- **`ZivAiEditor.App/Controls/ImagePreview.Crop.cs`（新增 partial）**：`CropState` + overlay +
+  确认/取消按钮 + toast；`UpdateCropMode`（进/出裁切、自动退对比）；指针路由
+  `CropOnPressed/Moved/Released`；`ConfirmCropAsync`（Z11 `Task.Run` → `LoadImage` →
+  `CropCompleted`）；Esc 优先；`RefreshCropBounds`（复用窗口载新图时重设全图框）。
+- **`ImagePreview.axaml.cs`（改，最小）**：`Init()` 调 `InitCrop()`；Esc 加裁切分支；指针三个
+  handler 加裁切路由（裁切时**屏蔽平移**，滚轮缩放保留）；`ApplyModel` 触发 overlay 重绘；
+  `LoadAsync` 调 `RefreshCropBounds`。
+- **`ImagePreview.axaml`（改）**：Grid 内新增 `PART_CropOverlay` / `PART_CropActions`（取消 / 确认
+  按钮）/ `PART_CropToast`。
+- **`SessionViewModel.cs`（改，非契约新增方法）**：`AppendEditNode(sourceImagePath, outputPath,
+  command)` —— 按 `ImagePath` 匹配节点（忽略大小写）→ 回退 `CurrentNodeId` → `_writer.AppendNode`
+  → `RefreshHistory`。
+- **`MainWindow.axaml.cs` + `MainWindow.Crop.cs`（改/新增 partial）**：预览创建时订阅
+  `CropCompleted` → `OnPreviewCropCompleted` 调 `_vm.AppendEditNode(source, output, "裁切")`。
+- **测试**：新增 `CropStateTests`（30 例）、`ImageCropperTests`（6 例）；`SessionViewModelTests`
+  新增 `AppendEditNode` 3 例。
+- **文档**：本段 + `ACCEPTANCE.MD` Step 9C.4 + `FROZEN.md` 尾部 9C.4（非契约新增类型）。
+
+### 裁切框渲染方案
+
+`CropOverlay` 与 `CompareOverlay` 同坐标系：用共享 `ImageViewModel.ImageToViewport` 把图像像素
+矩形映射到视口，`ScaledWidth/Height` 隐式经端点映射。框外暗化用四条矩形带（上 / 下 / 左 / 右）
+而非几何裁剪，避免 `PushGeometryClip` 依赖。边框 + 8 手柄按视口坐标绘制。
+
+### 手柄命中方式
+
+`CropState.HitTest(imageX, imageY, tolerance)`：容差 `tolerance = CropHandlePaddingPx(8) / zoom`
+（视口 8px 换算到图像像素）。判定顺序：四角 → 四边中点 → 框内 `Move` → `None`。
+
+### 坐标映射
+
+裁切框一律存**图像原始像素**（SPEC §3.9）；输入 `_model.ViewportToImage`，渲染
+`_model.ImageToViewport`。与 `ImageCropper` 解码（`LoadThumbnail` 不做 EXIF 旋转）保持同向，
+故选区与落盘像素一一对应。ZIV.AI 输出为 PNG（无 EXIF），编辑结果裁切无旋转歧义。
+
+### 落盘规则
+
+`<源图目录>/<stem>_crop_<yyyyMMdd_HHmmss>.png`；同名追加 `_1.._N`；源图空 → `AppContext.BaseDirectory
+/output/`。镜像 Python 规则（仅 `_ai_` → `_crop_`）；绝不覆盖源图（Z24）。
+
+### AOT 前置验证（裁决 A 要求）
+
+`dotnet publish src\ZivAiEditor.App -c Release -o <temp> -p:DebugType=None` → **成功**，
+输出 `ZivAiEditor.App.exe`（32MB）并含 `Magick.Native-Q16-HDRI-OpenMP-x64.dll`（24MB）等原生库。
+→ ZIV.Imaging（Magick）路径在 NativeAOT 下**可链接**，**采用 Option A**，未回退 Option B。
+
+### 独立复审（只读子代理）
+
+- **无 Blocker**（其列出的 B1 为「工作区同时含未提交的 9C.6 改动」——9C.6 已在上一步单独获批，
+  非 9C.4 引入）。
+- **Should-fix 已修**：
+  1. 复用预览窗载入**不同图**且裁切仍激活时，裁切边界未更新（`ToolStateMachine` 的
+     `HasImage` 未变化不触发事件）→ 新增 `RefreshCropBounds()`，在 `LoadAsync` 载图后重设全图框。
+  2. Toast 定时器竞态（旧定时器可能提前隐藏新提示）→ 加 `_cropToastGeneration` 代际守卫。
+  3. `CropOnPressed` 忽略 `BeginDrag` 返回值 → 按返回值设置 `_cropPointerDown`。
+- **Nit（未改，登记）**：`LoadThumbnail` 无像素缓冲上限保护（超大图理论 OOM，但其内部
+  `try/catch` 会返回 `null` → 提示失败，非崩溃）；`CropAsync` 的 `ct` 当前恒为默认（能力保留）。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：`CropStateTests` / `ImageCropperTests` /
+  `SessionViewModelTests` / `ToolStateMachineTests` / `ImageViewModelTests` / `CompareStateTests`
+  **83 通过 / 0 失败**；非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **214 通过 / 0 失败**
+  （9C.6 基线 175，本步 +39）。
+- **AOT**：`dotnet publish` 成功（见上）；**未跑 GPU**（Z29 / Z30）。
+- **Z8**：改动/新增文件均 < 600 行（`MainWindow.axaml.cs` 597、`ImagePreview.axaml.cs` 584、
+  `ImagePreview.Crop.cs` 315、`CropState.cs` 361）。
+- **Z9 / Z11**：裁切解码 / 编码在 `Task.Run` 后台线程；`CropOverlay` 不持有 Bitmap；预览 Bitmap
+  沿用既有 Dispose 生命周期。
+- **Z24**：输出新文件，源图字节级不变（`ImageCropperTests` 断言）。
+
+### 遇到的问题与解决
+
+1. **`CropStateTests.TryGetPixelRect` 期望值错**（round(500.6)=501 → 宽 401 而非 400）：修正测试
+   期望值（非实现错误）。
+2. **`MainWindow.axaml.cs` 涨到 606 行（超 Z8）**：把 `OnPreviewCropCompleted` 拆到新 partial
+   `MainWindow.Crop.cs` → 597 行。
+3. **复审 S1（复用窗口换图裁切边界失效）**：见上，已加 `RefreshCropBounds`。
+
+### 遗留项
+
+- **外扩裁切（9C.4-B）**：本步只做内裁；外扩（画布扩展 + outpaint）另立步。
+- **超大图裁切**：`LoadThumbnail` 无 2GB 像素缓冲上限保护；极端大图返回 `null` 并提示失败，
+  未做预检（登记）。
+- **`CropAsync` 取消令牌**：当前恒默认，能力保留未接线。
+- **`_cropPointerDown` 在指针捕获丢失时不复位**：与既有 `_pressed` 平移代码同型，非回归。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未修改** `Contracts` 既有成员（`IEditSession` / `IEditSessionWriter` 签名零变化）/
+  `python/server/*` / `contracts/ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；**未新增 NuGet**（复用
+  ZIV.Imaging 已有的 Magick.NET / SkiaSharp）；**未改** chrome 三控件 / `CompareState` /
+  `ToolStateMachine` / 图片导入 UI / 分辨率选择器逻辑（`ToolStateMachine` 仅被读取）。
+- `FROZEN.md` 尾部追加 9C.4 非契约新增类型说明（**不改已冻结行**）；`ACCEPTANCE.MD` 追加 Step 9C.4 验收段。

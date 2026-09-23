@@ -246,6 +246,38 @@ public sealed class SessionViewModel
         RebuildContext();
     }
 
+    /// <summary>
+    /// Appends a non-AI edit output (e.g. a crop, Step 9C.4) to the session and refreshes
+    /// the history. The parent is the node whose <c>ImagePath</c> matches
+    /// <paramref name="sourceImagePath"/> (case-insensitive), falling back to the current
+    /// node when the source is not a known node. Unlike <see cref="SubmitAsync"/> this runs
+    /// no parser / executor — the image is already produced.
+    /// </summary>
+    public void AppendEditNode(string sourceImagePath, string outputPath, string command)
+    {
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            return;
+        }
+
+        string? parentId = null;
+        if (!string.IsNullOrWhiteSpace(sourceImagePath))
+        {
+            foreach (var node in _session.GetHistory())
+            {
+                if (string.Equals(node.ImagePath, sourceImagePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    parentId = node.NodeId;
+                    break;
+                }
+            }
+        }
+
+        parentId ??= _session.CurrentNodeId;
+        _writer.AppendNode(parentId, outputPath, command);
+        RefreshHistory();
+    }
+
     /// <summary>Rebuilds <see cref="History"/> from the session's node set.</summary>
     public void RefreshHistory()
     {

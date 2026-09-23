@@ -254,4 +254,50 @@ public class SessionViewModelTests
 
         Assert.Equal(Root, session.RootImagePath);
     }
+
+    [Fact]
+    public async Task AppendEditNode_Attaches_To_The_Source_Node()
+    {
+        const string crop = @"C:\img\crop.png";
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        await vm.SubmitAsync("/去水印");
+
+        var editId = session.CurrentNodeId!;
+        vm.AppendEditNode(Output, crop, "裁切");
+
+        Assert.Equal(3, vm.History.Count);
+        Assert.Equal("裁切", vm.History[2].Node.Command);
+        Assert.Equal(editId, vm.History[2].Node.ParentNodeId);
+        Assert.Equal(crop, session.GetCurrentImagePath());
+    }
+
+    [Fact]
+    public void AppendEditNode_Falls_Back_To_Current_Node()
+    {
+        const string crop = @"C:\img\crop.png";
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        var rootId = session.CurrentNodeId!;
+        vm.AppendEditNode(@"C:\img\unknown.png", crop, "裁切");
+
+        Assert.Equal(2, vm.History.Count);
+        Assert.Equal(rootId, vm.History[1].Node.ParentNodeId);
+    }
+
+    [Fact]
+    public void AppendEditNode_Blank_Output_Is_NoOp()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        vm.AppendEditNode(Root, "", "裁切");
+        vm.AppendEditNode(Root, "   ", "裁切");
+
+        Assert.Single(vm.History);
+    }
 }

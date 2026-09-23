@@ -1477,3 +1477,68 @@ V4（App 装配统一）、#6（删死状态写入）、#7（导入事件命名�
 1. 追加 `DEVLOG.md` 的 Step 9C.6 记录（本步已完成）
 2. 在「验收记录」追加"Step 9C.6 通过，日期：____"（待签）
 3. 进入后续 Step（9C.4 裁切 / 9C.5-C / 9C.5-D 等，由用户决定）
+
+---
+
+## Step 9C.4 验收：裁切工具（内裁）
+
+**目标**：在 `ImagePreview` 窗口实现 PS 风格矩形裁切：`ToolMode.Crop` 进入 → 拖拽建框 / 拖动 /
+8 手柄缩放 → 框外暗化 → 确认生成新文件（Z24）并 `AppendNode` 进会话；取消 / Esc 退出。
+**本步只做内裁**；外扩留 9C.4-B。范围外：GPU 端到端（Z29 / Z30），真机交互由用户执行。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 仅改/增 UI / App 内部；无新增项目引用、无反向 / 循环依赖 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `IEditSession` / `IEditSessionWriter` 签名**零变化**；新增类型均非契约，`FROZEN` 9C.4 尾部记录 | ✅ |
+| G4 | 未授权修改检查 | 无既有冻结签名被改；`SessionViewModel.AppendEditNode` 为非契约新方法 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `FROZEN` 追加 Step 9C.4 | ✅ |
+| G6 | 便携性未破 | 输出落源图同目录 / 程序目录 `output/`；无注册表 / 外部配置 | ✅ |
+| G7 | AI 推理进程隔离未破 | 裁切为纯本地 Skia 处理，不加载 Python（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖（仅复用 ZIV.Imaging 共享库） | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.4.1 | 纯逻辑状态机 | 查 `CropState.cs` | 无 Avalonia；`IsActive`/`HasRect`/`IsDragging`/`DragHandle` | ✅ |
+| 9C.4.2 | 8 手柄 + Move 命中 | `CropStateTests` | 四角 + 四边中点 + Move，容差命中正确 | ✅ |
+| 9C.4.3 | 边界钳制 | `CropStateTests` | 矩形不越界（移动 / 缩放 / 建框） | ✅ |
+| 9C.4.4 | 最小尺寸 | `CropStateTests` | ≥16×16；过小建框被丢弃 | ✅ |
+| 9C.4.5 | 坐标映射 | 查 `ImagePreview.Crop.cs` | 复用 `ImageViewModel.ViewportToImage` / `ImageToViewport` | ✅ |
+| 9C.4.6 | 叠加渲染 | 查 `CropOverlay.axaml.cs` | 框外暗化 + 描边 + 8 手柄；`IsHitTestVisible=false` | ✅ |
+| 9C.4.7 | 初始全图框 | 查 `ImagePreview.Crop.cs` | 进入裁切 `SetFullRect()` | ✅ |
+| 9C.4.8 | 屏蔽平移 | 查 `ImagePreview.axaml.cs` | 裁切激活时 `OnPressed/Moved/Released` 走裁切，不平移；滚轮缩放保留 | ✅ |
+| 9C.4.9 | Esc 优先级 | 查 `OnKeyDown` | 裁切 → 对比 → 关窗 | ✅ |
+| 9C.4.10 | 自动退对比 | 查 `UpdateCropMode` | 进裁切前 `CompareState.SetCompareMode(false)` | ✅ |
+| 9C.4.11 | 落盘规则 | `ImageCropperTests` | `<stem>_crop_<ts>.png` 同目录；冲突 `_1..`；源图空 → `output/` | ✅ |
+| 9C.4.12 | 新文件 / 不覆盖 | `ImageCropperTests` | 输出存在且尺寸正确；源图字节级不变（Z24） | ✅ |
+| 9C.4.13 | 进会话 | `SessionViewModelTests` | `AppendEditNode` 按源图节点挂载 + 回退当前；`command="裁切"` | ✅ |
+| 9C.4.14 | 确认后预览切换 | 查 `ConfirmCropAsync` | `LoadImage(output)` + 退出裁切 + 触发 `CropCompleted` | ✅ |
+| 9C.4.15 | 失败不静默 | 查 `ConfirmCropAsync` | 失败 → 退出裁切 + toast 提示 + 不进会话 | ✅ |
+| 9C.4.16 | AOT 验证 | `dotnet publish` | NativeAOT 成功，含 Magick 原生库（Option A 可用） | ✅ |
+| 9C.4.17 | Z8 行数 | 查改动文件 | 均 < 600 行（`MainWindow.axaml.cs` 597） | ✅ |
+| 9C.4.18 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；受影响 83 通过；非 GPU 214 通过 | ✅ |
+| 9C.4.19 | 无 GPU 负载 | 测试 / publish 过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.4.20 | 真机交互 | 用户执行一次真机验收 | 建框 / 移动 / 缩放 / 暗化 / 确认生成 + 历史「裁切」/ 取消不变 / 无回归 | ⏳ 待用户确认 |
+| 9C.4.21 | 启动 / 无残留 | 启动 exe + 进程表 | 窗口正常、无新 Python 进程；结束无残留、未占 GPU | ⏳ 待用户确认 |
+
+### Step 9C.4 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.4.1–9C.4.19 全过；9C.4.20 / 9C.4.21 由用户真机确认。
+
+### Step 9C.4 遗留说明（非阻断）
+
+- **外扩裁切（9C.4-B）**：本步只做内裁；外扩（画布扩展 + outpaint）另立步。
+- **超大图裁切**：`LoadThumbnail` 无 2GB 像素缓冲上限预检；极端大图返回 `null` 并提示失败。
+- **`CropAsync` 取消令牌**：当前恒默认，能力保留未接线。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### Step 9C.4 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 9C.4 记录（本步已完成）
+2. 在「验收记录」追加"Step 9C.4 通过，日期：____"（待签）
+3. 进入后续 Step（9C.4-B 外扩 / 9C.5-C / 9C.5-D 等，由用户决定）

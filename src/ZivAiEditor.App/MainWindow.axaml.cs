@@ -294,6 +294,9 @@ public partial class MainWindow : Window
                 }
             };
 
+            // Step 9C.4: a confirmed crop appends a new node to the session.
+            preview.CropCompleted += OnPreviewCropCompleted;
+
             _imagePreview = preview;
             preview.Show(this);
         }
