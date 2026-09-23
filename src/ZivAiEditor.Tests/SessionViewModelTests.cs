@@ -256,48 +256,76 @@ public class SessionViewModelTests
     }
 
     [Fact]
-    public async Task AppendEditNode_Attaches_To_The_Source_Node()
+    public void SetNodeCrop_Stores_Crop_Without_Adding_A_Node()
     {
-        const string crop = @"C:\img\crop.png";
-        var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
-        vm.Start(new LaunchOptions { ImagePath = Root });
-        await vm.SubmitAsync("/去水印");
-
-        var editId = session.CurrentNodeId!;
-        vm.AppendEditNode(Output, crop, "裁切");
-
-        Assert.Equal(3, vm.History.Count);
-        Assert.Equal("裁切", vm.History[2].Node.Command);
-        Assert.Equal(editId, vm.History[2].Node.ParentNodeId);
-        Assert.Equal(crop, session.GetCurrentImagePath());
-    }
-
-    [Fact]
-    public void AppendEditNode_Falls_Back_To_Current_Node()
-    {
-        const string crop = @"C:\img\crop.png";
         var session = new EditSession();
         var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         var rootId = session.CurrentNodeId!;
-        vm.AppendEditNode(@"C:\img\unknown.png", crop, "裁切");
+        var crop = new CropSpec { X = 1, Y = 2, Width = 30, Height = 40, ResultImagePath = @"C:\img\root_crop.png" };
+        vm.SetNodeCrop(rootId, crop);
 
-        Assert.Equal(2, vm.History.Count);
-        Assert.Equal(rootId, vm.History[1].Node.ParentNodeId);
+        // No new node — the crop is a property of the existing node.
+        Assert.Single(vm.History);
+        Assert.Same(crop, vm.History[0].Node.Crop);
+        Assert.Equal(@"C:\img\root_crop.png", session.GetCurrentPipelineImagePath());
+        Assert.Equal(Root, session.GetCurrentImagePath());
     }
 
     [Fact]
-    public void AppendEditNode_Blank_Output_Is_NoOp()
+    public void SetNodeCrop_Unknown_Node_Is_NoOp()
     {
         var session = new EditSession();
         var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
-        vm.AppendEditNode(Root, "", "裁切");
-        vm.AppendEditNode(Root, "   ", "裁切");
+        vm.SetNodeCrop("missing", new CropSpec { Width = 10, Height = 10 });
 
         Assert.Single(vm.History);
+        Assert.Null(vm.History[0].Node.Crop);
+    }
+
+    [Fact]
+    public void SetNodeCrop_Readjust_Does_Not_Add_A_Node()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var rootId = session.CurrentNodeId!;
+
+        vm.SetNodeCrop(rootId, new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\a.png" });
+        var second = new CropSpec { Width = 20, Height = 20, ResultImagePath = @"C:\img\b.png" };
+        vm.SetNodeCrop(rootId, second);
+
+        Assert.Single(vm.History);
+        Assert.Same(second, vm.History[0].Node.Crop);
+        Assert.Equal(@"C:\img\b.png", session.GetCurrentPipelineImagePath());
+    }
+
+    [Fact]
+    public void SetNodeCrop_Shows_Crop_Result_In_Chat()
+    {
+        const string cropResult = @"C:\img\root_crop.png";
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var rootId = session.CurrentNodeId!;
+
+        vm.SetNodeCrop(rootId, new CropSpec { Width = 10, Height = 10, ResultImagePath = cropResult });
+
+        // The chat's "起始图像" bubble now carries the crop result, not the original.
+        Assert.Contains(vm.Messages, m => m.Role == ChatRole.System && m.ImagePath == cropResult);
+        Assert.DoesNotContain(vm.Messages, m => m.ImagePath == Root);
+    }
+
+    [Fact]
+    public void GetParentPipelineImagePath_Is_Null_For_Root()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        Assert.Null(vm.GetParentPipelineImagePath(Root));
     }
 }

@@ -1542,3 +1542,85 @@ V4（App 装配统一）、#6（删死状态写入）、#7（导入事件命名�
 1. 追加 `DEVLOG.md` 的 Step 9C.4 记录（本步已完成）
 2. 在「验收记录」追加"Step 9C.4 通过，日期：____"（待签）
 3. 进入后续 Step（9C.4-B 外扩 / 9C.5-C / 9C.5-D 等，由用户决定）
+
+---
+
+## Step 9C.6-B 验收：裁切语义重构（节点级裁切状态）
+
+**目标**：把裁切从「AI 编辑步骤（建节点）」改为「节点的内在属性」——每节点最多一个裁切状态、
+可反复调整、**不建节点**；送 AI 管线用裁切结果；划像对比与裁切互斥。范围外：GPU 端到端
+（Z29 / Z30），真机交互由用户执行。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 仅改/增 Contracts（新增）/ Agent / UI / App；无新增项目引用 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `IEditNode` / `IEditSession` / `IEditSessionWriter` **仅新增成员**，既有签名零变化；`FROZEN` 9C.6-B 尾部记录 | ✅ |
+| G4 | 未授权修改检查 | 契约变更已获用户授权（新增 `CropSpec` / `Crop` / 3 方法） | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `FROZEN` 追加 Step 9C.6-B | ✅ |
+| G6 | 便携性未破 | 裁切输出落源图同目录 / `output/`；无注册表 / 外部配置 | ✅ |
+| G7 | AI 推理进程隔离未破 | 裁切为纯本地 Skia 处理，不加载 Python（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.6B.1 | `CropSpec` 契约 | 查 `Contracts/Planning/CropSpec.cs` | X/Y/Width/Height/ResultImagePath（init） | ✅ |
+| 9C.6B.2 | `EditNode.Crop` | 查 `IEditNode.cs` / `EditSession.cs` | 可选字段，默认 null | ✅ |
+| 9C.6B.3 | `SetNodeCrop` 更新 | `EditSessionTests` | 重建节点保留身份；未知 no-op；root 引用同步 | ✅ |
+| 9C.6B.4 | 不建节点 | `SessionViewModelTests` | 设/改裁切后 `History.Count` 不变 | ✅ |
+| 9C.6B.5 | 送管线用裁切 | 查 `CommandParser.cs` | 用 `GetCurrentPipelineImagePath()` | ✅ |
+| 9C.6B.6 | pipeline 路径 | `EditSessionTests` | `Crop?.ResultImagePath ?? ImagePath`；无 current → null | ✅ |
+| 9C.6B.7 | 父 pipeline 路径 | `EditSessionTests` | 新增方法返回父裁切结果；root/未知 → null | ✅ |
+| 9C.6B.8 | `GetParentImagePath` 不变 | `EditSessionTests` 既有用例 | 全过（语义未变） | ✅ |
+| 9C.6B.9 | 初始框 75% | `CropStateTests` | 居中，四周 12.5% | ✅ |
+| 9C.6B.10 | 移动 + 8 手柄 | `CropStateTests` | 整框移动 + 8 手柄缩放；框外按下重建 | ✅ |
+| 9C.6B.11 | 对比互斥 | 查 `ImagePreview.Crop/Compare` | 进裁切退对比；进对比退裁切；退出对比不自动进裁切 | ✅ |
+| 9C.6B.12 | 对比内容 | 查 `ImagePreview.Compare` / `MainWindow.Preview` | 左=父 pipeline 图；右=当前节点原图；root 禁用 | ✅ |
+| 9C.6B.13 | 预览显示 | 查 `LoadNode` | 显示 `Crop?.ResultImagePath ?? ImagePath`；再次进入保留上次框 | ✅ |
+| 9C.6B.14 | 导出裁切 | `SessionExporterTests` | `crop` 元数据 + 相对 `result_image_path`；拷贝 `{NodeId}_crop.png` | ✅ |
+| 9C.6B.15 | Z8 行数 | 查改动文件 | 均 < 600 行（`ImagePreview.axaml.cs` 584） | ✅ |
+| 9C.6B.16 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；非 GPU 228 通过（修订后） | ✅ |
+| 9C.6B.17 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.6B.18 | 真机交互 | 用户执行一次真机验收 | 75% 初始框 / 任意点重建 / 确认落盘切图不建节点 / 再进入保留框 / 送管线用裁切 / 对比互斥 / 无回归 | ⏳ 待用户确认 |
+| 9C.6B.19 | 启动 / 无残留 | 启动 exe + 进程表 | 窗口正常、无新 Python 进程；结束无残留、未占 GPU | ⏳ 待用户确认 |
+
+### Step 9C.6-B 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.6B.1–9C.6B.17 全过；9C.6B.18 / 9C.6B.19 由用户真机确认。
+
+### Step 9C.6-B 遗留说明（非阻断）
+
+- 预览 `_nodeCrop` 为快照（当前单窗流程一致；未来多预览 / 会话重载需通知机制）。
+- 每次裁切产生新文件、旧裁切文件不删（Z24 一致）。
+- 非节点路径打开预览时裁切确认静默 no-op（低影响）。
+- 外扩裁切 9C.4-B 未做。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### Step 9C.6-B 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 9C.6-B 记录（本步已完成）
+2. 在「验收记录」追加"Step 9C.6-B 通过，日期：____"（待签）
+3. 进入后续 Step（9C.4-B 外扩 / 9C.5-C / 9C.5-D 等，由用户决定）
+
+---
+
+## Step 9C.6-B 修订（2026-09-23 · 真机反馈）
+
+> 用户真机验收发现三项，已修复并复审。**不改已冻结行**，本段为追加修订说明。
+
+| # | 问题 | 修复 |
+|---|---|---|
+| R1 | 裁切后再次进入裁切没保存 / 不能调整 | 进入裁切加载**原图**（坐标基准），恢复存储框；退出恢复显示图；确认恒以原图为源（不链式裁切） |
+| R2 | 裁切结果没返回聊天记录 | `RebuildContext` 用 pipeline 图渲染气泡；`SetNodeCrop` 重建聊天 |
+| R3 | 拖拽重建方案废弃 | 恢复**整框移动 + 8 手柄缩放**（框外按下重建） |
+
+- **复审 Blocker B1 已修**：聊天气泡携带裁切结果路径时，节点解析（`FindNodeByImagePath` /
+  `GetParentPipelineImagePath`）扩展为同时匹配 `ImagePath` 与 `Crop.ResultImagePath`。
+- **S1/S2 已修**：pending 气泡按身份替换（防生成中重建越界）；裁切激活时 `LoadNode` 载原图。
+- 修订后：`dotnet build` 0/0；非 GPU 全量 **228 通过 / 0 失败**。
+- 9C.6B.10 交互改为「整框移动 + 8 手柄缩放」（上表 9C.6B.10 行已同步）。

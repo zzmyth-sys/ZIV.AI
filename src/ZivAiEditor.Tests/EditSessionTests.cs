@@ -252,4 +252,129 @@ public class EditSessionTests
         Assert.IsAssignableFrom<IEditSessionWriter>(session);
         Assert.IsAssignableFrom<IEditNode>(node);
     }
+
+    [Fact]
+    public void SetNodeCrop_Updates_PipelinePath_But_Not_ImagePath()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var node = session.AppendNode(null, @"C:\img\out1.png", "cmd1");
+        var crop = new CropSpec { X = 1, Y = 2, Width = 30, Height = 40, ResultImagePath = @"C:\img\out1_crop.png" };
+
+        session.SetNodeCrop(node.NodeId, crop);
+
+        var updated = session.Nodes[node.NodeId];
+        Assert.Same(crop, updated.Crop);
+        Assert.Equal(@"C:\img\out1.png", updated.ImagePath);              // unchanged
+        Assert.Equal(@"C:\img\out1.png", session.GetCurrentImagePath());  // original semantics
+        Assert.Equal(@"C:\img\out1_crop.png", session.GetCurrentPipelineImagePath());
+    }
+
+    [Fact]
+    public void SetNodeCrop_On_Root_Keeps_RootImagePath()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+
+        session.SetNodeCrop(rootId, new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\root_crop.png" });
+
+        // The _rootNode reference must be re-pointed, or RootImagePath would go null.
+        Assert.Equal(@"C:\img\root.png", session.RootImagePath);
+        Assert.Equal(@"C:\img\root_crop.png", session.GetCurrentPipelineImagePath());
+    }
+
+    [Fact]
+    public void SetNodeCrop_Unknown_Node_Is_NoOp()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+
+        session.SetNodeCrop("missing", new CropSpec { Width = 10, Height = 10 });
+
+        Assert.Single(session.Nodes);
+        Assert.Equal(@"C:\img\root.png", session.GetCurrentPipelineImagePath());
+    }
+
+    [Fact]
+    public void GetCurrentPipelineImagePath_Falls_Back_To_ImagePath()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+
+        Assert.Equal(@"C:\img\root.png", session.GetCurrentPipelineImagePath());
+    }
+
+    [Fact]
+    public void GetCurrentPipelineImagePath_Null_When_No_Current()
+    {
+        var session = new EditSession();
+
+        Assert.Null(session.GetCurrentPipelineImagePath());
+    }
+
+    [Fact]
+    public void GetParentPipelineImagePath_Returns_Parent_Crop_Result()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var first = session.AppendNode(null, @"C:\img\out1.png", "cmd1");
+        session.SetNodeCrop(first.NodeId, new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\out1_crop.png" });
+        session.AppendNode(first.NodeId, @"C:\img\out2.png", "cmd2");
+
+        Assert.Equal(@"C:\img\out1_crop.png", session.GetParentPipelineImagePath(@"C:\img\out2.png"));
+        // The legacy method is unchanged: it still returns the parent's own output.
+        Assert.Equal(@"C:\img\out1.png", session.GetParentImagePath(@"C:\img\out2.png"));
+    }
+
+    [Fact]
+    public void GetParentPipelineImagePath_Root_Returns_Null()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+
+        Assert.Null(session.GetParentPipelineImagePath(@"C:\img\root.png"));
+        Assert.Null(session.GetParentPipelineImagePath(null));
+    }
+
+    [Fact]
+    public void GetParentPipelineImagePath_Falls_Back_When_Parent_Uncropped()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var first = session.AppendNode(null, @"C:\img\out1.png", "cmd1");
+        session.AppendNode(first.NodeId, @"C:\img\out2.png", "cmd2");
+
+        Assert.Equal(@"C:\img\out1.png", session.GetParentPipelineImagePath(@"C:\img\out2.png"));
+    }
+
+    [Fact]
+    public void GetParentPipelineImagePath_Accepts_A_Crop_Result_Path()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var first = session.AppendNode(null, @"C:\img\out1.png", "cmd1");
+        session.SetNodeCrop(first.NodeId, new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\out1_crop.png" });
+        var second = session.AppendNode(first.NodeId, @"C:\img\out2.png", "cmd2");
+        session.SetNodeCrop(second.NodeId, new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\out2_crop.png" });
+
+        // The chat carries a node's crop result; its parent's pipeline path must resolve.
+        Assert.Equal(@"C:\img\out1_crop.png", session.GetParentPipelineImagePath(@"C:\img\out2_crop.png"));
+    }
+
+    [Fact]
+    public void SetNodeCrop_Null_Clears_Crop()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        session.SetNodeCrop(rootId, new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\c.png" });
+        Assert.Equal(@"C:\img\c.png", session.GetCurrentPipelineImagePath());
+
+        session.SetNodeCrop(rootId, null);
+
+        Assert.Null(session.Nodes[rootId].Crop);
+        Assert.Equal(@"C:\img\root.png", session.GetCurrentPipelineImagePath());
+        Assert.Equal(@"C:\img\root.png", session.RootImagePath);
+    }
 }

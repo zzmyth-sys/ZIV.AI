@@ -28,7 +28,11 @@ public partial class ImagePreview
     private Bitmap? _parentBitmap;
     private string? _parentPath;
     private int _parentGeneration;
+    private bool _parentLoadRequested;
     private bool _draggingDivider;
+
+    /// <summary>Last observed compare mode, so the box image only swaps on a transition.</summary>
+    private bool _lastCompareMode;
 
     /// <summary>The preview's compare state (diagnostics / tests).</summary>
     public CompareState CompareState => _compareState;
@@ -40,34 +44,45 @@ public partial class ImagePreview
     /// Sets (or clears) the <b>parent</b> image used as the swipe-compare reference
     /// (Step 9C.2-C). Kept separate from <see cref="LoadImage"/> because the parent
     /// path comes from the current node's <c>ParentNodeId</c> rather than the clicked
-    /// image, so the call sites and lifetimes differ. Decoded off the UI thread (Z11)
-    /// and disposed on replace / close (Z9). A root node passes <c>null</c>, which
+    /// image, so the call sites and lifetimes differ. A root node passes <c>null</c>, which
     /// disables comparison.
+    ///
+    /// <para><b>Lazy decode</b> (Step 9C.6-B perf): the bitmap is <b>not</b> decoded here —
+    /// only the path is recorded, so opening a preview never pays for a reference image the
+    /// user may not compare. It is decoded on the first compare-enter
+    /// (<see cref="EnsureParentLoaded"/>) and disposed on path change / close (Z9).</para>
     /// </summary>
     public void SetCompareSource(string? parentPath)
     {
-        // Skip only when nothing would change: same path AND either the parent is already
-        // decoded, the path is empty, or the file is still missing. A same-path call where
-        // the file has since appeared (and was not decoded) retries the load.
-        var samePath = string.Equals(parentPath, _parentPath, StringComparison.OrdinalIgnoreCase);
-        var missing = string.IsNullOrWhiteSpace(parentPath) || !System.IO.File.Exists(parentPath);
-        if (samePath && (_parentBitmap is not null || missing))
+        if (string.Equals(parentPath, _parentPath, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
         _parentPath = parentPath;
-        var generation = ++_parentGeneration;
+        _parentGeneration++;
         DisposeParentBitmap();
 
-        if (string.IsNullOrWhiteSpace(parentPath) || !System.IO.File.Exists(parentPath))
+        var missing = string.IsNullOrWhiteSpace(parentPath) || !System.IO.File.Exists(parentPath);
+        _compareState.SetCanCompare(!missing);
+        UpdateCompareButton();
+    }
+
+    /// <summary>Decodes the parent bitmap on demand (first compare-enter). No-op if done.</summary>
+    private void EnsureParentLoaded()
+    {
+        if (_parentBitmap is not null || _parentLoadRequested)
         {
-            _compareState.SetCanCompare(false);
-            UpdateCompareButton();
             return;
         }
 
-        _ = LoadParentAsync(parentPath, generation);
+        if (string.IsNullOrWhiteSpace(_parentPath) || !System.IO.File.Exists(_parentPath))
+        {
+            return;
+        }
+
+        _parentLoadRequested = true;
+        _ = LoadParentAsync(_parentPath, ++_parentGeneration);
     }
 
     private async Task LoadParentAsync(string path, int generation)
@@ -93,6 +108,8 @@ public partial class ImagePreview
             bitmap?.Dispose();
             return;
         }
+
+        _parentLoadRequested = false;
 
         if (failed || bitmap is null)
         {
@@ -121,6 +138,34 @@ public partial class ImagePreview
     /// <summary>Pushes compare state onto the overlay + button, and refreshes the cursor.</summary>
     private void OnCompareStateChanged()
     {
+        // Step 9C.6-B: crop and compare are mutually exclusive, and the compare "right"
+        // side is the current node's ORIGINAL image (the left/parent side is its pipeline
+        // image). The box image is swapped only on an actual mode transition, so divider
+        // drags (which also raise StateChanged) do not re-trigger a decode.
+        var mode = _compareState.IsCompareMode;
+        if (mode != _lastCompareMode)
+        {
+            _lastCompareMode = mode;
+            if (mode)
+            {
+                if (IsCropActive)
+                {
+                    ExitCropMode();
+                }
+
+                EnsureParentLoaded();
+
+                if (!string.IsNullOrWhiteSpace(_nodeOriginalPath))
+                {
+                    LoadImage(_nodeOriginalPath);
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(_displayPath))
+            {
+                LoadImage(_displayPath);
+            }
+        }
+
         if (_overlay is not null)
         {
             _overlay.Divider = _compareState.Divider;
@@ -178,5 +223,6 @@ public partial class ImagePreview
         _overlay?.SetParent(null);
         _parentBitmap?.Dispose();
         _parentBitmap = null;
+        _parentLoadRequested = false;
     }
 }

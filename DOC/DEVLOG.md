@@ -2896,3 +2896,221 @@ root 节点进入 `GetHistory()` 后被 `SessionExporter` 自动拷为 `{rootNod
   ZIV.Imaging 已有的 Magick.NET / SkiaSharp）；**未改** chrome 三控件 / `CompareState` /
   `ToolStateMachine` / 图片导入 UI / 分辨率选择器逻辑（`ToolStateMachine` 仅被读取）。
 - `FROZEN.md` 尾部追加 9C.4 非契约新增类型说明（**不改已冻结行**）；`ACCEPTANCE.MD` 追加 Step 9C.4 验收段。
+
+---
+
+## [Step 9C.6-B] - 2026-09-23
+
+### 目标
+
+**裁切语义重构（节点级裁切状态）**：把裁切从「AI 编辑步骤（建历史节点）」改为「节点的内在属性」——
+每节点最多一个裁切状态、可反复调整、**不建节点**；送 AI 管线的图用裁切结果；划像对比与裁切互斥。
+流程：只读核查 → 用户裁决 → 实施 → 独立复审 → 修复 → 验证。
+
+### 只读核查结论
+
+1. `EditNode` 全属性 `init`-only，`IEditNode` 只读投影 → 加 `Crop` 字段；更新既有节点只能**重建**。
+2. `EditSession` 原只有 `AppendNode` 新增，无更新路径 → 新增 `SetNodeCrop` 重建并替换。
+   **陷阱**：`RootImagePath` 派生自私有 `_rootNode`，重建 root 时必须同步该引用。
+3. `GetCurrentImagePath` 生产调用仅 `CommandParser.cs:195/226` → 新增 `GetCurrentPipelineImagePath()`，
+   并把 parser 改调它；既有方法语义不动。
+4. 9C.4 裁切代码：`ImageCropper` 复用；`CropState`/`CropOverlay`/`ImagePreview.Crop`/`Compare` 需改。
+5. `MainWindow.Crop.cs` 的 `AppendEditNode` 接线改为 `SetNodeCrop`。
+6. `CropState` 的「移动整框 / 8 手柄调整」按裁决**全部删除**，任意点重建。
+
+### 裁决落实
+
+- **A** `SetNodeCrop` 未知 nodeId → **no-op**（防御，不抛）。
+- **B** 导出 `session.json` 节点加 `crop { x, y, width, height, result_image_path }`，
+  `result_image_path` 用**相对导出目录**名 `{NodeId}_crop.png`，并拷贝裁切结果到该名。
+- **C** 新增非契约 `SessionViewModel.SetNodeCrop`，**删除** `AppendEditNode`。
+- **D** **不改** `GetParentImagePath` 语义；**新增** `GetParentPipelineImagePath(string?)`，
+  划像对比改调新方法。
+- 对比行为：进对比切 `node.ImagePath`（原图），退出切回 `node.Crop?.ResultImagePath ?? node.ImagePath`。
+
+### 契约变更（FROZEN 尾部追加，已授权）
+
+- 新增 `Contracts/Planning/CropSpec.cs`：`X`/`Y`/`Width`/`Height`/`ResultImagePath`（init）。
+- `IEditNode` 新增 `CropSpec? Crop { get; }`；`EditNode` 新增 `CropSpec? Crop { get; init; }`。
+- `IEditSession` 新增 `GetCurrentPipelineImagePath()`、`GetParentPipelineImagePath(string?)`。
+- `IEditSessionWriter` 新增 `SetNodeCrop(string, CropSpec?)`。
+- **既有成员零修改**（`GetCurrentImagePath` / `GetParentImagePath` 语义不变）。
+
+### 做了什么
+
+- **`EditSession`**：`SetNodeCrop`（重建 + 替换 + 同步 `_rootNode`，未知 no-op）；
+  `GetCurrentPipelineImagePath`；`GetParentPipelineImagePath`；私有 `PipelinePath(node)`。
+- **`CommandParser`**：两处 `GetCurrentImagePath()` → `GetCurrentPipelineImagePath()`（送管线用裁切结果）。
+- **`CropState`**：删 `CropHandle`/`HitTest`/移动/手柄/`SetFullRect`/`_building`；
+  加 `SetRect`（还原上次框 + 钳制）、`SetDefaultRect`（75% 居中）；`BeginDrag` 恒为重建。
+- **`CropOverlay`**：删 8 手柄绘制，保留框外暗化 + 边框。
+- **`ImagePreview.Crop`**：`LoadNode(nodeId, originalPath, crop)`；初始框 = 上次框或 75%；
+  确认 → `ImageCropper`（源恒为 `_nodeOriginalPath`，不叠裁切）→ `CropSpec` → `CropCompleted`（不建节点）；
+  事件参数改 `NodeId + CropSpec`；`RefreshCropBounds` 用上次框/75%。
+- **`ImagePreview.Compare`**：对比与裁切互斥（进对比退出裁切；进裁切退出对比）；
+  进对比切箱内图为节点原图、退出切回显示图；仅在**模式跃迁**时切图（避免拖动分隔条重复解码）。
+- **`MainWindow.Preview.cs`（新增 partial）**：`OpenImagePreview` + `FindNodeByImagePath`（按 `ImagePath`
+  解析节点）→ `LoadNode` + `SetCompareSource(GetParentPipelineImagePath(path))`。
+- **`MainWindow.Crop.cs`**：`OnPreviewCropCompleted` → `_vm.SetNodeCrop(e.NodeId, e.Crop)`。
+- **`SessionExporter`**：节点 DTO 加 `crop`（`result_image_path` 相对名）；拷贝 `{NodeId}_crop.png`。
+- **测试**：`EditSessionTests` +9；`CropStateTests` 重写；`SessionViewModelTests` 去 3 加 4；
+  `SessionExporterTests` +1。
+- **文档**：本段 + `ACCEPTANCE.MD` Step 9C.6-B + `FROZEN.md` 尾部 9C.6-B。
+
+### DAG / 语义变更
+
+```
+裁切前（9C.4）                          裁切后（9C.6-B）
+裁切 = 新节点（AppendNode "裁切"）      裁切 = 节点属性 EditNode.Crop（不建节点）
+送管线 = 当前节点 ImagePath             送管线 = Crop?.ResultImagePath ?? ImagePath
+对比左 = 父节点 ImagePath               对比左 = 父节点 Crop?.ResultImagePath ?? ImagePath
+对比右 = 当前显示图                     对比右 = 当前节点 ImagePath（原图）
+裁切框 = 全图 + 可移动/手柄             裁切框 = 上次框或 75%；任意点重建
+```
+
+### EditSession 更新方式
+
+`EditNode` 为 `init`-only，故 `SetNodeCrop` **重建节点**：保留 `NodeId`/`ParentNodeId`/`ImagePath`/
+`Command`/`CreatedAt`，替换 `Crop`，再 `Nodes[nodeId] = updated`；若更新的是 root，
+`_rootNode = updated`（否则 `RootImagePath` 变 null）。未知 nodeId → no-op。
+
+### 裁切重构 / 对比互斥
+
+- 裁切：进模式 → 初始框（上次 `node.Crop` 或 75% 居中）→ 任意点按下拖动重建 → 确认生成新文件
+  （`_crop_<ts>.png`）→ `SetNodeCrop`（覆盖旧裁切，不建节点）→ 预览切结果图 → 退出模式。
+- 对比互斥：`UpdateCropMode` 进裁切前 `SetCompareMode(false)`；`OnCompareStateChanged` 进对比前
+  `ExitCropMode()`。两者均幂等短路，无递归。
+- 对比切换：进对比把箱内图切到 `_nodeOriginalPath`，退出切回 `_displayPath`；仅模式跃迁时切图。
+
+### 独立复审（只读子代理）
+
+- **无 Blocker**。
+- **Should-fix 已修**：
+  1. `CropState._building` 死字段（CS0414 警告）→ 删除（非增量构建确认 0 警告）。
+  2. `OnCompareStateChanged` 在每次 `StateChanged`（含拖动分隔条）都调用 `LoadImage` → 改为仅在
+     对比模式**跃迁**时切图。
+- **Should-fix 未改（登记）**：预览 `_nodeCrop` 为快照，若未来有第二预览窗 / 会话重载会失配；
+  当前单窗流程中 `ConfirmCropAsync` 在触发事件**前**已设 `_nodeCrop = spec`，一致。
+- **Nit（登记）**：`Nodes` 用 `Ordinal` 而路径匹配用 `OrdinalIgnoreCase`（既有）；每次裁切产生新文件、
+  旧裁切文件不删（Z24 一致）；非节点路径打开预览时 `_nodeId` 为 null → 裁切确认静默 no-op。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：受影响类 `EditSessionTests` / `CropStateTests` /
+  `SessionViewModelTests` / `SessionExporterTests` / `CommandParserTests` / `ImageCropperTests`
+  **75 通过 / 0 失败**；非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **207 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步不加载模型、不启动 Python、不占 GPU。
+- **Z8**：改动文件均 < 600 行（`ImagePreview.axaml.cs` 584、`MainWindow.axaml.cs` 555、
+  `ImagePreview.Crop.cs` 374、`EditSession.cs` 338、`CropState.cs` 232）。
+- **Z9 / Z11**：裁切解码/编码在 `Task.Run`；对比父图 Bitmap 沿用既有 Dispose。
+- **Z24**：裁切输出新文件，源图不变。
+
+### 实施验证（用户要求三项）
+
+1. **root 裁切后 `RootImagePath` 不变** → `EditSessionTests.SetNodeCrop_On_Root_Keeps_RootImagePath` ✅。
+2. **`LoadImage` 调用点统一** → 预览打开路径统一走 `LoadNode`（`MainWindow.Preview.cs`）；
+   `LoadImage` 仅作预览内部低层加载（裁切确认、对比切换）保留 ✅。
+3. **`GetParentImagePath` 既有测试全过**（语义未变）→ 全绿 ✅。
+
+### 遇到的问题与解决
+
+1. **CS0414 警告**：`CropState._building` 删除手柄逻辑后成死字段；增量构建未暴露，非增量构建发现。
+   → 删除字段与赋值，非增量构建 0 警告。
+2. **`MainWindow.axaml.cs` 涨到 614 行（超 Z8）**：新增 `FindNodeByImagePath` 与管线对比后超限。
+   → 把 `OpenImagePreview` + `FindNodeByImagePath` 拆到新 partial `MainWindow.Preview.cs` → 555 行。
+
+### 遗留项
+
+- 预览 `_nodeCrop` 快照（见复审 S1，未触发）。
+- 旧裁切文件不清理（Z24 一致）。
+- 非节点路径打开预览时裁切确认静默 no-op（低影响）。
+- 外扩裁切 9C.4-B 未做。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未修改** `python/server/*` / `contracts/ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；**未新增 NuGet**；
+  **未改** chrome / `ToolStateMachine` / 分辨率选择器 / 图片导入 UI；**未改** Contracts 既有成员。
+- `FROZEN.md` 尾部追加 9C.6-B（契约新增 + 语义变更说明，**不改已冻结行**）；
+  `ACCEPTANCE.MD` 追加 Step 9C.6-B 验收段。
+
+---
+
+## [Step 9C.6-B 修订] - 2026-09-23（真机反馈）
+
+### 现象与根因
+
+用户真机验收反馈三项：
+
+1. **裁切后再次进入裁切没保存 / 不能调整**：根因——裁切后预览显示的是**裁切结果图**，
+   `ImageViewModel` 的尺寸为结果图尺寸，而存储的裁切框是**原图坐标**，`SetRect` 被按结果图尺寸
+   错误钳制（且再次裁切会以结果图为源形成**裁切链**）。
+2. **裁切结果没有返回聊天记录**：`RebuildContext` 显示的是 `node.ImagePath`（原图），裁切是节点
+   属性、不改 `ImagePath`，故聊天不反映裁切；且 `SetNodeCrop` 未重建聊天。
+3. **拖拽重建方案废弃，保留句柄方案**：用户裁决恢复「整框移动 + 8 手柄缩放」。
+
+### 修复
+
+1. **裁切在原图上进行**：进入裁切模式加载 `_nodeOriginalPath`（原图），`RefreshCropBounds` 在原图
+   尺寸下恢复存储框（或 75%）；退出裁切恢复显示图（裁切结果/原图）。确认恒以 `_nodeOriginalPath`
+   为源 → **不再链式裁切**。
+2. **聊天显示 pipeline 图**：`RebuildContext` 用 `Crop?.ResultImagePath ?? ImagePath` 渲染
+   「起始图像」与编辑节点气泡；`SetNodeCrop` 重建聊天（生成中跳过，避免清空 in-flight 气泡）。
+3. **恢复句柄交互**：`CropState` / `CropOverlay` 恢复 9C.4 的整框移动 + 8 手柄缩放（框外按下重建），
+   保留节点级裁切语义与 `SetRect` / `SetDefaultRect`（75%）。
+
+### 复审发现并修复（Blocker）
+
+- **B1（Blocker）**：修复 #2 后聊天气泡携带**裁切结果路径**，而 `FindNodeByImagePath` /
+  `GetParentPipelineImagePath` 仅按 `node.ImagePath` 匹配 → 从聊天重开已裁切节点解析为 null，
+  再裁切静默 no-op、对比禁用。→ 两处匹配扩展为「`node.ImagePath` **或** `Crop.ResultImagePath`」
+  （`EditSession.MatchesPath`；`MainWindow.Preview.FindNodeByImagePath`）。
+- **S1（Should-fix）**：`SetNodeCrop → RebuildContext` 在生成中会清空 pending 气泡，续写按索引
+  可能越界。→ 改为按**对象身份**替换 pending（`ReplacePending`，气泡已被清则追加），并在 `IsBusy`
+  时跳过裁切触发的重建。
+- **S2（Should-fix）**：裁切激活时 `LoadNode` 载入显示图而非原图 → 裁切激活时改载原图。
+- **Nit**：删除 `MainWindow.axaml.cs` 未用 using；修正注释与验收段陈旧描述。
+
+### 实测（修订后）
+
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **228 通过 / 0 失败**。
+- Z8：改动文件均 < 600 行。**未跑 GPU**（Z29 / Z30）。
+
+---
+
+## [Step 9C.6-B 修订 2] - 2026-09-23（性能 + 交互）
+
+用户反馈：**编辑过的图「裁切确认」有点卡**；并要求**双击裁切框确认**。
+
+### 根因（性能）
+
+- `ImageCropper.CropAsync` 原走 ZIV.Imaging `SkiaCodec.SaveAsync`（Magick 编码）：全尺寸解码后
+  再 `ToMagick` 做 `BGRA → byte[] → MagickImage` 多次大对象拷贝 + Magick OpenMP 线程池，
+  编辑后的图更大 → 确认时 CPU / LOH 压力明显。
+- 对比机制：`SetCompareSource` 在**每次打开预览**时**立即解码父图**，而父图仅在用户点「对比」时
+  才需要 → 打开编辑图预览即多解一张大图并常驻内存，与裁切解码争资源。
+
+### 修复
+
+1. **裁切编码改 Skia 原生 PNG**：`ImageCropper.CropAsync` 用 `SKImage.Subset` + `Encode(Png)`
+   直接写文件（省去 Magick 往返与 OpenMP）；解码仍复用 ZIV.Imaging `LoadThumbnail`（Z13/Z15）。
+   整个操作在 `Task.Run` 内（Z11 自包含）。
+2. **对比父图惰性解码**：`SetCompareSource` 只记路径并置 `CanCompare`；首次进入对比才
+   `EnsureParentLoaded()` 解码，换图 / 关窗释放（Z9）。
+3. **确认反馈**：确认按钮文案切「裁切中…」并在操作期间禁用（可见反馈）。
+4. **双击确认**：裁切模式下在裁切框上**双击**即确认裁切（`CropOnReleased` 复用双击窗口；
+   框内判定用 `HitTest`）。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**。
+- `ImageCropperTests` 全过（验证 Skia 编码路径）；非 GPU 全量 **228 通过 / 0 失败**。
+- **未跑 GPU**（Z29 / Z30）。
+
+### 备注
+
+- 无契约变更；未改 python / chrome / ToolStateMachine / 分辨率选择器 / 导入 UI；无新 NuGet。
+- 裁切编码不再经 Magick（此前 AOT 验证针对 Magick 路径；现编码为 SkiaSharp，AOT 更简单）。

@@ -270,49 +270,6 @@ public partial class MainWindow : Window
         ScrollToEnd();
     }
 
-    /// <summary>
-    /// Opens (or reuses) the standalone large-image preview window for
-    /// <paramref name="path"/> (Step 9C.1). A single window instance is kept: a second
-    /// click loads the new image into the same window, preserving its position / size.
-    /// </summary>
-    private void OpenImagePreview(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
-        {
-            SetStatus("图像不存在，无法预览");
-            return;
-        }
-
-        if (_imagePreview is null)
-        {
-            var preview = new ImagePreview();
-            preview.Closed += (_, _) =>
-            {
-                if (ReferenceEquals(_imagePreview, preview))
-                {
-                    _imagePreview = null;
-                }
-            };
-
-            // Step 9C.4: a confirmed crop appends a new node to the session.
-            preview.CropCompleted += OnPreviewCropCompleted;
-
-            _imagePreview = preview;
-            preview.Show(this);
-        }
-        else if (_imagePreview.WindowState == WindowState.Minimized)
-        {
-            _imagePreview.WindowState = WindowState.Normal;
-        }
-
-        _imagePreview.LoadImage(path);
-
-        // Swipe-compare reference: the parent node's output (Step 9C.2-C); null for
-        // the root image, which disables the compare button.
-        _imagePreview.SetCompareSource(_vm.GetParentImagePath(path));
-        _imagePreview.Activate();
-    }
-
     private Control BuildMessage(ChatMessage message)
     {
         var panel = new StackPanel { Spacing = 4, MaxWidth = 420 };

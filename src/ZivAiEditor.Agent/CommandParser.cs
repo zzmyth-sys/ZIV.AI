@@ -192,7 +192,7 @@ public sealed class CommandParser : ICommandParser
         }
 
         var prompt = ApplyTemplate(command, args);
-        var mainImage = session.GetCurrentImagePath();
+        var mainImage = session.GetCurrentPipelineImagePath();
         if (string.IsNullOrWhiteSpace(mainImage) && string.IsNullOrWhiteSpace(prompt))
         {
             return Error("No current image and no prompt; cannot build a plan.");
@@ -223,7 +223,7 @@ public sealed class CommandParser : ICommandParser
 
     private ParseResult ParseNaturalLanguage(string prompt, IEditSession session)
     {
-        var mainImage = session.GetCurrentImagePath();
+        var mainImage = session.GetCurrentPipelineImagePath();
         if (string.IsNullOrWhiteSpace(mainImage) && string.IsNullOrWhiteSpace(prompt))
         {
             return Error("No current image and no prompt; cannot build a plan.");

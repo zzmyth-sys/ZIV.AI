@@ -126,6 +126,38 @@ public sealed class EditSession : IEditSession, IEditSessionWriter
     }
 
     /// <summary>
+    /// Sets (or clears) the intrinsic crop of one node (Step 9C.6-B). Because
+    /// <see cref="EditNode"/> is immutable (<c>init</c>-only), the node is rebuilt with the
+    /// same identity / parent / image / command / timestamp and swapped in. A no-op when
+    /// <paramref name="nodeId"/> is unknown (defensive: the caller is the preview / close
+    /// path, which must never throw). The root reference is re-pointed when the root node
+    /// is updated, so <see cref="RootImagePath"/> stays valid.
+    /// </summary>
+    public void SetNodeCrop(string nodeId, CropSpec? crop)
+    {
+        if (string.IsNullOrEmpty(nodeId) || !Nodes.TryGetValue(nodeId, out var node))
+        {
+            return;
+        }
+
+        var updated = new EditNode
+        {
+            NodeId = node.NodeId,
+            ParentNodeId = node.ParentNodeId,
+            ImagePath = node.ImagePath,
+            Command = node.Command,
+            CreatedAt = node.CreatedAt,
+            Crop = crop,
+        };
+
+        Nodes[nodeId] = updated;
+        if (ReferenceEquals(_rootNode, node))
+        {
+            _rootNode = updated;
+        }
+    }
+
+    /// <summary>
     /// All nodes, oldest first (stable for equal timestamps). Since Step 9C.6 the
     /// synthesized root ("原图") node is included and always sorts first, so the history
     /// starts at the source image even on a coarse clock.
@@ -151,6 +183,21 @@ public sealed class EditSession : IEditSession, IEditSessionWriter
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The working <b>pipeline</b> image path (Step 9C.6-B): the current node's crop
+    /// result when it has one, otherwise its <see cref="EditNode.ImagePath"/>. Returns
+    /// <c>null</c> when no node is current.
+    /// </summary>
+    public string? GetCurrentPipelineImagePath()
+    {
+        if (string.IsNullOrEmpty(CurrentNodeId) || !Nodes.TryGetValue(CurrentNodeId, out var node))
+        {
+            return null;
+        }
+
+        return PipelinePath(node);
     }
 
     /// <summary>
@@ -182,6 +229,49 @@ public sealed class EditSession : IEditSession, IEditSessionWriter
 
         return null;
     }
+
+    /// <summary>
+    /// The parent (reference) <b>pipeline</b> image path for <paramref name="imagePath"/>
+    /// (Step 9C.6-B): the parent node's crop result when it has one, otherwise its
+    /// <see cref="EditNode.ImagePath"/>. Used by swipe-compare so the reference is the
+    /// image the edit actually consumed. Returns <c>null</c> for the root node (no parent)
+    /// or an unknown path.
+    /// </summary>
+    public string? GetParentPipelineImagePath(string? imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath))
+        {
+            return null;
+        }
+
+        foreach (var node in GetHistory())
+        {
+            // The input may be the node's own image or its crop result (chat / preview can
+            // carry either), so match against both.
+            if (!MatchesPath(node, imagePath))
+            {
+                continue;
+            }
+
+            return string.IsNullOrEmpty(node.ParentNodeId)
+                ? null
+                : Nodes.TryGetValue(node.ParentNodeId, out var parent)
+                    ? PipelinePath(parent)
+                    : null;
+        }
+
+        return null;
+    }
+
+    /// <summary>The image a node feeds the pipeline: its crop result, else its output.</summary>
+    private static string PipelinePath(IEditNode node)
+        => node.Crop is { ResultImagePath.Length: > 0 } crop ? crop.ResultImagePath : node.ImagePath;
+
+    /// <summary>True when <paramref name="path"/> is the node's own image or its crop result.</summary>
+    private static bool MatchesPath(IEditNode node, string path)
+        => string.Equals(node.ImagePath, path, StringComparison.OrdinalIgnoreCase)
+           || (node.Crop is { ResultImagePath.Length: > 0 } crop
+               && string.Equals(crop.ResultImagePath, path, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// The node path from the root node down to <see cref="CurrentNodeId"/> (oldest
@@ -245,6 +335,12 @@ public sealed class EditNode : IEditNode
 
     /// <summary>The user input that produced this node (shown in the history list).</summary>
     public string Command { get; init; } = "";
+
+    /// <summary>
+    /// The node's intrinsic crop (Step 9C.6-B); <c>null</c> when uncropped. At most one
+    /// per node — re-adjusting replaces it, never appends a node.
+    /// </summary>
+    public CropSpec? Crop { get; init; }
 
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.Now;
 }

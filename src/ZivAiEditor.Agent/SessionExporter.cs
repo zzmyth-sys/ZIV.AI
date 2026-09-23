@@ -68,16 +68,23 @@ public sealed class SessionExporter : ISessionExporter
 
             var dto = SessionExportDto.From(session);
 
-            foreach (var node in dto.Nodes)
+            foreach (var node in session.GetHistory())
             {
                 ct.ThrowIfCancellationRequested();
-                if (string.IsNullOrWhiteSpace(node.ImagePath) || !File.Exists(node.ImagePath))
+
+                if (!string.IsNullOrWhiteSpace(node.ImagePath) && File.Exists(node.ImagePath))
                 {
-                    continue;
+                    var destination = Path.Combine(outputDirectory, node.NodeId + ".png");
+                    File.Copy(node.ImagePath, destination, overwrite: true);
                 }
 
-                var destination = Path.Combine(outputDirectory, node.NodeId + ".png");
-                File.Copy(node.ImagePath, destination, overwrite: true);
+                // Step 9C.6-B: copy the node's crop result as {NodeId}_crop.png so the
+                // export is self-contained (the JSON points at this relative name).
+                if (node.Crop is { ResultImagePath.Length: > 0 } crop && File.Exists(crop.ResultImagePath))
+                {
+                    var cropDestination = Path.Combine(outputDirectory, node.NodeId + "_crop.png");
+                    File.Copy(crop.ResultImagePath, cropDestination, overwrite: true);
+                }
             }
 
             var json = JsonSerializer.Serialize(dto, JsonContext.SessionExportDto);
@@ -126,6 +133,18 @@ internal sealed class SessionExportDto
                 ImagePath = node.ImagePath,
                 Command = node.Command,
                 CreatedAt = node.CreatedAt,
+                Crop = node.Crop is { } crop
+                    ? new SessionExportCrop
+                    {
+                        X = crop.X,
+                        Y = crop.Y,
+                        Width = crop.Width,
+                        Height = crop.Height,
+                        ResultImagePath = crop.ResultImagePath.Length > 0
+                            ? node.NodeId + "_crop.png"
+                            : "",
+                    }
+                    : null,
             })
             .ToList(),
     };
@@ -145,8 +164,30 @@ internal sealed class SessionExportNode
     [JsonPropertyName("command")]
     public string Command { get; init; } = "";
 
+    [JsonPropertyName("crop")]
+    public SessionExportCrop? Crop { get; init; }
+
     [JsonPropertyName("created_at")]
     public DateTimeOffset CreatedAt { get; init; }
+}
+
+internal sealed class SessionExportCrop
+{
+    [JsonPropertyName("x")]
+    public int X { get; init; }
+
+    [JsonPropertyName("y")]
+    public int Y { get; init; }
+
+    [JsonPropertyName("width")]
+    public int Width { get; init; }
+
+    [JsonPropertyName("height")]
+    public int Height { get; init; }
+
+    /// <summary>Result image name relative to the export directory ({NodeId}_crop.png).</summary>
+    [JsonPropertyName("result_image_path")]
+    public string ResultImagePath { get; init; } = "";
 }
 
 [JsonSourceGenerationOptions(

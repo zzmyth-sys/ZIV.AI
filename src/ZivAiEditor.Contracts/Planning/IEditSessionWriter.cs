@@ -27,4 +27,11 @@ public interface IEditSessionWriter
 
     /// <summary>Switches the working node. Returns <c>false</c> when the id is unknown.</summary>
     bool NavigateTo(string nodeId);
+
+    /// <summary>
+    /// Sets (or clears) the intrinsic crop of one node (Step 9C.6-B). The node is
+    /// rebuilt in place — no node is added, and the node's identity / parent / image are
+    /// preserved. A no-op when <paramref name="nodeId"/> is unknown.
+    /// </summary>
+    void SetNodeCrop(string nodeId, CropSpec? crop);
 }

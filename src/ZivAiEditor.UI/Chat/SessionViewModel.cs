@@ -155,9 +155,10 @@ public sealed class SessionViewModel
             return false;
         }
 
-        // The pending bubble is replaced in place once the executor returns.
-        var pendingIndex = Messages.Count;
-        Messages.Add(new ChatMessage { Role = ChatRole.Assistant, Text = "生成中…", IsPending = true });
+        // The pending bubble is replaced in place once the executor returns. It is tracked
+        // by identity (not index) so a context rebuild while generating cannot desync it.
+        var pending = new ChatMessage { Role = ChatRole.Assistant, Text = "生成中…", IsPending = true };
+        Messages.Add(pending);
         IsBusy = true;
 
         var parentId = _session.CurrentNodeId;
@@ -177,32 +178,32 @@ public sealed class SessionViewModel
             if (state.Status == TaskStatus.Succeeded && !string.IsNullOrWhiteSpace(state.OutputImagePath))
             {
                 _writer.AppendNode(parentId, state.OutputImagePath, text);
-                Messages[pendingIndex] = new ChatMessage
+                ReplacePending(pending, new ChatMessage
                 {
                     Role = ChatRole.Assistant,
                     Text = $"{elapsed.TotalSeconds:F1}秒 完成",
                     ImagePath = state.OutputImagePath,
-                };
+                });
                 RefreshHistory();
                 return true;
             }
 
-            Messages[pendingIndex] = new ChatMessage
+            ReplacePending(pending, new ChatMessage
             {
                 Role = ChatRole.Assistant,
                 Text = BuildFailureMessage(state),
                 IsError = true,
-            };
+            });
             return false;
         }
         catch (OperationCanceledException)
         {
-            Messages[pendingIndex] = new ChatMessage { Role = ChatRole.Assistant, Text = "已取消。", IsError = true };
+            ReplacePending(pending, new ChatMessage { Role = ChatRole.Assistant, Text = "已取消。", IsError = true });
             return false;
         }
         catch (Exception ex)
         {
-            Messages[pendingIndex] = new ChatMessage { Role = ChatRole.Assistant, Text = ex.Message, IsError = true };
+            ReplacePending(pending, new ChatMessage { Role = ChatRole.Assistant, Text = ex.Message, IsError = true });
             return false;
         }
         finally
@@ -247,35 +248,22 @@ public sealed class SessionViewModel
     }
 
     /// <summary>
-    /// Appends a non-AI edit output (e.g. a crop, Step 9C.4) to the session and refreshes
-    /// the history. The parent is the node whose <c>ImagePath</c> matches
-    /// <paramref name="sourceImagePath"/> (case-insensitive), falling back to the current
-    /// node when the source is not a known node. Unlike <see cref="SubmitAsync"/> this runs
-    /// no parser / executor — the image is already produced.
+    /// Sets (or clears) the intrinsic crop of one node (Step 9C.6-B) and refreshes the
+    /// history. A crop is a node property, not an edit step: no node is added. A no-op when
+    /// the node is unknown.
     /// </summary>
-    public void AppendEditNode(string sourceImagePath, string outputPath, string command)
+    public void SetNodeCrop(string nodeId, CropSpec? crop)
     {
-        if (string.IsNullOrWhiteSpace(outputPath))
-        {
-            return;
-        }
-
-        string? parentId = null;
-        if (!string.IsNullOrWhiteSpace(sourceImagePath))
-        {
-            foreach (var node in _session.GetHistory())
-            {
-                if (string.Equals(node.ImagePath, sourceImagePath, StringComparison.OrdinalIgnoreCase))
-                {
-                    parentId = node.NodeId;
-                    break;
-                }
-            }
-        }
-
-        parentId ??= _session.CurrentNodeId;
-        _writer.AppendNode(parentId, outputPath, command);
+        _writer.SetNodeCrop(nodeId, crop);
         RefreshHistory();
+
+        // Step 9C.6-B: the chat shows each node's pipeline image, so a crop change must
+        // re-render the stream (the crop result replaces the node's image in the bubbles).
+        // Skipped while generating, to avoid clearing the in-flight bubble.
+        if (!IsBusy)
+        {
+            RebuildContext();
+        }
     }
 
     /// <summary>Rebuilds <see cref="History"/> from the session's node set.</summary>
@@ -300,29 +288,71 @@ public sealed class SessionViewModel
     /// </summary>
     public string? GetParentImagePath(string? imagePath) => _session.GetParentImagePath(imagePath);
 
-    /// <summary>Clears the chat and replays the path from the root image to the current node.</summary>
+    /// <summary>
+    /// The parent (reference) pipeline image path for a chat image, used by swipe-compare
+    /// (Step 9C.6-B): the parent node's crop result, else its output. Delegates to
+    /// <see cref="IEditSession.GetParentPipelineImagePath"/>.
+    /// </summary>
+    public string? GetParentPipelineImagePath(string? imagePath)
+        => _session.GetParentPipelineImagePath(imagePath);
+
+    /// <summary>
+    /// Clears the chat and replays the path from the root node to the current node. Each
+    /// bubble shows the node's <b>pipeline</b> image (Step 9C.6-B): its crop result when it
+    /// has one, otherwise its output — so a crop is reflected in the chat stream.
+    /// </summary>
     private void RebuildContext()
     {
         Messages.Clear();
 
-        if (_session.RootImagePath is { Length: > 0 } root)
+        var path = _session.GetPathToCurrent();
+        if (path.Count == 0)
         {
-            Messages.Add(new ChatMessage { Role = ChatRole.System, Text = "起始图像", ImagePath = root });
-        }
-
-        // Step 9C.6: the path now starts at the root node, which is already rendered as
-        // the "起始图像" bubble above — skip it so the source image is not shown twice.
-        foreach (var node in _session.GetPathToCurrent())
-        {
-            if (node.ParentNodeId is null)
+            // No node path (e.g. T2I-first before any node): show the bare root if set.
+            if (_session.RootImagePath is { Length: > 0 } root)
             {
-                continue;
+                Messages.Add(new ChatMessage { Role = ChatRole.System, Text = "起始图像", ImagePath = root });
             }
 
+            return;
+        }
+
+        // The first node is the root ("原图"), already rendered as the "起始图像" bubble.
+        Messages.Add(new ChatMessage
+        {
+            Role = ChatRole.System,
+            Text = "起始图像",
+            ImagePath = PipelinePath(path[0]),
+        });
+
+        foreach (var node in path.Skip(1))
+        {
             Messages.Add(new ChatMessage { Role = ChatRole.User, Text = node.Command });
-            Messages.Add(new ChatMessage { Role = ChatRole.Assistant, Text = "完成", ImagePath = node.ImagePath });
+            Messages.Add(new ChatMessage { Role = ChatRole.Assistant, Text = "完成", ImagePath = PipelinePath(node) });
         }
     }
+
+    /// <summary>
+    /// Replaces the pending "生成中" bubble (tracked by identity) with the final message. If
+    /// the context was rebuilt while generating and the bubble is gone, the final message is
+    /// appended instead of throwing on a stale index.
+    /// </summary>
+    private void ReplacePending(ChatMessage pending, ChatMessage replacement)
+    {
+        var index = Messages.IndexOf(pending);
+        if (index >= 0)
+        {
+            Messages[index] = replacement;
+        }
+        else
+        {
+            Messages.Add(replacement);
+        }
+    }
+
+    /// <summary>The image a node shows in the chat: its crop result, else its output.</summary>
+    private static string PipelinePath(IEditNode node)
+        => node.Crop is { ResultImagePath.Length: > 0 } crop ? crop.ResultImagePath : node.ImagePath;
 
     private static string BuildFailureMessage(TaskState state)
         => state.ErrorMessage

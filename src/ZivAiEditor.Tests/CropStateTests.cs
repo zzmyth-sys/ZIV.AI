@@ -3,7 +3,10 @@ using Xunit;
 
 namespace ZivAiEditor.Tests;
 
-/// <summary>Step 9C.4 pure crop-state tests (geometry, handles, clamping, state).</summary>
+/// <summary>
+/// Step 9C.6-B pure crop-state tests: 75% default, restore via SetRect, move + 8-handle
+/// resize, clamping and min size.
+/// </summary>
 public class CropStateTests
 {
     private const double W = 1000;
@@ -21,9 +24,7 @@ public class CropStateTests
     private static CropState StateWithRect(double x, double y, double w, double h)
     {
         var state = NewState();
-        state.BeginDrag(x, y, Tol);
-        state.UpdateDrag(x + w, y + h);
-        state.EndDrag();
+        state.SetRect(x, y, w, h);
         return state;
     }
 
@@ -38,11 +39,25 @@ public class CropStateTests
     }
 
     [Fact]
-    public void SetFullRect_Selects_Whole_Image()
+    public void SetDefaultRect_Is_75_Percent_Centered()
     {
         var state = NewState();
 
-        state.SetFullRect();
+        state.SetDefaultRect();
+
+        Assert.True(state.HasRect);
+        Assert.Equal(125, state.X);
+        Assert.Equal(100, state.Y);
+        Assert.Equal(750, state.Width);
+        Assert.Equal(600, state.Height);
+    }
+
+    [Fact]
+    public void SetRect_Restores_And_Clamps_To_Image()
+    {
+        var state = NewState();
+
+        state.SetRect(-100, -100, 5000, 5000);
 
         Assert.True(state.HasRect);
         Assert.Equal(0, state.X);
@@ -52,29 +67,11 @@ public class CropStateTests
     }
 
     [Fact]
-    public void BuildDrag_Creates_Normalized_Rect()
+    public void SetRect_Below_MinSize_Clears_HasRect()
     {
         var state = NewState();
 
-        state.BeginDrag(300, 200, Tol);
-        state.UpdateDrag(100, 50);
-        state.EndDrag();
-
-        Assert.True(state.HasRect);
-        Assert.Equal(100, state.X);
-        Assert.Equal(50, state.Y);
-        Assert.Equal(200, state.Width);
-        Assert.Equal(150, state.Height);
-    }
-
-    [Fact]
-    public void BuildDrag_Below_MinSize_Is_Discarded()
-    {
-        var state = NewState();
-
-        state.BeginDrag(300, 200, Tol);
-        state.UpdateDrag(305, 205);
-        state.EndDrag();
+        state.SetRect(10, 10, 5, 5);
 
         Assert.False(state.HasRect);
     }
@@ -166,31 +163,38 @@ public class CropStateTests
     }
 
     [Fact]
-    public void HitTest_Without_Rect_Is_None()
+    public void BuildDrag_Outside_Creates_Normalized_Rect()
     {
         var state = NewState();
 
-        Assert.Equal(CropHandle.None, state.HitTest(300, 250, Tol));
+        state.BeginDrag(300, 200, Tol); // no rect → build
+        state.UpdateDrag(100, 50);
+        state.EndDrag();
+
+        Assert.True(state.HasRect);
+        Assert.Equal(100, state.X);
+        Assert.Equal(50, state.Y);
+        Assert.Equal(200, state.Width);
+        Assert.Equal(150, state.Height);
     }
 
     [Fact]
-    public void Exit_Clears_State()
+    public void BuildDrag_Below_MinSize_Is_Discarded()
     {
-        var state = StateWithRect(100, 100, 400, 300);
+        var state = NewState();
 
-        state.Exit();
+        state.BeginDrag(300, 200, Tol);
+        state.UpdateDrag(305, 205);
+        state.EndDrag();
 
-        Assert.False(state.IsActive);
         Assert.False(state.HasRect);
-        Assert.False(state.IsDragging);
-        Assert.Equal(0, state.Width);
-        Assert.Equal(0, state.Height);
     }
 
     [Fact]
     public void TryGetPixelRect_Returns_Integer_Rect()
     {
-        var state = StateWithRect(100.4, 100.6, 400.2, 300.1);
+        var state = NewState();
+        state.SetRect(100.4, 100.6, 400.2, 300.1);
 
         Assert.True(state.TryGetPixelRect(out var x, out var y, out var w, out var h));
         Assert.Equal(100, x);
@@ -208,10 +212,24 @@ public class CropStateTests
     }
 
     [Fact]
+    public void Exit_Clears_State()
+    {
+        var state = StateWithRect(100, 100, 400, 300);
+
+        state.Exit();
+
+        Assert.False(state.IsActive);
+        Assert.False(state.HasRect);
+        Assert.False(state.IsDragging);
+        Assert.Equal(0, state.Width);
+        Assert.Equal(0, state.Height);
+    }
+
+    [Fact]
     public void SetImageBounds_No_Image_Clears_Rect()
     {
         var state = NewState();
-        state.SetFullRect();
+        state.SetDefaultRect();
         Assert.True(state.HasRect);
 
         state.SetImageBounds(0, 0);

@@ -27,6 +27,13 @@ public interface IEditSession
     /// </summary>
     string? GetCurrentImagePath();
 
+    /// <summary>
+    /// The working <b>pipeline</b> image path (Step 9C.6-B): the current node's crop
+    /// result when it has one, otherwise its <see cref="IEditNode.ImagePath"/>. This is
+    /// the image an AI edit consumes. Returns <c>null</c> when no node is current.
+    /// </summary>
+    string? GetCurrentPipelineImagePath();
+
     /// <summary>All nodes, oldest first (stable for equal timestamps).</summary>
     IReadOnlyList<IEditNode> GetHistory();
 
@@ -36,6 +43,14 @@ public interface IEditSession
     /// <c>null</c> for the root image itself (no parent) or an unknown path.
     /// </summary>
     string? GetParentImagePath(string? imagePath);
+
+    /// <summary>
+    /// The parent (reference) <b>pipeline</b> image path for <paramref name="imagePath"/>
+    /// (Step 9C.6-B): the parent node's crop result when it has one, otherwise its
+    /// <see cref="IEditNode.ImagePath"/>. Used by swipe-compare. Returns <c>null</c> for
+    /// the root node (no parent) or an unknown path.
+    /// </summary>
+    string? GetParentPipelineImagePath(string? imagePath);
 
     /// <summary>
     /// The node path from the root image down to <see cref="CurrentNodeId"/> (oldest

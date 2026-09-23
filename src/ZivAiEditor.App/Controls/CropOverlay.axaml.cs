@@ -8,8 +8,8 @@ using ZivAiEditor.UI.Imaging;
 namespace ZivAiEditor.App.Controls;
 
 /// <summary>
-/// Self-drawn crop overlay (Step 9C.4): darkens the area outside the selection and draws
-/// the rectangle border plus its 8 handles (4 corners + 4 edge midpoints). Like
+/// Self-drawn crop overlay (Step 9C.6-B): darkens the area outside the selection and
+/// draws the rectangle border plus its 8 handles (4 corners + 4 edge midpoints). Like
 /// <see cref="CompareOverlay"/> it draws through the shared <see cref="ImageViewModel"/>
 /// transform, so the frame stays aligned through pan / zoom. It is
 /// <c>IsHitTestVisible = false</c> — <see cref="ImagePreview"/> owns pointer input and

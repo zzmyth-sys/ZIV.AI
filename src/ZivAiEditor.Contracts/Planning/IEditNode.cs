@@ -22,5 +22,11 @@ public interface IEditNode
     /// <summary>The user input that produced this node (shown in the history list).</summary>
     string Command { get; }
 
+    /// <summary>
+    /// The node's intrinsic crop (Step 9C.6-B): at most one per node, re-adjustable,
+    /// never a node of its own. <c>null</c> when the node is uncropped.
+    /// </summary>
+    CropSpec? Crop { get; }
+
     DateTimeOffset CreatedAt { get; }
 }

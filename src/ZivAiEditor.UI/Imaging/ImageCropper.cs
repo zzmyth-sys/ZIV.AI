@@ -67,10 +67,10 @@ public static class ImageCropper
     /// <summary>
     /// Crops <paramref name="sourceImagePath"/> to the given pixel rectangle and writes a
     /// new PNG beside it. Returns the output path, or <c>null</c> on any failure (missing
-    /// source, decode / encode failure, empty rectangle). Decode / encode run on the
-    /// caller's thread — invoke from a background task (Z11).
+    /// source, decode / encode failure, empty rectangle). The whole operation runs off the
+    /// caller's thread (Z11).
     /// </summary>
-    public static async Task<string?> CropAsync(
+    public static Task<string?> CropAsync(
         string sourceImagePath,
         int x,
         int y,
@@ -78,45 +78,52 @@ public static class ImageCropper
         int height,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(sourceImagePath) || !File.Exists(sourceImagePath))
+        if (string.IsNullOrWhiteSpace(sourceImagePath) || !File.Exists(sourceImagePath)
+            || width <= 0 || height <= 0)
         {
-            return null;
-        }
-
-        if (width <= 0 || height <= 0)
-        {
-            return null;
+            return Task.FromResult<string?>(null);
         }
 
         ct.ThrowIfCancellationRequested();
 
-        using var codec = new SkiaCodec();
-
-        // Full-resolution decode (int.MaxValue = no downscale), matching the preview's
-        // raw pixel orientation so the selection rectangle maps 1:1.
-        using var full = codec.LoadThumbnail(sourceImagePath, int.MaxValue);
-        if (full is null)
+        return Task.Run(() =>
         {
-            return null;
-        }
+            using var codec = new SkiaCodec();
 
-        var rect = SKRectI.Intersect(
-            new SKRectI(x, y, x + width, y + height),
-            new SKRectI(0, 0, full.Width, full.Height));
-        if (rect.Width <= 0 || rect.Height <= 0)
-        {
-            return null;
-        }
+            // Full-resolution decode (int.MaxValue = no downscale), matching the preview's
+            // raw pixel orientation so the selection rectangle maps 1:1.
+            using var full = codec.LoadThumbnail(sourceImagePath, int.MaxValue);
+            if (full is null)
+            {
+                return null;
+            }
 
-        using var cropped = full.Subset(rect);
-        if (cropped is null)
-        {
-            return null;
-        }
+            var rect = SKRectI.Intersect(
+                new SKRectI(x, y, x + width, y + height),
+                new SKRectI(0, 0, full.Width, full.Height));
+            if (rect.Width <= 0 || rect.Height <= 0)
+            {
+                return null;
+            }
 
-        var output = ResolveOutputPath(sourceImagePath, DateTimeOffset.Now);
-        await codec.SaveAsync(cropped, output, null, 100, ct).ConfigureAwait(false);
+            using var cropped = full.Subset(rect);
+            if (cropped is null)
+            {
+                return null;
+            }
 
-        return File.Exists(output) ? output : null;
+            var output = ResolveOutputPath(sourceImagePath, DateTimeOffset.Now);
+
+            // Encode with Skia's native PNG writer: far fewer copies than the shared
+            // Magick path (no BGRA -> byte[] -> MagickImage round-trip) and no OpenMP
+            // thread pool, so confirming a crop on a large edited image stays light.
+            using var data = cropped.Encode(SKEncodedImageFormat.Png, 100);
+            using (var stream = File.Create(output))
+            {
+                data.SaveTo(stream);
+            }
+
+            return File.Exists(output) ? output : null;
+        }, ct);
     }
 }

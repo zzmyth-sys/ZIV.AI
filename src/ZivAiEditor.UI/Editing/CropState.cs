@@ -1,6 +1,6 @@
 namespace ZivAiEditor.UI.Editing;
 
-/// <summary>Which part of the crop rectangle a pointer is over (Step 9C.4).</summary>
+/// <summary>Which part of the crop rectangle a pointer is over (Step 9C.6-B).</summary>
 public enum CropHandle
 {
     None,
@@ -16,20 +16,28 @@ public enum CropHandle
 }
 
 /// <summary>
-/// Pure crop-selection state for the preview window (Step 9C.4). The rectangle is stored
-/// in <b>source-image pixel</b> coordinates (SPEC §3.9); the App overlay maps it to and
-/// from the viewport through <c>ImageViewModel</c>. It carries <b>no</b> Avalonia
+/// Pure crop-selection state for the preview window (Step 9C.6-B). The rectangle is
+/// stored in <b>source-image pixel</b> coordinates (SPEC §3.9); the App overlay maps it
+/// to and from the viewport through <c>ImageViewModel</c>. It carries <b>no</b> Avalonia
 /// dependency, so the geometry / hit-testing / state machine are unit-testable (Z3/Z6).
 ///
-/// Lifecycle: <see cref="Enter"/> → (<see cref="SetFullRect"/> or drag-build) →
-/// <see cref="BeginDrag"/> / <see cref="UpdateDrag"/> / <see cref="EndDrag"/> →
-/// <see cref="Exit"/>. The rectangle is always clamped inside the image and never
-/// smaller than <see cref="MinSize"/> on either edge.
+/// <para><b>Interaction</b> (user ruling): the rectangle can be moved as a whole and
+/// resized by its 8 handles (4 corners + 4 edge midpoints); pressing outside it starts a
+/// new rectangle. The initial rectangle is the node's previous crop when one exists,
+/// otherwise a 75% centered box (<see cref="SetDefaultRect"/>).</para>
+///
+/// Lifecycle: <see cref="Enter"/> → (<see cref="SetRect"/> / <see cref="SetDefaultRect"/>
+/// / drag) → <see cref="BeginDrag"/> / <see cref="UpdateDrag"/> / <see cref="EndDrag"/> →
+/// <see cref="Exit"/>. The rectangle is always clamped inside the image and never smaller
+/// than <see cref="MinSize"/> on either edge.
 /// </summary>
 public sealed class CropState
 {
     /// <summary>Smallest allowed selection edge, in image pixels.</summary>
     public const double MinSize = 16.0;
+
+    /// <summary>Fraction of the image used by the default (centered) rectangle.</summary>
+    public const double DefaultFraction = 0.75;
 
     private double _imageWidth;
     private double _imageHeight;
@@ -105,19 +113,44 @@ public sealed class CropState
         _x = _y = _width = _height = 0;
     }
 
-    /// <summary>Selects the whole image (PS-style initial state). No-op without an image.</summary>
-    public void SetFullRect()
+    /// <summary>
+    /// Sets the rectangle explicitly (used to restore a node's previous crop). The
+    /// rectangle is clamped to the image; <see cref="HasRect"/> ends up <c>false</c> when
+    /// the clamped size is below <see cref="MinSize"/> (e.g. the image changed size).
+    /// </summary>
+    public void SetRect(double x, double y, double width, double height)
+    {
+        if (!HasImage)
+        {
+            HasRect = false;
+            return;
+        }
+
+        var left = Math.Clamp(x, 0, _imageWidth);
+        var top = Math.Clamp(y, 0, _imageHeight);
+        var right = Math.Clamp(x + width, 0, _imageWidth);
+        var bottom = Math.Clamp(y + height, 0, _imageHeight);
+
+        _x = left;
+        _y = top;
+        _width = Math.Max(0, right - left);
+        _height = Math.Max(0, bottom - top);
+        HasRect = _width >= MinSize && _height >= MinSize;
+    }
+
+    /// <summary>Selects a centered rectangle covering <see cref="DefaultFraction"/> of the image.</summary>
+    public void SetDefaultRect()
     {
         if (!HasImage)
         {
             return;
         }
 
-        _x = 0;
-        _y = 0;
-        _width = _imageWidth;
-        _height = _imageHeight;
-        HasRect = true;
+        _width = _imageWidth * DefaultFraction;
+        _height = _imageHeight * DefaultFraction;
+        _x = (_imageWidth - _width) / 2.0;
+        _y = (_imageHeight - _height) / 2.0;
+        HasRect = _width >= MinSize && _height >= MinSize;
     }
 
     /// <summary>

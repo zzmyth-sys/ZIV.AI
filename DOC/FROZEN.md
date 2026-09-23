@@ -2056,3 +2056,69 @@ Agent 编排，应下沉至 Agent；涉及 `IExecutor` 设计变更，单独立�
   **83 通过 / 0 失败**；非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **214 通过 / 0 失败**
   （9C.6 基线 175，本步 +39）。
 - `dotnet publish`（App，NativeAOT）成功；**未跑 GPU**（Z29 / Z30）。
+
+---
+
+## Step 9C.6-B（日期：2026-09-23）
+
+> **修订说明（Step 9C.6-B · 裁切语义重构：节点级裁切状态）**
+>
+> 本段为 Step 9C.6-B **只增**记录。目标：把裁切从「AI 编辑步骤（建节点）」改为「节点的内在
+> 属性」——每节点最多一个裁切状态、可反复调整、**不建节点**；送 AI 管线用裁切结果；划像对比
+> 与裁切互斥。**契约变更已获用户授权**。**不改动 Step 0–9C.6 已冻结行**；本段为**纯追加**。
+
+### 9C.6-B.1 新增契约（冻结 · 契约新增，已授权）
+
+| 类型 | 文件 | 说明 |
+|---|---|---|
+| `CropSpec`（类） | `ZivAiEditor.Contracts/Planning/CropSpec.cs` | `X` / `Y` / `Width` / `Height`（图像原始像素）+ `ResultImagePath`（新文件，Z24），均 `init` |
+
+- `IEditNode` **新增** `CropSpec? Crop { get; }`（默认 null）；`EditNode` 新增
+  `CropSpec? Crop { get; init; }`。
+- `IEditSession` **新增** `string? GetCurrentPipelineImagePath()` 与
+  `string? GetParentPipelineImagePath(string? imagePath)`。
+- `IEditSessionWriter` **新增** `void SetNodeCrop(string nodeId, CropSpec? crop)`。
+- **既有成员零修改**：`GetCurrentImagePath()` / `GetParentImagePath()` 签名与语义**均不变**。
+
+### 9C.6-B.2 语义变更（冻结 · 非契约）
+
+| 行为 | 9C.4 | 9C.6-B |
+|---|---|---|
+| 裁切 | 新建节点（`AppendNode "裁切"`） | **节点属性** `EditNode.Crop`，不建节点 |
+| 送 AI 管线图 | `当前节点.ImagePath` | `Crop?.ResultImagePath ?? ImagePath` |
+| 划像对比左（父） | 父节点 `ImagePath` | 父节点 `Crop?.ResultImagePath ?? ImagePath`（新方法） |
+| 划像对比右（当前） | 当前显示图 | 当前节点 `ImagePath`（**原图**） |
+| 对比 / 裁切 | 独立 | **互斥**（进一者自动退另一者） |
+| 初始裁切框 | 全图 | 上次裁切框（若有）否则 **75% 居中** |
+| 裁切交互 | 移动整框 + 8 手柄 | **任意点按下拖动重建**（无移动 / 手柄） |
+
+- `SetNodeCrop` 因 `EditNode` 为 `init`-only 而**重建节点**（保留 `NodeId`/`ParentNodeId`/
+  `ImagePath`/`Command`/`CreatedAt`），并同步 `_rootNode` 引用；未知 `nodeId` → **no-op**。
+
+### 9C.6-B.3 导出（冻结 · 非契约）
+
+- `session.json` 节点新增 `crop { x, y, width, height, result_image_path }`；
+  `result_image_path` 为**相对导出目录**名 `{NodeId}_crop.png`；导出时拷贝裁切结果到该名。
+- 既有 `nodes[].image_path` 行为不变。
+
+### 9C.6-B.4 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：受影响类 `EditSessionTests` / `CropStateTests` /
+  `SessionViewModelTests` / `SessionExporterTests` / `CommandParserTests` / `ImageCropperTests`
+  **75 通过 / 0 失败**；非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **207 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 9C.6-B 修订说明（2026-09-23 · 真机反馈，冻结 · 非契约）
+
+> 本小节为 Step 9C.6-B 的**收尾修订说明**。**不改动 9C.6-B.1–9C.6-B.4 既有行**，仅追加。
+
+- **裁切在原图上进行**：进入裁切加载节点原图（裁切坐标恒为原图坐标），退出恢复显示图（裁切结果/
+  原图）；确认恒以原图为源，**不链式裁切**。
+- **聊天反映裁切**：`RebuildContext` 用 `Crop?.ResultImagePath ?? ImagePath` 渲染气泡；
+  `SetNodeCrop` 重建聊天（生成中跳过）。
+- **交互恢复**：整框移动 + 8 手柄缩放（框外按下重建）；保留节点级裁切语义与 75% 默认框。
+- **节点解析扩展**：`FindNodeByImagePath` / `GetParentPipelineImagePath` 同时匹配 `ImagePath` 与
+  `Crop.ResultImagePath`（聊天气泡可能携带裁切结果路径）。
+- **无新增契约**：本次修订仅行为语义与实现，`CropSpec` / `IEditNode.Crop` / 3 个方法签名不变。
+- 修订后：`dotnet build` 0 错误 0 警告；非 GPU 全量 **228 通过 / 0 失败**。

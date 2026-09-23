@@ -1,4 +1,5 @@
 using ZivAiEditor.Agent;
+using ZivAiEditor.Contracts.Planning;
 using Xunit;
 
 namespace ZivAiEditor.Tests;
@@ -98,6 +99,49 @@ public class SessionExporterTests
         finally
         {
             Cleanup(tempDir);
+        }
+    }
+
+    [Fact]
+    public async Task Export_Writes_Crop_Metadata_And_Copies_Crop_Image()
+    {
+        var sourceDir = NewTempDir();
+        var outputDir = NewTempDir();
+        var exporter = new SessionExporter();
+
+        try
+        {
+            var root = WriteSourceImage(sourceDir, "root.png");
+            var cropSource = WriteSourceImage(sourceDir, "root_crop_src.png");
+
+            var session = new EditSession();
+            session.SetRoot(root);
+            var rootNode = session.GetHistory()[0];
+            session.SetNodeCrop(rootNode.NodeId, new CropSpec
+            {
+                X = 5,
+                Y = 6,
+                Width = 30,
+                Height = 40,
+                ResultImagePath = cropSource,
+            });
+
+            var result = await exporter.ExportAsync(session, outputDir);
+
+            Assert.Equal(outputDir, result);
+            // The crop result is copied under a name relative to the export directory.
+            var copiedCrop = Path.Combine(outputDir, rootNode.NodeId + "_crop.png");
+            Assert.True(File.Exists(copiedCrop));
+
+            var json = await File.ReadAllTextAsync(Path.Combine(outputDir, "session.json"));
+            Assert.Contains("\"crop\"", json);
+            Assert.Contains(rootNode.NodeId + "_crop.png", json);
+            Assert.Contains("\"width\": 30", json);
+        }
+        finally
+        {
+            Cleanup(sourceDir);
+            Cleanup(outputDir);
         }
     }
 
