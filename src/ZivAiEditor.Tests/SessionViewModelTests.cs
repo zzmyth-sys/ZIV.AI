@@ -159,4 +159,74 @@ public class SessionViewModelTests
         Assert.DoesNotContain(vm.Messages, m => m.IsPending);
         Assert.Contains(vm.Messages, m => m.ImagePath == Output);
     }
+
+    [Fact]
+    public void GetParentImagePath_Is_Null_For_Root_Image()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        Assert.Null(vm.GetParentImagePath(Root));
+        Assert.Null(vm.GetParentImagePath(""));
+        Assert.Null(vm.GetParentImagePath(null));
+        Assert.Null(vm.GetParentImagePath(@"C:\img\unknown.png"));
+    }
+
+    [Fact]
+    public async Task GetParentImagePath_Returns_Root_For_Direct_Child()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        await vm.SubmitAsync("/去水印");
+
+        Assert.Equal(Root, vm.GetParentImagePath(Output));
+    }
+
+    [Fact]
+    public async Task GetParentImagePath_Returns_Parent_Node_Output_For_Grandchild()
+    {
+        const string second = @"C:\img\out2.png";
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        await vm.SubmitAsync("/去水印");
+
+        // Branch a grandchild off the first node; its parent output is the first node.
+        var firstId = session.CurrentNodeId!;
+        session.AppendNode(firstId, second, "/换背景");
+
+        Assert.Equal(Output, vm.GetParentImagePath(second));
+    }
+
+    [Fact]
+    public async Task SetRootImage_Resets_Session_And_Rebuilds_Chat()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        await vm.SubmitAsync("/去水印");
+        Assert.Single(vm.History);
+
+        vm.SetRootImage(@"C:\img\new.png");
+
+        Assert.Equal(@"C:\img\new.png", session.RootImagePath);
+        Assert.Empty(vm.History);
+        Assert.Null(session.CurrentNodeId);
+        Assert.Contains(vm.Messages, m => m.ImagePath == @"C:\img\new.png");
+    }
+
+    [Fact]
+    public void SetRootImage_Blank_Is_NoOp()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        vm.SetRootImage(null);
+        vm.SetRootImage("   ");
+
+        Assert.Equal(Root, session.RootImagePath);
+    }
 }

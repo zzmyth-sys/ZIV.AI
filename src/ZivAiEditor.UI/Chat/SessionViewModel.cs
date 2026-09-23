@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using ZivAiEditor.Agent;
 using ZivAiEditor.Contracts.Execution;
+using ZivAiEditor.Contracts.Imaging;
+using ZivAiEditor.Contracts.Planning;
 using TaskStatus = ZivAiEditor.Contracts.Enums.TaskStatus;
 
 namespace ZivAiEditor.UI.Chat;
@@ -76,6 +78,12 @@ public sealed class SessionViewModel
 
     public bool IsBusy { get; private set; }
 
+    /// <summary>
+    /// Resolution selected in the UI; applied to a plan that does not carry its own
+    /// resolution (natural-language edits). <c>null</c> = leave it to the backend default.
+    /// </summary>
+    public ResolutionPolicy? Resolution { get; set; }
+
     public LaunchOptions? LaunchOptions { get; private set; }
 
     /// <summary>
@@ -147,16 +155,36 @@ public sealed class SessionViewModel
         IsBusy = true;
 
         var parentId = _session.CurrentNodeId;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        // Apply the UI-selected resolution when the plan has none of its own.
+        var plan = parsed.Plan;
+        if (plan.Resolution is null && Resolution is not null)
+        {
+            plan = new EditPlan
+            {
+                PlanId = plan.PlanId,
+                SourcePrompt = plan.SourcePrompt,
+                MainImagePath = plan.MainImagePath,
+                ReferenceImagePath = plan.ReferenceImagePath,
+                Mask = plan.Mask,
+                Steps = plan.Steps,
+                CreatedAt = plan.CreatedAt,
+                Resolution = Resolution,
+            };
+        }
+
         try
         {
-            var state = await _executor.ExecuteAsync(parsed.Plan, progress, ct);
+            var state = await _executor.ExecuteAsync(plan, progress, ct);
+            var elapsed = stopwatch.Elapsed;
             if (state.Status == TaskStatus.Succeeded && !string.IsNullOrWhiteSpace(state.OutputImagePath))
             {
                 _session.AppendNode(parentId, state.OutputImagePath, text);
                 Messages[pendingIndex] = new ChatMessage
                 {
                     Role = ChatRole.Assistant,
-                    Text = "完成",
+                    Text = $"{elapsed.TotalSeconds:F1}秒 完成",
                     ImagePath = state.OutputImagePath,
                 };
                 RefreshHistory();
@@ -203,6 +231,25 @@ public sealed class SessionViewModel
         return true;
     }
 
+    /// <summary>
+    /// Sets the starting image from an import and resets the session (Step 9C.3):
+    /// changing the root invalidates the existing node DAG, so nodes / current node are
+    /// cleared and the chat is rebuilt. A blank path is a no-op. Unlike
+    /// <see cref="ApplyRequest"/> this is an explicit in-session import, not a startup /
+    /// second-instance handoff.
+    /// </summary>
+    public void SetRootImage(string? imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath))
+        {
+            return;
+        }
+
+        _session.ResetToRoot(imagePath);
+        RefreshHistory();
+        RebuildContext();
+    }
+
     /// <summary>Rebuilds <see cref="History"/> from the session's node set.</summary>
     public void RefreshHistory()
     {
@@ -216,6 +263,39 @@ public sealed class SessionViewModel
                 IsCurrent = string.Equals(node.NodeId, _session.CurrentNodeId, StringComparison.Ordinal),
             });
         }
+    }
+
+    /// <summary>
+    /// The parent (reference) image path for a chat image, used by the swipe-compare
+    /// overlay (Step 9C.2-C): the parent node's output, or the root image for a direct
+    /// child of the root. Returns <c>null</c> for the root image itself (no parent) or
+    /// an unknown path.
+    /// </summary>
+    public string? GetParentImagePath(string? imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath))
+        {
+            return null;
+        }
+
+        foreach (var node in _session.GetHistory())
+        {
+            if (!string.Equals(node.ImagePath, imagePath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(node.ParentNodeId))
+            {
+                return _session.RootImagePath;
+            }
+
+            return _session.Nodes.TryGetValue(node.ParentNodeId, out var parent)
+                ? parent.ImagePath
+                : null;
+        }
+
+        return null;
     }
 
     /// <summary>Clears the chat and replays the path from the root image to the current node.</summary>

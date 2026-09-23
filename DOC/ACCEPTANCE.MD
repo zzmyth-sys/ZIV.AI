@@ -1109,3 +1109,159 @@ JSON payload）；`SPEC.md` §3.4 / §7 授权修订。范围外：URL 协议注
 1. 追加 `DEVLOG.md` 的 Step 9C.2 记录（本步已完成）
 2. 在「验收记录」追加“Step 9C.2 通过，日期：____”（待签）
 3. 进入 Step 9C.3（遮罩绘制）或后续 Step，由用户决定
+
+---
+
+## Step 9C.2-C 验收：划像对比（父图 vs 当前图）
+
+**目标**：预览窗口把当前节点图像与**父节点**（这一步编辑的输入）图像叠加，用**垂直分割线**
+左右拖动对比（左父图 / 右当前图）；再点对比按钮或 Esc 退出，恢复单图；根节点无父图 →
+按钮**禁用**。范围外：outpaint 精确对齐（登记遗留）、遮罩 / 裁切绘制、GPU 端到端（Z29 / Z30）。
+
+> **前置调查结论：outpaint 几何不可得**（`EditNode` / `ToolResult` / IPC `result` 帧均无几何），
+> 故采用**简化对齐**（父图居中 + 背景填充）；精确对齐登记 `DOC/OPTIMIZATION.md` §7.5。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 新增 UI 纯逻辑 + App 控件；无反向 / 循环依赖；无新增项目引用 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `Contracts` 零新增、零修改；5 接口 + 6 模型签名未改 | ✅ |
+| G4 | 未授权修改检查 | Step 0–9C.2 冻结行未改；无契约变更；新增走 Step 9C.2-C 只增段 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `FROZEN` 追加 Step 9C.2-C | ✅ |
+| G6 | 便携性未破 | 无注册表 / 外部路径配置 | ✅ |
+| G7 | AI 推理进程隔离未破 | 对比为纯本地 UI，不加载 Python（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.2C.1 | 纯逻辑下沉 | 查 `ZivAiEditor.UI/Editing/CompareState.cs` | 无 Avalonia 依赖，可单测 | ✅ |
+| 9C.2C.2 | 无父图禁用 | `CompareStateTests` + 无头探针 | `CanCompare=false` → 按钮禁用 | ✅ |
+| 9C.2C.3 | 有父图可切换 | `CompareStateTests` + 无头探针 | `CanCompare=true` → 按钮启用、可切换 | ✅ |
+| 9C.2C.4 | 分割线钳制 | `CompareStateTests` | `SetDivider` 钳制到 `[0,1]` | ✅ |
+| 9C.2C.5 | 进入 / 退出状态 | `CompareStateTests` + 无头探针 | `IsCompareMode` 正确；退出复位分割线 | ✅ |
+| 9C.2C.6 | 方案 A（独立开关） | `CompareStateTests` + 无头探针 | 不占 `ToolMode`；切工具不退出对比 | ✅ |
+| 9C.2C.7 | 父图路径来源 | 查 `SessionViewModel.GetParentImagePath` + 测试 | 直接子→根图；孙→父节点输出；根→`null` | ✅ |
+| 9C.2C.8 | 渲染（自绘） | 无头探针（渲染像素） | 左父图 / 右当前图；外扩区为背景填充 | ✅（探针渲染核对） |
+| 9C.2C.9 | 不静默变形 | 查 `CompareOverlay` 渲染 | 同 zoom 绘制、保持宽高比（非拉伸） | ✅ |
+| 9C.2C.10 | Esc 先退出对比 | 无头探针 | 首次 Esc 退出对比不关窗；再次 Esc 关窗 | ✅ |
+| 9C.2C.11 | Z9 释放 | 查代码 | 当前图 / 父图位图在替换 / 清空 / 关窗 `Dispose` | ✅ |
+| 9C.2C.12 | Z11 后台解码 | 查代码 | 父图解码在 `Task.Run`，代次丢弃过期结果 | ✅ |
+| 9C.2C.13 | Z8 行数 | 查新增 / 修改文件 | 均 < 600 行（`ImagePreview.axaml.cs` 523、`ImagePreview.Compare.cs` 164） | ✅ |
+| 9C.2C.14 | 未改 chrome / 工具栏 | `git diff` | 9C.2-A 三控件与 `EditorToolbar` 未被改 | ✅ |
+| 9C.2C.15 | 未改冻结结构 | 查 diff | `Contracts` / `python/server/*` / `ipc-protocol.md` 未改 | ✅ |
+| 9C.2C.16 | 构建 / 测试 | `dotnet build` / `dotnet test`（受影响类） | 0 错误 0 警告；`CompareStateTests` 13 通过；非 GPU 145 通过 | ✅ |
+| 9C.2C.17 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.2C.18 | 启动 / 无残留 | 启动 exe + 进程表 | 窗口正常、无新 Python 进程；结束无残留 | ✅ |
+| 9C.2C.19 | 真机交互 | 用户执行一次真机验收 | 根节点禁用 / 非根点击对比 / 拖分割线 / 再点或 Esc 退出 / 其他工具无回归 | ⏳ 待用户确认 |
+
+### Step 9C.2-C 通过标准
+
+- 通用 G1–G8 全过
+- 专属 9C.2C.1–9C.2C.18 全过；9C.2C.19 由用户真机确认
+
+### Step 9C.2-C 遗留说明（非阻断）
+
+- **outpaint 精确对齐未做**：几何未回传 C#，当前为简化对齐（居中 + 背景填充）；
+  登记 `DOC/OPTIMIZATION.md` §7.5（含所需冻结结构改动）。
+- **UI 接线仅由外部（未入库）无头探针覆盖**；仓库内自动化覆盖纯状态机与父图查找。
+- 分割线拖拽仅验证状态钳制与渲染，未做输入模拟。
+
+### Step 9C.2-C 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 9C.2-C 记录（本步已完成）
+2. 在「验收记录」追加“Step 9C.2-C 通过，日期：____”（待签）
+3. 进入后续 Step（由用户决定）
+
+---
+
+## Step 9C.3 验收：图片导入行（点击 / 拖入，单张为主图）
+
+**目标**：主窗口底部输入区上方新增一行「图片导入 / 拖入」条——初始一个**虚线 `+` 框**；
+点击 `+` 打开文件选择器（多选）；可**拖入**多张 / 单张；每导入一张追加**虚线缩略图框**，
+末尾**始终保留 `+` 框**；悬停缩略图右上角 **`×`** 移除；**单张设为主图**，多张仅收集
+（`@` 引用为后续）。范围外：`@` 引用、GPU 端到端（Z29 / Z30）。流程使用 light-rip（Medium）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 纯逻辑在 UI、控件 / picker 在 App；无反向 / 循环依赖；无新增项目引用 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `Contracts` 零新增、零修改；5 接口 + 6 模型签名未改 | ✅ |
+| G4 | 未授权修改检查 | 无契约变更；新增走 Step 9C.3 只增段；`EditSession` / `SessionViewModel` 为内部实现 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `FROZEN` 追加 Step 9C.3 | ✅ |
+| G6 | 便携性未破 | 无注册表 / 外部路径配置 | ✅ |
+| G7 | AI 推理进程隔离未破 | 导入为纯本地 UI / 文件选择，不加载 Python（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.3.1 | 初始单框 | 无头探针 + 查 `ImageImportBar.axaml` | 初始恰好 1 个虚线 `+` 框 | ✅ |
+| 9C.3.2 | 追加缩略图 + 末尾 `+` | 无头探针 | 每导入一张追加虚线缩略图；`+` 框始终在末尾 | ✅ |
+| 9C.3.3 | 点击 `+` 开选择器 | 查 `MainWindow.Import.cs` | `AddRequested` → `OpenFilePickerAsync`（多选，图片过滤） | ✅（代码） |
+| 9C.3.4 | 拖入多张 / 单张 | 查代码 + 手动 | Window 级 `DragDrop`，`TryGetFiles` → `AddFiles` | ⏳ 手动确认 |
+| 9C.3.5 | 悬停 `×` 移除 | 查 `ImageImportBar.axaml(.cs)` + 无头探针 | `Panel.thumb:pointerover` 显示 `×`；点击移除 | ✅ |
+| 9C.3.6 | 单张设为主图 | 无头探针 + `SessionViewModelTests` | `CountBefore==0 && CountAfter==1` → `SetRootImage` | ✅ |
+| 9C.3.7 | 多张不设主图 | 无头探针 | 一次拖入多张不改主图 | ✅ |
+| 9C.3.8 | 移除不重置会话 | 无头探针 + `ImageImportListTests` | 2→1 移除**不**提升、不重置；0 时 root 保留 | ✅ |
+| 9C.3.9 | 去重 | `ImageImportListTests` | 同路径（大小写不敏感）不重复添加 | ✅ |
+| 9C.3.10 | 纯逻辑下沉 | 查 `ZivAiEditor.UI/Editing/ImageImportList.cs` | 无 Avalonia 依赖，可单测 | ✅ |
+| 9C.3.11 | Z9 / Z11 | 查 `ImageImportBar.axaml.cs` | 缩略图后台解码；剪枝 / 关窗 `Dispose` | ✅ |
+| 9C.3.12 | Z8 行数 | 查新增 / 修改文件 | 均 < 600 行（`MainWindow.axaml.cs` 551、`MainWindow.Import.cs` 127） | ✅ |
+| 9C.3.13 | 未改冻结结构 | 查 diff | Contracts / `python/server/*` / `ipc-protocol.md` 未改；无新 NuGet | ✅ |
+| 9C.3.14 | 构建 / 测试 | `dotnet build` / `dotnet test`（受影响类） | 0 错误 0 警告；`ImageImportListTests` 11 通过；非 GPU 158 通过 | ✅ |
+| 9C.3.15 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.3.16 | 启动 / 无残留 | 启动 exe + 进程表 | 窗口正常、无新 Python 进程；结束无残留 | ⏳ 手动确认 |
+| 9C.3.17 | 真机交互 | 用户执行一次真机验收 | 点选 / 拖入 / 移除 / 单张设主图 / 多张收集无回归 | ⏳ 待用户确认 |
+
+### Step 9C.3 通过标准
+
+- 通用 G1–G8 全过
+- 专属 9C.3.1–9C.3.15 全过；9C.3.4 / 9C.3.16 / 9C.3.17 由用户真机确认
+
+### Step 9C.3 遗留说明（非阻断）
+
+- **`@` 引用未实现**：多张仅收集，`@` 规则属后续 Step。
+- **OS 真实拖拽 / 原生 picker 仅手动覆盖**。
+- **Window 级 `AllowDrop` 可能抑制 `TextBox` 文本拖放**（如需要可收窄到导入行）。
+
+### Step 9C.3 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 9C.3 记录（本步已完成）
+2. 在「验收记录」追加“Step 9C.3 通过，日期：____”（待签）
+3. 进入后续 Step（`@` 引用 / 遮罩绘制等，由用户决定）
+
+### Step 9C.3 收尾：网页聊天式附件条（2026-09-23）
+
+**用户反馈**：常驻虚线 `+` 框「不够易用」，改为**直接拖入对话框、上方弹出图片**的网页聊天模式。
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| 9C.3.18 | 默认无附件条 | 无头探针 | 初始附件条 `IsVisible=false`、无缩略图 | ✅ |
+| 9C.3.19 | 拖入 / 点选后弹出 | 无头探针 + 手动 | 有附件时附件条在输入框上方显示 | ✅（探针；拖拽手动） |
+| 9C.3.20 | 移除到空自动收起 | 无头探针 | `Count==0` → 附件条隐藏 | ✅ |
+| 9C.3.21 | 图片按钮入口 | 查 `MainWindow.axaml(.Import.cs)` | `PART_BtnAddImage`（Tabler `photo`）→ 文件选择器 | ✅（代码） |
+| 9C.3.22 | 单张设主图 / 多张收集 | 无头探针 | 规则不变（`CountBefore==0 && CountAfter==1`） | ✅ |
+| 9C.3.23 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；非 GPU 158 通过 | ✅ |
+
+> 说明：本节为 9C.3 的收尾调整，`9C.3.1`（初始单框）/ `9C.3.2`（末尾 `+` 框）/ `9C.3.3`
+> （点击 `+`）已由本次改造取代，以本节为准；原行保留不改（记录演进）。
+
+### Step 9C.3 收尾 2：标题栏侧栏按钮 + 输入区圆角化（2026-09-23）
+
+**用户裁决**：标题栏加「侧栏」图标按钮切换历史节点栏；底部输入区**圆角 / 居中 / 不拉通**，
+圆角与窗体 `CornerRadius=8` 统一；按钮走 **opencode** 风格。
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| 9C.3.24 | 侧栏切换按钮 | 无头探针 | 标题栏 `PART_BtnToggleSidebar`（IconSidebar）切换 `PART_HistoryPane` 显隐 | ✅ |
+| 9C.3.25 | 输入框圆角 | 无头探针 | `PART_Input.CornerRadius = 8`（与窗体一致） | ✅ |
+| 9C.3.26 | 输入区居中不拉通 | 查 `MainWindow.axaml` | 输入区 `Grid MaxWidth="760"`（居中，不占满整窗） | ✅ |
+| 9C.3.27 | opencode 按钮风格 | 无头探针 + 查 `ChromeStyles.axaml` | 发送 `Button.ocSend`（灰底圆角 + ↑ 箭头）、附件 `Button.oc` | ✅ |
+| 9C.3.28 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；非 GPU 158 通过 | ✅ |

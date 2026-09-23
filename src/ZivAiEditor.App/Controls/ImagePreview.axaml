@@ -35,7 +35,7 @@
           <Path Classes="toolIcon" Data="{StaticResource IconZoomReset}" />
         </Button>
         <ToggleButton x:Name="PART_BtnCompare" Classes="tool"
-                      ToolTip.Tip="划像对比（下一步实现）" IsEnabled="False">
+                      ToolTip.Tip="划像对比（父图 / 当前图）" IsEnabled="False">
           <Path Classes="toolIcon" Data="{StaticResource IconCompare}" />
         </ToggleButton>
       </StackPanel>
@@ -54,6 +54,10 @@
                              PanWithMouseButtons="None"
                              ConstrainZoomOutToFitLevel="False" />
 
+        <c:CompareOverlay x:Name="PART_Compare"
+                          BackgroundFill="{StaticResource ZivCanvasBackgroundBrush}"
+                          IsVisible="False" />
+
         <TextBlock x:Name="PART_Empty"
                    Text="暂无图像"
                    Foreground="{StaticResource ZivTextSecondaryBrush}"
@@ -70,6 +74,34 @@
                 IsVisible="False">
           <TextBlock x:Name="PART_ZoomText"
                      Text="适配"
+                     FontSize="11"
+                     Foreground="{StaticResource ZivTextBrush}" />
+        </Border>
+
+        <!-- Image pixel size, bottom-right (same style as the zoom badge). -->
+        <Border x:Name="PART_SizeBadge"
+                Margin="8"
+                Padding="6,2"
+                CornerRadius="4"
+                Background="{StaticResource ZivOverlayBrush}"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                IsVisible="False">
+          <TextBlock x:Name="PART_SizeText"
+                     FontSize="11"
+                     Foreground="{StaticResource ZivTextBrush}" />
+        </Border>
+
+        <!-- Reference (parent) image size, bottom-left, shown only in compare mode. -->
+        <Border x:Name="PART_CompareInfo"
+                Margin="8"
+                Padding="6,2"
+                CornerRadius="4"
+                Background="{StaticResource ZivOverlayBrush}"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Bottom"
+                IsVisible="False">
+          <TextBlock x:Name="PART_CompareInfoText"
                      FontSize="11"
                      Foreground="{StaticResource ZivTextBrush}" />
         </Border>

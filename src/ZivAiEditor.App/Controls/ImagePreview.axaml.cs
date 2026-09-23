@@ -38,11 +38,12 @@ public partial class ImagePreview : Window
     private TextBlock? _emptyLabel;
     private Border? _zoomBadge;
     private TextBlock? _zoomText;
+    private Border? _sizeBadge;
+    private TextBlock? _sizeText;
     private ChromeTitleBar? _chrome;
     private EditorToolbar? _toolbar;
     private TextBlock? _titleText;
     private Button? _resetView;
-    private ToggleButton? _compare;
 
     private Bitmap? _bitmap;
     private string? _path;
@@ -148,6 +149,16 @@ public partial class ImagePreview : Window
             _zoomBadge.IsVisible = true;
         }
 
+        if (_sizeText is not null)
+        {
+            _sizeText.Text = $"{bitmap.Size.Width} × {bitmap.Size.Height}";
+        }
+
+        if (_sizeBadge is not null)
+        {
+            _sizeBadge.IsVisible = true;
+        }
+
         _tools.NotifyImageChanged(true);
     }
 
@@ -157,7 +168,13 @@ public partial class ImagePreview : Window
         _emptyLabel = this.FindControl<TextBlock>("PART_Empty");
         _zoomBadge = this.FindControl<Border>("PART_ZoomBadge");
         _zoomText = this.FindControl<TextBlock>("PART_ZoomText");
+        _sizeBadge = this.FindControl<Border>("PART_SizeBadge");
+        _sizeText = this.FindControl<TextBlock>("PART_SizeText");
         _titleText = this.FindControl<TextBlock>("PART_TitleText");
+        _overlay = this.FindControl<CompareOverlay>("PART_Compare");
+        _overlay?.Attach(_model);
+        _compareInfo = this.FindControl<Border>("PART_CompareInfo");
+        _compareInfoText = this.FindControl<TextBlock>("PART_CompareInfoText");
 
         _chrome = this.FindControl<ChromeTitleBar>("PART_Chrome");
         if (_chrome is not null)
@@ -188,10 +205,13 @@ public partial class ImagePreview : Window
         if (_compare is not null)
         {
             WindowDecorationProperties.SetElementRole(_compare, WindowDecorationsElementRole.User);
+            _compare.Click += OnCompareClick;
         }
 
         _tools.StateChanged += (_, _) => OnToolsChanged();
         OnToolsChanged();
+
+        _compareState.StateChanged += (_, _) => OnCompareStateChanged();
 
         if (_box is not null)
         {
@@ -256,6 +276,7 @@ public partial class ImagePreview : Window
         _box.Offset = new Vector(_model.OffsetX, _model.OffsetY);
         UpdateZoomBadge();
         HideScrollBars();
+        _overlay?.InvalidateVisual();
 
         // The scroll-bar range follows the new zoom one layout pass later; re-apply
         // the offset then so the anchored position survives the range update.
@@ -324,16 +345,33 @@ public partial class ImagePreview : Window
             ToolMode.Eraser => StandardCursorType.Hand,
             _ => StandardCursorType.Arrow,
         };
+
+        // Compare mode overrides the tool cursor (the divider can be dragged).
+        if (_compareState.IsCompareMode)
+        {
+            type = StandardCursorType.SizeWestEast;
+        }
+
         _box.Cursor = new Cursor(type);
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape)
+        if (e.Key != Key.Escape)
         {
-            e.Handled = true;
-            Close();
+            return;
         }
+
+        e.Handled = true;
+
+        // Esc exits compare mode first (single image); a second Esc closes the window.
+        if (_compareState.IsCompareMode)
+        {
+            _compareState.SetCompareMode(false);
+            return;
+        }
+
+        Close();
     }
 
     private void OnWheel(object? sender, PointerWheelEventArgs e)
@@ -362,10 +400,21 @@ public partial class ImagePreview : Window
             return;
         }
 
-        _pressed = true;
-        _dragged = false;
         _pressPoint = e.GetPosition(_box);
         _lastPanPoint = _pressPoint;
+
+        // In compare mode a press near the divider starts a divider drag instead of a pan.
+        if (_compareState.IsCompareMode && IsNearDivider(_pressPoint.X))
+        {
+            _draggingDivider = true;
+            _pressed = true;
+            _dragged = false;
+            e.Pointer.Capture(_box);
+            return;
+        }
+
+        _pressed = true;
+        _dragged = false;
         e.Pointer.Capture(_box);
     }
 
@@ -377,6 +426,13 @@ public partial class ImagePreview : Window
         }
 
         var point = e.GetPosition(_box);
+
+        if (_draggingDivider)
+        {
+            SetDividerFromViewport(point.X);
+            return;
+        }
+
         if (!_dragged && Distance(point, _pressPoint) > DragThreshold)
         {
             _dragged = true;
@@ -401,6 +457,12 @@ public partial class ImagePreview : Window
 
         _pressed = false;
         e.Pointer.Capture(null);
+
+        if (_draggingDivider)
+        {
+            _draggingDivider = false;
+            return;
+        }
 
         // A drag is a pan; a double click (no drag) toggles fit / 100%.
         if (_dragged)
@@ -441,7 +503,19 @@ public partial class ImagePreview : Window
             _zoomBadge.IsVisible = false;
         }
 
+        if (_sizeBadge is not null)
+        {
+            _sizeBadge.IsVisible = false;
+        }
+
         _tools.NotifyImageChanged(false);
+
+        // No image → nothing to compare; drop the reference too.
+        _parentPath = null;
+        _parentGeneration++;
+        DisposeParentBitmap();
+        _compareState.Reset();
+        UpdateCompareButton();
     }
 
     private void DisposeBitmap()
@@ -455,7 +529,11 @@ public partial class ImagePreview : Window
         _bitmap = null;
     }
 
-    private void Cleanup() => DisposeBitmap();
+    private void Cleanup()
+    {
+        DisposeBitmap();
+        DisposeParentBitmap();
+    }
 
     private static double Distance(Point a, Point b)
     {

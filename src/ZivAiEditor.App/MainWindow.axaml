@@ -29,62 +29,91 @@
                  FontWeight="SemiBold"
                  TextTrimming="CharacterEllipsis" />
     </c:ChromeTitleBar.LeftContent>
+    <c:ChromeTitleBar.RightContent>
+      <Button x:Name="PART_BtnToggleSidebar" Classes="tool" ToolTip.Tip="历史节点">
+        <Path Classes="toolIcon" Data="{StaticResource IconSidebar}" />
+      </Button>
+    </c:ChromeTitleBar.RightContent>
     <c:ChromeTitleBar.Body>
-      <DockPanel>
-          <!-- Bottom input + status -->
-          <Border DockPanel.Dock="Bottom" Background="{StaticResource ZivTitleBarBrush}" Padding="12,10">
-            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
-              <TextBox x:Name="PART_Input"
-                       Grid.Row="0"
-                       Grid.Column="0"
-                       MinHeight="40"
-                       AcceptsReturn="False"
-                       PlaceholderText="输入编辑指令，例如 /换背景 茶肆 或 把天空换成日落"
-                       Background="#2A2A2A"
-                       Foreground="{StaticResource ZivTextBrush}"
-                       BorderBrush="#3A3A3A" />
-              <Button x:Name="PART_BtnSend"
-                      Grid.Row="0"
-                      Grid.Column="1"
-                      Margin="8,0,0,0"
-                      MinWidth="72"
-                      Height="40"
-                      Background="#3A6DF0"
-                      Foreground="White"
-                      Content="发送" />
-              <TextBlock x:Name="PART_Status"
-                         Grid.Row="1"
-                         Grid.Column="0"
-                         Grid.ColumnSpan="2"
-                         Margin="0,6,0,0"
-                         Foreground="{StaticResource ZivTextSecondaryBrush}"
-                         Text="就绪"
-                         TextTrimming="CharacterEllipsis" />
+      <!-- Two columns: the history pane spans the full height (title bar to the
+           window bottom); the input area lives only in the right (chat) column. -->
+      <Grid ColumnDefinitions="Auto,*">
+        <!-- History node list (tree, ParentNodeId indentation); toggled from the
+             title bar's sidebar button. -->
+        <Border x:Name="PART_HistoryPane"
+                Grid.Column="0"
+                Width="240"
+                Background="#202020"
+                BorderBrush="#2E2E2E"
+                BorderThickness="0,0,1,0">
+          <Grid RowDefinitions="Auto,*">
+            <TextBlock Grid.Row="0"
+                       Margin="12,10"
+                       Foreground="{StaticResource ZivTextSecondaryBrush}"
+                       Text="历史节点" />
+            <ListBox x:Name="PART_HistoryList"
+                     Grid.Row="1"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     SelectionMode="Single" />
+          </Grid>
+        </Border>
+
+        <DockPanel Grid.Column="1">
+          <!-- Bottom input + status. Centered, capped width (does not span the whole
+               window), rounded to match the window chrome (CornerRadius 8). -->
+          <Border DockPanel.Dock="Bottom" Background="{StaticResource ZivBackgroundBrush}" Padding="12,10">
+            <Grid MaxWidth="570" RowDefinitions="Auto,Auto" HorizontalAlignment="Stretch">
+              <c:ImageImportBar x:Name="PART_ImportBar"
+                                Grid.Row="0"
+                                Margin="0,0,0,8" />
+              <!-- Input container (opencode / DeepSeek style): text on top, a tool row
+                   below with + / send. -->
+              <Border Grid.Row="1"
+                      x:Name="PART_InputBox"
+                      Background="#1E1E1E"
+                      BorderBrush="#333333"
+                      BorderThickness="1"
+                      CornerRadius="12"
+                      Padding="12,10">
+                <Grid RowDefinitions="Auto,Auto">
+                  <TextBox x:Name="PART_Input"
+                           Grid.Row="0"
+                           Classes="plainInput"
+                           MinHeight="56"
+                           AcceptsReturn="False"
+                           VerticalContentAlignment="Top"
+                           PlaceholderText="输入编辑指令，/ 命令，@ 添加上下文…"
+                           Foreground="{StaticResource ZivTextBrush}" />
+                  <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,*,Auto" Margin="0,6,0,0">
+                    <Button x:Name="PART_BtnAddImage"
+                            Grid.Column="0"
+                            Classes="oc"
+                            ToolTip.Tip="添加图片">
+                      <Path Classes="toolIcon" Width="12" Height="12" Data="{StaticResource IconPlus}" />
+                    </Button>
+                    <c:ResolutionPicker x:Name="PART_ResolutionPicker"
+                                        Grid.Column="1"
+                                        Margin="6,0,0,0"
+                                        VerticalAlignment="Center" />
+                    <Button x:Name="PART_BtnSend"
+                            Grid.Column="3"
+                            Classes="ocSend"
+                            ToolTip.Tip="发送">
+                      <Path Classes="sendIcon" Data="{StaticResource IconArrowUp}" />
+                    </Button>
+                  </Grid>
+                </Grid>
+              </Border>
             </Grid>
           </Border>
 
-          <Grid ColumnDefinitions="240,*">
-            <!-- History node list (tree, ParentNodeId indentation) -->
-            <Border Grid.Column="0" Background="#202020" BorderBrush="#2E2E2E" BorderThickness="0,0,1,0">
-              <Grid RowDefinitions="Auto,*">
-                <TextBlock Grid.Row="0"
-                           Margin="12,10"
-                           Foreground="{StaticResource ZivTextSecondaryBrush}"
-                           Text="历史节点" />
-                <ListBox x:Name="PART_HistoryList"
-                         Grid.Row="1"
-                         Background="Transparent"
-                         BorderThickness="0"
-                         SelectionMode="Single" />
-              </Grid>
-            </Border>
-
-            <!-- Chat stream -->
-            <ScrollViewer x:Name="PART_ChatScroll" Grid.Column="1" Padding="12">
-              <StackPanel x:Name="PART_ChatStream" Spacing="8" />
-            </ScrollViewer>
-          </Grid>
+          <!-- Chat stream -->
+          <ScrollViewer x:Name="PART_ChatScroll" Padding="12">
+            <StackPanel x:Name="PART_ChatStream" Spacing="8" />
+          </ScrollViewer>
         </DockPanel>
+      </Grid>
     </c:ChromeTitleBar.Body>
   </c:ChromeTitleBar>
 </Window>

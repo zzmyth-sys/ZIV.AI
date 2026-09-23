@@ -244,3 +244,33 @@
   `qwen_image_vae`）；我们用的是 **Qwen-Image-2.1**，**无官方 2.1 outpaint 模板**，v1 ControlNet
   与 2.1 的兼容性**未验证**。若引入需先做**小样实测**（画质 / 显存 / 耗时），再决定是否入管线。
 - **触发条件**：当新区域与原图一致性要求提高、或方案 A 的软掩膜仍不满足时再评估。
+
+### 7.5 划像对比的 outpaint 精确对齐（候选 · 登记于 Step 9C.2-C）
+
+> **登记位置说明**：本项是「数据管道 / 特性完整性」候选，非性能优化，也非发布阻断项，
+> 故登记于 `OPTIMIZATION.md` §7（工具能力候选）而非 `RELEASE-CHECKLIST.md`。
+> 依据：Step 9C.2-C 前置调查结论（见 `DOC/DEVLOG.md` Step 9C.2-C）。
+
+- **背景**：Step 9C.2-C 的划像对比在「父图与当前图尺寸不同」（典型：outpaint）时采用
+  **简化对齐**——父图**居中**绘制在当前画布上，外扩区域以画布背景色填充，**不做**按实际
+  offset 的精确摆放。
+- **根因（不可得）**：outpaint 的几何信息（父图在输出画布中的 `offset` / 尺寸、`anchor`、
+  目标画布尺寸）当前**未回传到 C#**：
+  - `EditNode`（`ZivAiEditor.Agent/EditSession.cs`）只有 `NodeId` / `ParentNodeId` /
+    `ImagePath` / `Command` / `CreatedAt`，**无几何字段**；
+  - `ToolResult.Metadata`（`ZivAiEditor.Tools/QwenImage21OutpaintTool.cs`）只写 `task_id`；
+  - `EditRequest.Anchor` 仅**上行**（请求 → 后端），`InferenceResultDetail` 只有
+    `Width` / `Height` / `Seed`，**无源图 offset / 源图尺寸 / anchor 回传**；
+  - `python/server/outpaint.py` 的 `anchor_position()` / `build_outpaint()` **确实计算**了
+    `x / y / src_w / src_h / target_w / target_h`，但只落盘到临时 workdir，**result 帧不回传**；
+  - `contracts/ipc-protocol.md` §3.2 `result` 帧字段为 `task_id` / `output_path`（实现另含
+    `width` / `height` / `duration_ms` / `seed`），**无几何字段**。
+- **精确对齐所需的改动（属冻结结构，须先获授权）**：
+  1. `contracts/ipc-protocol.md` `result` 帧新增可选几何字段（如
+     `source_rect` = `{x,y,w,h}` + `canvas` = `{w,h}`），升 `ipc_version`（向后兼容可选字段）；
+  2. Python `handlers` / `pipeline.run_outpaint` 回传该字段；
+  3. C# `InferenceResultDetail` / `ToolResult.Metadata` 承接；
+  4. `EditNode` 扩展几何字段（**改冻结结构**）或在 App 侧旁路保存节点几何。
+- **触发条件**：当 outpaint 结果的划像对比需要「像素级对齐外扩区域」时再评估；
+  届时**必须先报告并获授权**（涉及 `EditNode` / IPC result 帧等冻结结构）。
+- **当前实现**：简化对齐（居中 + 背景填充），见 `ZivAiEditor.App/Controls/CompareOverlay.axaml.cs`。

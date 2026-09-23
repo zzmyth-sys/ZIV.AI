@@ -29,6 +29,19 @@ public sealed class EditSession
     public void SetRoot(string imagePath) => RootImagePath = imagePath;
 
     /// <summary>
+    /// Replaces the starting image and <b>resets the session</b>: every node and the
+    /// current-node selection are dropped, because the existing DAG was built on the
+    /// previous root. Used when the user imports a single image as the new main image
+    /// (Step 9C.3).
+    /// </summary>
+    public void ResetToRoot(string imagePath)
+    {
+        RootImagePath = imagePath;
+        Nodes.Clear();
+        CurrentNodeId = null;
+    }
+
+    /// <summary>
     /// Appends a new output node under <paramref name="parentId"/> and makes it
     /// current. <paramref name="parentId"/> is <c>null</c> for a direct child of
     /// the root.

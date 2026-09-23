@@ -1936,3 +1936,393 @@ GPU 端到端（Z29 / Z30）。
 - **未修改** Contracts / `python/server/*` / `C:\AI\ComfyUI_PIC`；**未新增 NuGet**；子任务 B
   **未改**子任务 A 的 chrome 控件（`ChromeTitleBar` / `ChromeResizeBorders` / `ChromeBehavior`）。
 - 提交：子任务 A `58738f3`；子任务 B 见后续提交。
+
+---
+
+## [Step 9C.2-C] - 2026-09-23
+
+### 目标
+
+实现**划像对比（swipe compare）**：在预览窗口把当前节点图像与**父节点**（这一步编辑的输入）
+图像叠加，用**垂直分割线**左右拖动对比（左父图 / 右当前图）；再点对比按钮或 Esc 退出，
+恢复单图。根节点无父图 → 对比按钮**禁用**。纯逻辑下沉 `ZivAiEditor.UI` 可单测。
+
+### 前置只读调查结论：**不可得** → 走「简化对齐」
+
+确认 outpaint 的几何信息（父图在输出画布中的 offset / 尺寸、anchor、画布尺寸）
+**当前不可得**，逐条证据：
+
+1. **`EditNode`**（`src/ZivAiEditor.Agent/EditSession.cs:87-99`）：仅
+   `NodeId` / `ParentNodeId` / `ImagePath` / `Command` / `CreatedAt`，**无几何字段**。
+2. **`ToolResult.Metadata`**（`src/ZivAiEditor.Contracts/Tools/ToolResult.cs:10`）：
+   `QwenImage21OutpaintTool.cs:113-116` 只写 `["task_id"]`；**无几何**。
+3. **`EditRequest.Anchor`**（`Contracts/Inference/EditRequest.cs:66`）：只**上行**传入后端
+   （`QwenImage21OutpaintTool.cs:92`）；`InferenceResultDetail`
+   （`Backend/InferenceProgressExtensions.cs:39-47`）只有 `Width`/`Height`/`Seed`，
+   **无源图 offset / 源图尺寸 / anchor 回传**。
+4. **`python/server/pipeline.py` `run_outpaint`（:93-115）+ `outpaint.py`**：
+   `anchor_position()` 返回 `x,y`、`build_outpaint()` 写 `canvas.png`/`mask.png`，
+   几何**确实计算**但只落盘到临时 workdir，**result 帧不回传**。
+5. **`contracts/ipc-protocol.md` §3.5 / §3.2**：`preview` 帧仅 `task_id + JPEG`；
+   `result` 帧字段为 `task_id` / `output_path`（实现另含 `width`/`height`/`duration_ms`/`seed`），
+   **无几何字段**。
+
+→ 精确对齐需扩展**冻结结构**（`EditNode` 或 IPC `result` 帧），按任务约束**先报告、不自行改**，
+本次采用**简化对齐**：当前图为基准画布，父图**居中**绘制，其余外扩区域用**画布背景色**填充
+（不做等比缩放居中）。遗留项登记于 `DOC/OPTIMIZATION.md` §7.5（含精确对齐所需改动）。
+
+### 做了什么
+
+- **纯逻辑**（`ZivAiEditor.UI/Editing/CompareState.cs`，无 Avalonia）：`CanCompare` /
+  `IsCompareMode` / `Divider`（钳制 `[0,1]`）/ `SetCanCompare` / `SetCompareMode` / `Toggle` /
+  `SetDivider` / `Reset` / `event StateChanged`。丢失父图时**强制退出**对比并复位分割线。
+- **自绘叠加控件**（`ZivAiEditor.App/Controls/CompareOverlay.axaml(.cs)`）：`Control.Render`
+  用共享的 `ImageViewModel` 变换绘制父图，并裁剪到分割线左侧；先以画布背景色填充当前图像
+  矩形（露出外扩区域），再居中绘制父图，最后画分割线。
+- **`ImagePreview`**：新增 `CompareState` + `SetCompareSource(string?)`（**独立于 `LoadImage`**）；
+  新增 `PART_Compare` 叠加层；对比按钮（右侧槽）点击 → `Toggle`；`CompareState.StateChanged`
+  → 叠加层显隐 / 分割线 / 按钮启用态 / 光标（`SizeWestEast`）；指针按下时若命中分割线
+  （±8px 带）则进入**分割线拖拽**（否则照旧平移）；**Esc 先退出对比，再次 Esc 才关窗**；
+  父图**后台线程解码**（Z11）、替换 / 清空 / 关窗时 `Dispose`（Z9）。
+- **`ImagePreview` 拆分**：为满足 **Z8（单文件 < 600 行）**，对比相关字段 / 方法拆到
+  `ImagePreview.Compare.cs`（`partial class`）；主文件 668 → **523 行**。
+- **`MainWindow`**：打开预览时用 `_vm.GetParentImagePath(path)` 取父图路径并
+  `SetCompareSource(...)`（根图返回 `null` → 按钮禁用）。
+- **`SessionViewModel`**：新增只读 `GetParentImagePath(string?)`（父节点输出 / 根图 / `null`）。
+- **测试**：`CompareStateTests.cs` 13 例；`SessionViewModelTests` 增 3 例（根 / 直接子 / 孙）。
+- **文档**：本段 + `ACCEPTANCE.MD` Step 9C.2-C + `FROZEN.md` 尾部只增段 +
+  `OPTIMIZATION.md` §7.5 遗留项。
+
+### 关键决策
+
+1. **`LoadImage` 扩展方式：新增 `SetCompareSource`，不改 `LoadImage`**。理由：当前图路径来自
+   「被点击的图」，父图路径来自「当前节点的 `ParentNodeId`」——**来源与生命周期不同**；
+   若并入 `LoadImage(path, parentPath)`，则每个调用点都需先知道父图，且根图 / T2I 场景要传
+   `null`，耦合更大。独立 setter 让「当前图」与「对比源」各自可更新。
+2. **渲染选型：自绘**（`Control.Render` + `DrawingContext`）。理由：
+   - 双 `Image` + `Clip` 需把第二张位图塞进 `AdvancedImageBox` 的模板层，**侵入其内部**；
+   - `ImageBrush` + `Rectangle.Viewport/DestinationRect` 仍需手动复刻缩放 / 平移映射，
+     且与 `AdvancedImageBox` 的 offset 模型**双份维护**；
+   - 自绘用**同一个 `ImageViewModel`** 计算两张图的屏幕矩形，**天然像素对齐**（平移 / 缩放同步），
+     且能精确控制外扩区域的背景填充；**不引 NuGet**。
+   - 未使用现成第三方对比控件（避免新依赖与许可证风险）。
+3. **对齐策略：简化对齐**（父图居中 + 背景填充）；精确对齐登记遗留（见前置调查）。
+4. **对比模式归属：方案 A**（独立 `IsCompareMode`，**不占 `ToolMode`**、不与其他工具互斥）。
+   已在 `CompareStateTests` 显式覆盖「切工具不退出对比」。
+5. **不做静默变形**：父图按**同一 zoom** 绘制（宽高比保持）；尺寸不同时居中而非拉伸。
+6. **`EditorToolbar` 未改**：对比按钮自 9C.2-B 收尾 3 起位于 `ImagePreview` **标题栏右侧槽**
+   （非 `EditorToolbar`），故其启用态 / 点击接线在 `ImagePreview` 内实现。
+
+### FROZEN 顺带核对（`git show 16a4ac6 -- DOC/FROZEN.md`）
+
+- **结论：9C.2-B 对 `FROZEN.md` 是纯追加**，**未改** 9C.2-A 的既有行。
+- 依据：diff 头为 `@@ -1465,3 +1465,51 @@`——**仅 3 行上下文 + 51 行新增**；
+  全部 `+` 行为追加的「## Step 9C.2」段，`-` 行为 **0**；无任何既有行被改写 / 删除。
+- 逐行核对：新增段位于 9C.1 段之后（尾部），未触碰 9C.1.1 / 9C.1.2 / 9C.1.3 的既有内容。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 测试（Z29，**无 GPU**）：`CompareStateTests` **13 通过 / 0 失败**；
+  `SessionViewModelTests` **10 通过 / 0 失败**；非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）
+  → **145 通过 / 0 失败**。
+- **外部无头探针**（`Avalonia.Headless` + `UseSkia`，真实位图
+  `outpaint_output.png` 2048×1280 为当前图 / `source_crop.png` 1020×543 为父图）→ **ALL PASS**：
+  - 根图：`CanCompare=false`、按钮禁用；
+  - 非根：`CanCompare=true`、按钮启用；
+  - 进入对比：`IsCompareMode=true`、叠加层 `IsVisible=true`；
+  - 分割线：`SetDivider(-5)`→0、`SetDivider(5)`→1、`0.33` 正常；
+  - **切工具（Crop）不退出对比**（方案 A）；
+  - **Esc 退出对比且不关窗**；再次 Esc 关窗；
+  - **渲染核对**：分割线左侧「当前图像矩形内、父图之外」像素为 **#161616 背景填充**，
+    父图区域为父图内容（非背景）——验证「简化对齐 + 背景填充」正确。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步不加载模型、不启动 Python、不占 GPU。
+
+### 遇到的问题与解决
+
+1. **Z8 超标**：`ImagePreview.axaml.cs` 加完对比逻辑后达 **668 行**（> 600）。
+   - 解决：拆 `ImagePreview.Compare.cs`（`partial class`），主文件回落 **523 行**，全部 < 600。
+2. **无头渲染中叠加层「空白」误判**：首版探针在 `x=1` 采样得到 `(0,0,0)`（透明），
+   误以为背景填充失败。
+   - 原因：叠加层**只**在当前图像矩形内绘制；矩形外的透明区域由下层 `AdvancedImageBox`
+     的画布背景呈现，故直接渲染叠加层时矩形外为透明。
+   - 解决：探针改为**扫描中心行首个非透明像素**（当前矩形左缘），在其内侧采样得到
+     `#161616`，与预期一致。
+3. **探针引用自包含 App 失败**：`NETSDK1151`（非自包含 exe 不能引用自包含 exe）。
+   - 解决：探针项目 `SelfContained=true` 对齐。
+
+### 遗留项
+
+- **outpaint 精确对齐**：需扩展冻结结构（IPC `result` 帧 + `EditNode`），**未做**；
+  登记于 `DOC/OPTIMIZATION.md` §7.5。当前为简化对齐（居中 + 背景填充）。
+- **UI 接线仅由外部（未入库）无头探针覆盖**；仓库内自动化只覆盖纯状态机
+  （`CompareStateTests`）与父图查找（`SessionViewModelTests`）。与 9C.1 / 9C.2 现状一致。
+- **分割线拖拽未做单元 / 无头输入模拟**：仅验证了状态钳制与渲染；指针拖拽分支为
+  薄封装（命中 → `SetDividerFromViewport`）。
+- 清空遮罩 / 撤销仍无真实数据源（9C.3 / 9C.4）；本步未动。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未修改** Contracts / `python/server/*` / `contracts/ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；
+  **未新增 NuGet**；**未改** 9C.2-A 的 `ChromeTitleBar` / `ChromeResizeBorders` / `ChromeBehavior`；
+  **未改** `EditorToolbar`（对比按钮在 `ImagePreview` 右侧槽）。
+
+---
+
+## [Step 9C.3] - 2026-09-23
+
+### 目标
+
+为主窗口添加**图片导入方式**：在底部输入区**上方**新增一行「图片导入 / 拖入」条——初始只有一个
+**虚线 `+` 框**；点击 `+` 打开文件选择器（多选）；可把图片文件**拖入**（多张 / 单张）；每导入
+一张在其后生成**虚线缩略图框**，末尾**始终保留 `+` 框**；悬停缩略图右上角显示 **`×`** 移除；
+**单张导入设为主图**（起始图），**多张仅收集**（供后续 `@` 引用，本步不做 `@`）。
+流程使用 light-rip（Medium）。
+
+### 做了什么
+
+- **纯逻辑**（`src/ZivAiEditor.UI/Editing/ImageImportList.cs`，无 Avalonia）：有序去重路径列表
+  （`OrdinalIgnoreCase`）、`AddRange`（一批只发一次 `Changed`）、`RemoveAt`、`Clear`；
+  `Changed` 事件携带 `CountBefore` / `CountAfter`。
+- **控件**（`src/ZivAiEditor.App/Controls/ImageImportBar.axaml(.cs)`）：虚线缩略图 + 末尾虚线 `+` 框；
+  缩略图**后台线程解码**（Z11）、剪枝 / 关窗时 `Dispose`（Z9）；悬停 `×`；事件 `AddRequested`
+  （picker 由 `MainWindow` 负责）与 `ImagesChanged`；`AddFiles` / `RemoveAt` / `Dispose`。
+  控件**不碰** `StorageProvider` / `DragDrop`。
+- **接线**（`src/ZivAiEditor.App/MainWindow.Import.cs`，`partial MainWindow`）：`+` → `PickImagesAsync`
+  （`OpenFilePickerAsync`，`AllowMultiple`，图片过滤）；**Window 级拖拽**（`DragDrop.SetAllowDrop` +
+  `DragOver` / `Drop`，经 `e.DataTransfer.TryGetFiles()`）；提升规则见下。
+- **会话**：`EditSession.ResetToRoot(string)`（`SetRoot` + `Nodes.Clear` + `CurrentNodeId = null`）；
+  `SessionViewModel.SetRootImage(string?)`（`ResetToRoot` + `RefreshHistory` + `RebuildContext`；空 = no-op）。
+- **`MainWindow.axaml`**：输入 Border 内 Grid 加一行（`RowDefinitions="Auto,Auto,Auto"`），
+  `PART_ImportBar` 在输入框上方。
+- **图标**：`TablerIcons.axaml` 追加 `IconPlus` / `IconClose`（Tabler, MIT）。
+- **测试**：`ImageImportListTests.cs` 11 例；`SessionViewModelTests` 增 2 例（`SetRootImage`）。
+- **文档**：本段 + `ACCEPTANCE.MD` Step 9C.3 + `FROZEN.md` 尾部只增段。
+
+### 关键决策（含 light-rip 预审的 P0/P1 修复）
+
+1. **不复用 `ApplyRequest`（预审 P0）**：`ApplyRequest` 是「启动 / 第二实例交接」接缝，会 `SetRoot`
+   但**不清节点**，导入时复用会污染会话 DAG。改用窄接口 `SessionViewModel.SetRootImage`——
+   明确语义「**变更起始图即重置会话**」（清空 `Nodes` / `CurrentNodeId`）。
+2. **提升规则（预审 P1）**：仅当 `CountBefore == 0 && CountAfter == 1`（由**添加**把列表从空变为
+   恰好一张）才设主图；**移除不会**重新提升（否则 2→1 移除会静默重置会话）。移除到 0 **不改变**
+   已生效 root（缩略图列表与会话 root 解耦）。
+3. **picker 归属（预审 P1）**：控件只发 `AddRequested`；`MainWindow` 用现有 `StorageProvider` 模式
+   打开选择器（对齐 `PickFolderAsync`），避免在 `UserControl` 里找 `TopLevel`。
+4. **拖拽归属（预审 P1）**：OS 拖拽挂在 **`Window` 级**（自定义 chrome 下更稳），转发给 `bar.AddFiles`。
+5. **去重**：`OrdinalIgnoreCase`（Windows 路径大小写不敏感）。
+6. **Z8**：`MainWindow.axaml.cs` 加导入逻辑后达 660 行 → 拆 `MainWindow.Import.cs`（partial），
+   主文件回落 **551 行**。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 测试（Z29，**无 GPU**）：`ImageImportListTests` **11 通过 / 0 失败**；
+  `SessionViewModelTests` **12 通过 / 0 失败**；非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）
+  → **158 通过 / 0 失败**。
+- **外部无头探针**（`Avalonia.Headless` + `UseSkia`，真实 `MainWindow`）→ **ALL PASS**（17 项）：
+  初始恰好 1 个 `+` 框；导入 1 张 → `session.RootImagePath` 被设为该图、1 缩略图 + 末尾 `+` 框；
+  再导入 1 张 → **不改主图**、2 缩略图；**2→1 移除不重置会话（P1 修复）**；移除到 0 → root 保留、
+  只剩 `+` 框。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步不加载模型。
+
+### 遇到的问题与解决
+
+1. **Avalonia 12 拖拽 API 变更**：`DragEventArgs.Data` 已不存在；改为 `DragEventArgs.DataTransfer`
+   （`IDataTransfer`）+ `DataTransferExtensions.TryGetFiles()`（`IStorageItem[]?`）。经查 Avalonia
+   12 源码确认。
+2. **`Path` 命名冲突（CS0104）**：`Avalonia.Controls.Shapes.Path` vs `System.IO.Path` →
+   `using Path = Avalonia.Controls.Shapes.Path;`。
+3. **Z8 超标**：`MainWindow.axaml.cs` 660 → 拆 partial `MainWindow.Import.cs` → 551。
+4. **顺带修复 9C.2-C 的 P1**（post-work review 发现）：`ImagePreview.SetCompareSource` 的
+   早退会**永久缓存「父图缺失」结果**；改为「同路径且（已解码 / 路径空 / 文件仍不存在）才跳过」，
+   使「同路径但文件随后出现」能重试加载。
+
+### 遗留项
+
+- **`@` 引用未实现**：多张导入仅收集为列表；`@` 提示词引用规则属后续 Step。
+- **OS 真实拖拽 / 原生文件选择器仅手动覆盖**：无头探针无法模拟真实 OS 拖放与原生 picker；
+  仓库内自动化覆盖纯逻辑（`ImageImportListTests`）与会话语义（`SessionViewModelTests`）。
+- **Window 级 `AllowDrop` 较激进**：拖非图片内容经过窗口（含输入框）时 `DragEffects=None`，
+  可能抑制 `TextBox` 自身的文本拖放；如需要可收窄到导入行。待手动确认。
+- **提升即重置会话**：启动带 root 时导入单张会重置会话（设计契约），状态栏提示未额外告警。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+-   **未修改** Contracts / `python/server/*` / `contracts/ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；
+  **未新增 NuGet**；**未改** chrome 三控件 / `EditorToolbar` / `CompareState` 逻辑。
+
+### Step 9C.3 收尾：改为网页聊天式附件条（2026-09-23）
+
+- **用户反馈**：常驻的虚线 `+` 框导入行「不够易用」，要求改为**网页 DeepSeek / ChatGPT 那种
+  直接拖入对话框、上方弹出图片**的模式。
+- **改造**：
+  1. **去掉常驻 `+` 框**：`ImageImportBar` 不再自带加号入口。
+  2. **附件条默认隐藏**：`PART_Scroll` 初始 `IsVisible=False`，仅当**有附件**时弹出
+     （在输入框**正上方**）；移除到空后**自动收起**。
+  3. **输入行新增「图片」按钮**（`PART_BtnAddImage`，Tabler `photo` 图标，输入框与发送之间）
+     → 点击打开文件选择器（多选）；拖入仍走 **Window 级 `DragDrop`**。
+  4. 缩略图仍为**虚线框**，悬停显示 **`×`** 移除；**单张设主图**规则不变。
+- **`ImageImportBar`**：移除 `AddRequested` 事件与加号构建；新增 `HasImages` / `Clear`；
+  `Rebuild` 依据 `Count > 0` 控制 `PART_Scroll.IsVisible`。
+- **图标**：`TablerIcons.axaml` 追加 `IconPhoto`（Tabler, MIT）。
+- **验证**：`dotnet build` **0/0**；非 GPU **158 通过 / 0 失败**；外部无头探针更新为
+  「初始无缩略图 + 附件条隐藏 / 导入后弹出 / 移除到空自动收起」→ **ALL PASS**。
+- **注意**：重建前需**先关闭正在运行的 `ZivAiEditor.App`**（exe 锁定输出 dll，否则 `MSB3027`）。
+
+### Step 9C.3 收尾 2：标题栏侧栏按钮 + 输入区圆角化（2026-09-23）
+
+- **用户裁决**：① 窗体标题栏加一个「侧栏」图标按钮（方框 + 左竖条）切换**历史节点栏**显隐；
+  ② 底部输入区改为**圆角、居中、不拉通**，圆角与窗体 `CornerRadius=8` **统一**；
+  ③ 按钮风格走 **opencode**（圆角方形灰底 + ↑ 箭头）。
+- **改动**：
+  1. `MainWindow.axaml`：`LeftContent` 改为 `StackPanel[ 侧栏按钮 + 标题文字 ]`
+     （`PART_BtnToggleSidebar`，`IconSidebar`）；输入区外层 `Grid MaxWidth="760"`（`Stretch` +
+     `MaxWidth` → **居中且不拉通**）；`PART_Input` 加 `CornerRadius="8"`；历史节点 `Border`
+     命名 `PART_HistoryPane`、外层列改 `Auto,*`；发送按钮改 `Button.ocSend` + `Path.sendIcon`
+     （`IconArrowUp`），图片按钮改 `Button.oc`。
+  2. `MainWindow.axaml.cs`：`InitChat` 接线侧栏按钮 → 切换 `PART_HistoryPane.IsVisible`。
+  3. `ChromeStyles.axaml`：新增 `Button.oc` / `Button.ocSend` / `Path.sendIcon`（opencode 风格：
+     40×40、圆角 8、发送灰底 `#5A5A5A` + 深色箭头、禁用 `Opacity 0.45`）。
+  4. `TablerIcons.axaml`：新增 `IconSidebar` / `IconArrowUp`（Tabler, MIT）。
+- **验证**：`dotnet build` **0/0**；非 GPU **158 通过 / 0 失败**；外部无头探针 **25 项 ALL PASS**
+  （含 `PART_Input` 圆角=8、发送按钮 `ocSend` 样式、侧栏按钮切换历史栏显隐往返）。
+
+### Step 9C.3 收尾 3：侧栏按钮移到右上角（2026-09-23）
+
+- **用户反馈**：侧栏切换按钮应放**右上角**（窗口按钮左侧），不在左上角标题旁。
+- **改动**：`MainWindow.axaml` 把 `PART_BtnToggleSidebar` 从 `ChromeTitleBar.LeftContent`
+  移到 **`ChromeTitleBar.RightContent`**（渲染在最小化 / 最大化 / 关闭之前）；左槽恢复为仅标题文字。
+- **验证**：`dotnet build` **0/0**；外部无头探针 **25 项 ALL PASS**（`PART_BtnToggleSidebar`
+  经 `FindControl` 仍可解析并切换历史栏显隐）。
+
+### Step 9C.3 收尾 4：修复侧栏按钮点击无效（User 角色）（2026-09-23）
+
+- **现象**：右上角侧栏按钮**点击无反应**，历史节点栏隐藏不了。
+- **原因**：按钮位于自绘标题栏（`WindowDecorations="None"` + 扩展客户区）内，OS 的 caption
+  命中测试把标题栏区域的点击当作「拖动/双击最大化」吞掉；必须把按钮标记为
+  `WindowDecorationsElementRole.User` 才被视为客户内容（与 `EditorToolbar` / `ImagePreview`
+  的按钮同做法）。此前只接线了 `Click`，**漏设角色**。
+- **修复**：`MainWindow.axaml.cs` 的 `InitChat` 对 `PART_BtnToggleSidebar` 调用
+  `WindowDecorationProperties.SetElementRole(..., WindowDecorationsElementRole.User)`
+  （`WindowDecorationProperties` 在 `Avalonia.Controls.Chrome`，`WindowDecorationsElementRole`
+  在 `Avalonia.Input`）。
+- **探针盲区教训**：无头探针用 `RaiseEvent(ClickEvent)` **直接触发** Click，绕过了 OS 命中测试，
+  故此前显示 PASS 而真实点击失败。已在探针补 **`GetElementRole == User`** 断言堵住该盲区。
+- **验证**：`dotnet build` **0/0**；无头探针 **26 项 ALL PASS**（新增角色断言）。
+
+### Step 9C.3 收尾 5：历史栏全高、输入区只在右列（2026-09-23）
+
+- **用户反馈**：截图标注「历史节点栏**没有拉通**（到底部）」「输入区**错误拉通**（横跨了历史栏
+  下方）」。要求：**历史栏全高**（标题栏 → 窗口底部），输入区**只在右侧主区**、不横跨历史栏。
+- **改动**：`MainWindow.axaml` 的 `Body` 由 `DockPanel[Bottom 输入区(全宽) + Grid{历史,聊天}]`
+  改为 **`Grid ColumnDefinitions="Auto,*"`**：`PART_HistoryPane` 占左列（**全高**），右列内再用
+  `DockPanel[Bottom 输入区 + 聊天 ScrollViewer]`。历史栏因此从标题栏直通窗口底部；输入区
+  `MaxWidth=760` 居中于**主区**而非整窗。
+- **验证**：`dotnet build` **0/0**；无头探针 **26 项 ALL PASS**（侧栏切换 / 输入框圆角 / 角色）。
+
+### Step 9C.3 收尾 6：输入框宽度 75% + 高度 2 行（2026-09-23）
+
+- **用户反馈**：输入框太长，缩至**现在的 75%**；高度变 **2 行**。
+- **改动**：`MainWindow.axaml` 输入区 `Grid MaxWidth` **760 → 570**（≈75%）；`PART_Input`
+  `MinHeight` **40 → 64**（约 2 行）、`VerticalContentAlignment="Top"`（文字顶部对齐，呈多行框观感）。
+- **验证**：`dotnet build` **0/0**。
+
+### Step 9C.3 收尾 7：输入框容器化 + 状态移入聊天流（2026-09-23）
+
+- **用户反馈**：① 输入框做成 opencode / DeepSeek 那种**整体圆角容器**（上方文本、下方工具行）；
+  ② **不要模型名**；③ 「就绪」这类状态**放进聊天窗、跟随聊天滚动**，跟在「系统 / AI」角色行后面。
+- **改动**：
+  1. `MainWindow.axaml`：输入区改为**单层圆角容器** `Border`（`PART_InputBox`，`#1E1E1E` +
+     `#333` 边框 + `CornerRadius=12`），内部 `Grid[ 上：无边框透明 `PART_Input`（2 行高）；
+     下：工具行 ]`；工具行只留 **`+` 添加图片**（`Button.oc`）与**发送**（`Button.ocSend`）。
+     去掉模型徽标（sparkle / 模型名 / chevron）与底部固定 `PART_Status`。
+  2. `MainWindow.axaml.cs`：`RenderChat` 末尾追加**状态行**（`BuildStatusRow`：「系统」标题 +
+     状态文本），`SetStatus` 改为更新该行 —— 状态随聊天流滚动，不再固定在输入框下方。
+  3. `TablerIcons.axaml`：新增 `IconSparkle` / `IconChevronDown`（暂未使用，留后续模型选择器）；
+     `ChromeStyles.axaml`：新增 `Path.modelIcon` / `Path.chevronIcon`。
+- **验证**：`dotnet build` **0/0**；非 GPU **158 通过 / 0 失败**；无头探针 **ALL PASS**
+  （`PART_InputBox` 圆角=12、发送 `ocSend`、侧栏切换 + `User` 角色）。
+
+### Step 9C.3 收尾 8：去输入框内框 / 按钮缩至 60%（2026-09-23）
+
+- **用户反馈**：输入框内的**黑底与内框多余**（TextBox 模板默认背景 / 边框）；底部按钮**太大**，
+  缩至 **60%**。
+- **改动**：
+  1. `ChromeStyles.axaml` 新增 `TextBox.plainInput`（含模板部件
+     `Border#PART_BorderElement` 的 `:pointerover` / `:focus` 覆盖）→ 输入框**完全透明无边框**，
+     只保留外层圆角容器。`MainWindow.axaml` 的 `PART_Input` 改用该类。
+  2. 按钮尺寸 **40 → 24**（≈60%）、`CornerRadius` **8 → 6**：`Button.oc` / `Button.ocSend`；
+     发送箭头 `Path.sendIcon` **16 → 11**，`+` 图标内联 **12**。
+- **验证**：`dotnet build` **0/0**；无头探针 **ALL PASS**。
+
+### Step 9C.3 收尾 9：分辨率选择器 + 状态并入生成中 + 对比对齐（2026-09-23）
+
+- **用户裁决**：① 做「三档 + 自定义」分辨率选择 UI，放输入框 **`+` 号右边**；② 去掉「系统 就绪」
+  状态行，状态**并入「生成中」**消息；③ 划像对比父图要用**进管线前重缩放后的大小**（= 生成尺寸），
+  否则对不齐。
+- **改动**：
+  1. 新增 `Controls/ResolutionPicker.axaml(.cs)`：sparkle + 当前 tier（快速 1024 / 均衡 1536 /
+     高质 2048 / 自定义）+ chevron；`MenuFlyout` 选 tier；`Attach(ModelProfile)` 从 `TierSides`
+     取长边；默认 **Balanced**；`Tier` + `SelectionChanged`。
+  2. `MainWindow.axaml`：工具行改 `Auto,Auto,*,Auto`，`+` 右边放 `PART_ResolutionPicker`。
+  3. `MainWindow` 注入 `IModelProfileRegistry`（默认 `new ModelProfileRegistry()`），
+     `App.axaml.cs` 传 `AppContext.ModelProfiles`；`InitChat` 里 `Attach(_modelProfiles.Default)`。
+  4. 状态：删除聊天流末尾「系统」行（`MainWindow.Status.cs` 改为更新 pending 文本
+     `_pendingTextLabel`）；`BuildMessage` 对 pending 保存文本引用；`SetBusy` 不再写「就绪」。
+  5. 对比：`CompareOverlay.Render` 去掉「居中 + 背景填充」，改为父图**铺满当前图矩形**
+     （`DrawImage(parent, currentRect)`）。
+- **调查结论（缩放线路）**：C# 侧**无实际 resize 代码**，只传 `ResolutionPolicy`；实际按目标
+  尺寸处理在 Python，**输出 = 目标尺寸**。故「进管线前（重缩放后）尺寸 = 生成尺寸」，对比用当前
+  图矩形即对齐。
+- **验证**：`dotnet build` **0/0**；非 GPU **158 通过**；`ImportProbe`（含 picker 默认 Balanced）
+  **ALL PASS**；`CompareProbe`（渲染断言更新为父图铺满）**ALL PASS**。
+- **遗留**：分辨率选择器**暂未接入编辑请求**（仅 UI + 选择状态）；`自定义` tier 暂不弹宽高输入。
+
+### Step 9C.3 收尾 10：完成耗时 + 尺寸信息（2026-09-23）
+
+- **用户裁决**：① 聊天流里生成完成的「完成」改为 **「XX.X 秒 完成」**；② 大图预览**右下角**
+  加**图片大小**信息（样式同右上角缩放比）；③ 划像对比时**左下角**加**原图尺寸**。
+- **改动**：
+  1. `SessionViewModel.SubmitAsync`：`Stopwatch` 计时，完成消息文本改为
+     `$"{elapsed.TotalSeconds:F1}秒 完成"`。
+  2. `ImagePreview.axaml(.cs)`：新增右下角 `PART_SizeBadge` / `PART_SizeText`（显示
+     `宽 × 高`，与右上角缩放 badge 同样式：`ZivOverlayBrush` + 圆角 4 + 11px）；加载成功显示、
+     清空隐藏。
+  3. `ImagePreview.Compare.cs`：新增左下角 `PART_CompareInfo` / `PART_CompareInfoText`，
+     父图解码成功后显示 `原图 宽 × 高`，仅**对比模式**下可见（`OnCompareStateChanged` 控制）。
+- **验证**：`dotnet build` **0/0**；非 GPU **158 通过**；`CompareProbe` / `ImportProbe` **ALL PASS**。
+
+### Step 9C.3 收尾 11：分辨率选择生效 + 去图标（2026-09-23）
+
+- **用户反馈**：① 分辨率下拉**选择没生效**；② 下拉的 sparkle 图标**太丑、太大、未对齐文字**。
+- **改动**：
+  1. **接线生效**：`SessionViewModel` 新增 `ResolutionPolicy? Resolution`；`SubmitAsync` 在 plan
+     无自带分辨率时（自然语言编辑）用其重建 `EditPlan.Resolution`。`MainWindow` 的
+     `ResolutionPicker.SelectionChanged` → `ApplyResolution`：`ResolutionResolver.FromTier(tier,
+     profile)`（`Custom` → `null` 走后端默认）。初始 `Balanced` 即写入。
+  2. **去图标**：`ResolutionPicker.axaml` 去掉 sparkle（`Path.modelIcon`），只留 tier 文字 +
+     `chevronIcon`（内联缩到 10×10，居中）。
+- **验证**：`dotnet build` **0/0**；非 GPU **158 通过**；`ImportProbe` **ALL PASS**。
+- **遗留**：`Custom` 档仍无宽高输入（选它 = 用后端默认）。
+
+### Step 9C.3 收尾 12：修正下拉下箭头 + 恢复 sparkle（2026-09-23）
+
+- **用户澄清**：之前说的「图标太丑又大又没对齐」指的是下拉的**下箭头（chevron）**，不是 sparkle
+  （参考图 DeepSeek 保留了 sparkle）。
+- **改动**：
+  1. `IconSparkle` 换回 **Tabler `sparkles`**（三颗星）几何；`ResolutionPicker` 恢复 sparkle 图标。
+  2. `Path.chevronIcon` 调小 / 调细：**12 → 11**、`StrokeThickness` **1.4 → 1.1**、圆头圆角、
+     `VerticalAlignment=Center`；去掉 `ResolutionPicker` 里 chevron 的内联尺寸。
+- **验证**：`dotnet build` **0/0**。
+
+### Step 9C.3 收尾 13：下箭头缩至 65% + 下移 4px（2026-09-23）
+
+- **用户裁决**：下拉下箭头**缩小到 65%**、**下移 4px**。
+- **改动**：`Path.chevronIcon` **11 → 7**（≈65%）；`ResolutionPicker` 的 chevron 加
+  `TranslateTransform Y="4"` 下移。
+- **踩坑**：`RenderTransform="translate(0,4)"` 内联字符串**运行时崩溃**
+  （退出码 `0xE0434352`），XAML 编译期却通过；改用**元素式** `<TranslateTransform Y="4"/>` 正常。
+- **验证**：`dotnet build` **0/0**；exe 启动正常（`HasExited=False`）。

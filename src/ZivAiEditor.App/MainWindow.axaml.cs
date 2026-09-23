@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Chrome;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -13,7 +14,9 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using ZivAiEditor.Agent;
 using ZivAiEditor.App.Controls;
+using ZivAiEditor.Backend;
 using ZivAiEditor.Contracts.Execution;
+using ZivAiEditor.Contracts.Models;
 using ZivAiEditor.UI;
 using ZivAiEditor.UI.Chat;
 
@@ -37,6 +40,7 @@ public partial class MainWindow : Window
 
     private SessionViewModel _vm = null!;
     private ISessionExporter _exporter = null!;
+    private IModelProfileRegistry _modelProfiles = new ModelProfileRegistry();
     private ImagePreview? _imagePreview;
     private CancellationTokenSource? _cts;
     private bool _closing;
@@ -59,9 +63,15 @@ public partial class MainWindow : Window
         ICommandParser commandParser,
         IExecutor executor,
         ISessionExporter sessionExporter,
-        LaunchOptions? launchOptions = null)
+        LaunchOptions? launchOptions = null,
+        IModelProfileRegistry? modelProfiles = null)
     {
         _exporter = sessionExporter ?? throw new ArgumentNullException(nameof(sessionExporter));
+        if (modelProfiles is not null)
+        {
+            _modelProfiles = modelProfiles;
+        }
+
         _vm = new SessionViewModel(session, commandParser, executor);
 
         InitializeComponent();
@@ -71,6 +81,7 @@ public partial class MainWindow : Window
         }
 
         InitChat();
+        InitImport();
 
         _vm.Messages.CollectionChanged += (_, _) => RenderChat();
         _vm.History.CollectionChanged += (_, _) => RenderHistory();
@@ -82,7 +93,11 @@ public partial class MainWindow : Window
         }
 
         Closing += OnClosing;
-        Closed += (_, _) => DisposeBitmaps();
+        Closed += (_, _) =>
+        {
+            DisposeBitmaps();
+            _importBar?.Dispose();
+        };
     }
 
     /// <summary>
@@ -135,6 +150,32 @@ public partial class MainWindow : Window
         {
             history.SelectionChanged += OnHistorySelectionChanged;
         }
+
+        // Title-bar sidebar button toggles the history pane (Step 9C.3 UI pass).
+        // Marked "User" so the OS treats it as client content inside the caption
+        // (otherwise the title-bar hit-test swallows the click).
+        if (this.FindControl<Button>("PART_BtnToggleSidebar") is { } toggleSidebar
+            && this.FindControl<Border>("PART_HistoryPane") is { } historyPane)
+        {
+            WindowDecorationProperties.SetElementRole(toggleSidebar, WindowDecorationsElementRole.User);
+            toggleSidebar.Click += (_, _) => historyPane.IsVisible = !historyPane.IsVisible;
+        }
+
+        // Resolution tier picker (Step 6.5 logic, first UI): selection feeds the plan.
+        if (this.FindControl<ResolutionPicker>("PART_ResolutionPicker") is { } picker)
+        {
+            picker.Attach(_modelProfiles.Default);
+            picker.SelectionChanged += (_, _) => ApplyResolution(picker);
+            ApplyResolution(picker);
+        }
+    }
+
+    /// <summary>Maps the picker's tier to a resolution policy on the session view model.</summary>
+    private void ApplyResolution(ResolutionPicker picker)
+    {
+        _vm.Resolution = picker.Tier == ResolutionTier.Custom
+            ? null
+            : ResolutionResolver.FromTier(picker.Tier, _modelProfiles.Default);
     }
 
     private TextBox? FindInput() => this.FindControl<TextBox>("PART_Input");
@@ -260,6 +301,10 @@ public partial class MainWindow : Window
         }
 
         _imagePreview.LoadImage(path);
+
+        // Swipe-compare reference: the parent node's output (Step 9C.2-C); null for
+        // the root image, which disables the compare button.
+        _imagePreview.SetCompareSource(_vm.GetParentImagePath(path));
         _imagePreview.Activate();
     }
 
@@ -281,12 +326,20 @@ public partial class MainWindow : Window
 
         if (!string.IsNullOrWhiteSpace(message.Text))
         {
-            panel.Children.Add(new TextBlock
+            var textBlock = new TextBlock
             {
                 Text = message.Text,
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = message.IsError ? ErrorBrush : TextBrush,
-            });
+            };
+
+            // Progress / status is routed into the in-flight "生成中" bubble.
+            if (message.IsPending)
+            {
+                _pendingTextLabel = textBlock;
+            }
+
+            panel.Children.Add(textBlock);
         }
 
         if (message.ImagePath is { Length: > 0 } path)
@@ -412,14 +465,6 @@ public partial class MainWindow : Window
         }
 
         SetStatus(busy ? "处理中…" : "就绪");
-    }
-
-    private void SetStatus(string text)
-    {
-        if (this.FindControl<TextBlock>("PART_Status") is { } status)
-        {
-            status.Text = text;
-        }
     }
 
     private void ScrollToEnd()

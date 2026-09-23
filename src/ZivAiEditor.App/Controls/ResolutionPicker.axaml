@@ -1,0 +1,27 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ZivAiEditor.App.Controls.ResolutionPicker">
+  <!-- Resolution tier picker (Step 6.5 logic, first UI): Fast / Balanced / HighQuality /
+       Custom. Shows the active tier + its long edge; the menu comes from the model
+       profile's TierSides. Sits to the right of the "+" in the input tool row. -->
+  <Button x:Name="PART_Btn"
+          Background="Transparent"
+          BorderThickness="0"
+          Padding="6,0"
+          Height="24"
+          CornerRadius="6"
+          Cursor="Hand">
+    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+      <Path Classes="modelIcon" Data="{StaticResource IconSparkle}" />
+      <TextBlock x:Name="PART_Label"
+                 FontSize="12"
+                 VerticalAlignment="Center"
+                 Foreground="{StaticResource ZivTextSecondaryBrush}" />
+      <Path Classes="chevronIcon" Data="{StaticResource IconChevronDown}">
+        <Path.RenderTransform>
+          <TranslateTransform Y="2" />
+        </Path.RenderTransform>
+      </Path>
+    </StackPanel>
+  </Button>
+</UserControl>
