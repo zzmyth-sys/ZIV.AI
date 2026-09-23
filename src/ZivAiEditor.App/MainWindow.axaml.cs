@@ -7,6 +7,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Chrome;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -140,14 +141,20 @@ public partial class MainWindow : Window
 
         if (FindInput() is { } input)
         {
-            input.KeyDown += (_, e) =>
-            {
-                if (e.Key == Key.Enter)
+            // Multi-line input: Enter sends, Shift+Enter inserts a newline. Intercept on
+            // the TUNNEL phase, because with AcceptsReturn the TextBox's own class handler
+            // consumes Enter (inserting a newline) before the bubbling KeyDown reaches us.
+            input.AddHandler(
+                InputElement.KeyDownEvent,
+                (_, e) =>
                 {
-                    e.Handled = true;
-                    _ = SubmitAsync();
-                }
-            };
+                    if (e.Key == Key.Enter && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+                    {
+                        e.Handled = true;
+                        _ = SubmitAsync();
+                    }
+                },
+                RoutingStrategies.Tunnel);
         }
 
         if (this.FindControl<ListBox>("PART_HistoryList") is { } history)

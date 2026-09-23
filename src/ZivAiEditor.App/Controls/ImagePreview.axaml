@@ -4,6 +4,7 @@
         xmlns:c="clr-namespace:ZivAiEditor.App.Controls"
         x:Class="ZivAiEditor.App.Controls.ImagePreview"
         Title="ZIV.AI - 大图预览"
+        Icon="avares://ZivAiEditor.App/Assets/logo.png"
         Width="900"
         Height="640"
         MinWidth="360"

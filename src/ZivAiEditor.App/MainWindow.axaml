@@ -3,6 +3,7 @@
         xmlns:c="clr-namespace:ZivAiEditor.App.Controls"
         x:Class="ZivAiEditor.App.MainWindow"
         Title="ZIV.AI Editor"
+        Icon="avares://ZivAiEditor.App/Assets/logo.png"
         Width="1040"
         Height="700"
         MinWidth="760"
@@ -23,18 +24,22 @@
   <c:ChromeTitleBar x:Name="PART_Chrome">
     <c:ChromeTitleBar.LeftContent>
       <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-        <Button x:Name="PART_BtnNewProject" Classes="tool" ToolTip.Tip="新建项目">
+        <Image Source="avares://ZivAiEditor.App/Assets/logo.png"
+               Width="20"
+               Height="20"
+               VerticalAlignment="Center" />
+        <TextBlock Text="ZIV.AI Editor"
+                   Margin="6,0,0,0"
+                   VerticalAlignment="Center"
+                   Foreground="{StaticResource ZivTextBrush}"
+                   FontWeight="SemiBold"
+                   TextTrimming="CharacterEllipsis" />
+        <Button x:Name="PART_BtnNewProject" Classes="tool" Margin="8,0,0,0" ToolTip.Tip="新建项目">
           <Path Classes="toolIcon" Data="{StaticResource IconPlus}" />
         </Button>
         <Button x:Name="PART_BtnSave" Classes="tool" ToolTip.Tip="保存项目 (Ctrl+S)">
           <Path Classes="toolIcon" Data="{StaticResource IconSave}" />
         </Button>
-        <TextBlock Text="ZIV.AI Editor"
-                   Margin="8,0,0,0"
-                   VerticalAlignment="Center"
-                   Foreground="{StaticResource ZivTextBrush}"
-                   FontWeight="SemiBold"
-                   TextTrimming="CharacterEllipsis" />
       </StackPanel>
     </c:ChromeTitleBar.LeftContent>
     <c:ChromeTitleBar.RightContent>
@@ -98,9 +103,11 @@
                            Grid.Row="0"
                            Classes="plainInput"
                            MinHeight="56"
-                           AcceptsReturn="False"
+                           MaxHeight="180"
+                           AcceptsReturn="True"
+                           TextWrapping="Wrap"
                            VerticalContentAlignment="Top"
-                           PlaceholderText="输入编辑指令，/ 命令，@ 添加上下文…"
+                           PlaceholderText="输入编辑指令（Enter 发送，Shift+Enter 换行）…"
                            Foreground="{StaticResource ZivTextBrush}" />
                   <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto" Margin="0,6,0,0">
                     <Button x:Name="PART_BtnAddImage"

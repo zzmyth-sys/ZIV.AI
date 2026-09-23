@@ -14,6 +14,7 @@
     <PublishAot>true</PublishAot>
     <PublishSingleFile Condition="'$(PublishAot)' != 'true'">true</PublishSingleFile>
     <SelfContained>true</SelfContained>
+    <ApplicationIcon>Assets\logo.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -32,6 +33,11 @@
   <ItemGroup>
     <None Include="..\..\settings.ini" Link="settings.ini" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Template\commands.json" Link="Template\commands.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- App logo (window / title-bar icon). The .ico is the Win32 exe icon. -->
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\logo.png" />
   </ItemGroup>
 
   <!-- Step 9A: let the test project exercise the App-layer single-instance guard

@@ -1,6 +1,17 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
+  <!-- All buttons: center their content (text or icon). Class-specific styles below
+       refine size / colors but keep the same centering. -->
+  <Style Selector="Button">
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="ToggleButton">
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
   <!-- Shared self-drawn window chrome (Step 9C.2): title-bar buttons and window icons,
        moved verbatim out of MainWindow / ImagePreview so both windows share one copy. -->
   <Style Selector="Button.tb">
