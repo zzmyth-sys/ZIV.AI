@@ -5,14 +5,15 @@ using ZivAiEditor.UI.Imaging;
 namespace ZivAiEditor.Tests;
 
 /// <summary>
-/// Step 9C.4 image-crop tests (ZIV.Imaging decode / encode + Skia subset, file IO only,
-/// no GPU). Validates the output-path rule, collision avoidance, and that the crop
-/// writes a new file of the right size without touching the source (Z24).
+/// Step 9C.6-B2 crop temp-file tests: program-directory cache path, per-node overwrite,
+/// and robust cleanup. File IO only, no GPU.
 /// </summary>
 public class ImageCropperTests
 {
     private static string NewTempDir()
         => Path.Combine(Path.GetTempPath(), "zivai_crop_" + Guid.NewGuid().ToString("N"));
+
+    private static string NewSessionId() => Guid.NewGuid().ToString("N");
 
     private static string WritePng(string directory, string name, int width, int height)
     {
@@ -29,65 +30,29 @@ public class ImageCropperTests
     }
 
     [Fact]
-    public void ResolveOutputPath_Uses_Source_Directory_And_Crop_Suffix()
+    public void ResolveCropPath_Is_Under_Program_Cache()
     {
-        var dir = NewTempDir();
-        try
-        {
-            var source = Path.Combine(dir, "photo.png");
-            var now = new DateTimeOffset(2026, 9, 23, 14, 5, 6, TimeSpan.Zero);
+        var path = ImageCropper.ResolveCropPath("s1", "n1");
 
-            var output = ImageCropper.ResolveOutputPath(source, now);
-
-            Assert.Equal(dir, Path.GetDirectoryName(output));
-            Assert.Equal("photo_crop_20260923_140506.png", Path.GetFileName(output));
-        }
-        finally
-        {
-            Cleanup(dir);
-        }
+        Assert.Equal(
+            Path.Combine(ImageCropper.CropsRootDirectory, "s1", "n1.png"),
+            path);
+        Assert.StartsWith(ImageCropper.CropsRootDirectory, path, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void ResolveOutputPath_Avoids_Collisions()
+    public async Task CropAsync_Writes_To_Cache_And_Leaves_Source()
     {
         var dir = NewTempDir();
-        try
-        {
-            var source = Path.Combine(dir, "photo.png");
-            var now = new DateTimeOffset(2026, 9, 23, 14, 5, 6, TimeSpan.Zero);
-
-            var first = ImageCropper.ResolveOutputPath(source, now);
-            File.WriteAllBytes(first, new byte[] { 1 });
-
-            var second = ImageCropper.ResolveOutputPath(source, now);
-            File.WriteAllBytes(second, new byte[] { 1 });
-
-            var third = ImageCropper.ResolveOutputPath(source, now);
-
-            Assert.Equal("photo_crop_20260923_140506.png", Path.GetFileName(first));
-            Assert.Equal("photo_crop_20260923_140506_1.png", Path.GetFileName(second));
-            Assert.Equal("photo_crop_20260923_140506_2.png", Path.GetFileName(third));
-        }
-        finally
-        {
-            Cleanup(dir);
-        }
-    }
-
-    [Fact]
-    public async Task CropAsync_Writes_New_Png_With_Correct_Size_And_Leaves_Source()
-    {
-        var dir = NewTempDir();
+        var session = NewSessionId();
         try
         {
             var source = WritePng(dir, "photo.png", 100, 80);
             var before = await File.ReadAllBytesAsync(source);
 
-            var output = await ImageCropper.CropAsync(source, 10, 10, 50, 40);
+            var output = await ImageCropper.CropAsync(session, "n1", source, 10, 10, 50, 40);
 
-            Assert.NotNull(output);
-            Assert.NotEqual(source, output);
+            Assert.Equal(ImageCropper.ResolveCropPath(session, "n1"), output);
             Assert.True(File.Exists(output));
 
             using var decoded = SKBitmap.Decode(output);
@@ -95,11 +60,39 @@ public class ImageCropperTests
             Assert.Equal(40, decoded.Height);
 
             // Source bytes are byte-for-byte unchanged (Z24).
-            var after = await File.ReadAllBytesAsync(source);
-            Assert.Equal(before, after);
+            Assert.Equal(before, await File.ReadAllBytesAsync(source));
         }
         finally
         {
+            ImageCropper.CleanupSession(session);
+            Cleanup(dir);
+        }
+    }
+
+    [Fact]
+    public async Task CropAsync_Recrop_Overwrites_The_Same_File()
+    {
+        var dir = NewTempDir();
+        var session = NewSessionId();
+        try
+        {
+            var source = WritePng(dir, "photo.png", 100, 80);
+
+            var first = await ImageCropper.CropAsync(session, "n1", source, 10, 10, 50, 40);
+            var second = await ImageCropper.CropAsync(session, "n1", source, 0, 0, 30, 20);
+
+            Assert.Equal(first, second); // same per-node path — overwritten, not accumulated
+
+            var sessionDir = Path.Combine(ImageCropper.CropsRootDirectory, session);
+            Assert.Single(Directory.GetFiles(sessionDir)); // exactly one file for the node
+
+            using var decoded = SKBitmap.Decode(second);
+            Assert.Equal(30, decoded.Width);
+            Assert.Equal(20, decoded.Height);
+        }
+        finally
+        {
+            ImageCropper.CleanupSession(session);
             Cleanup(dir);
         }
     }
@@ -108,12 +101,12 @@ public class ImageCropperTests
     public async Task CropAsync_Clamps_Rectangle_To_Image()
     {
         var dir = NewTempDir();
+        var session = NewSessionId();
         try
         {
             var source = WritePng(dir, "photo.png", 40, 30);
 
-            // Request extends past the right / bottom edges; the result is clipped.
-            var output = await ImageCropper.CropAsync(source, 20, 10, 100, 100);
+            var output = await ImageCropper.CropAsync(session, "n1", source, 20, 10, 100, 100);
 
             Assert.NotNull(output);
             using var decoded = SKBitmap.Decode(output);
@@ -122,6 +115,7 @@ public class ImageCropperTests
         }
         finally
         {
+            ImageCropper.CleanupSession(session);
             Cleanup(dir);
         }
     }
@@ -130,13 +124,15 @@ public class ImageCropperTests
     public async Task CropAsync_Missing_Source_Returns_Null()
     {
         var dir = NewTempDir();
+        var session = NewSessionId();
         try
         {
             var missing = Path.Combine(dir, "nope.png");
-            Assert.Null(await ImageCropper.CropAsync(missing, 0, 0, 10, 10));
+            Assert.Null(await ImageCropper.CropAsync(session, "n1", missing, 0, 0, 10, 10));
         }
         finally
         {
+            ImageCropper.CleanupSession(session);
             Cleanup(dir);
         }
     }
@@ -145,13 +141,84 @@ public class ImageCropperTests
     public async Task CropAsync_Empty_Rectangle_Returns_Null()
     {
         var dir = NewTempDir();
+        var session = NewSessionId();
         try
         {
             var source = WritePng(dir, "photo.png", 100, 80);
-            Assert.Null(await ImageCropper.CropAsync(source, 10, 10, 0, 40));
+            Assert.Null(await ImageCropper.CropAsync(session, "n1", source, 10, 10, 0, 40));
         }
         finally
         {
+            ImageCropper.CleanupSession(session);
+            Cleanup(dir);
+        }
+    }
+
+    [Fact]
+    public async Task CropAsync_Blank_Ids_Return_Null()
+    {
+        var dir = NewTempDir();
+        try
+        {
+            var source = WritePng(dir, "photo.png", 40, 30);
+
+            Assert.Null(await ImageCropper.CropAsync("", "n1", source, 0, 0, 10, 10));
+            Assert.Null(await ImageCropper.CropAsync("s1", "   ", source, 0, 0, 10, 10));
+        }
+        finally
+        {
+            Cleanup(dir);
+        }
+    }
+
+    [Fact]
+    public async Task CleanupSession_Removes_Directory_And_Is_Idempotent()
+    {
+        var dir = NewTempDir();
+        var session = NewSessionId();
+        try
+        {
+            var source = WritePng(dir, "photo.png", 40, 30);
+            await ImageCropper.CropAsync(session, "n1", source, 0, 0, 20, 20);
+
+            var sessionDir = Path.Combine(ImageCropper.CropsRootDirectory, session);
+            Assert.True(Directory.Exists(sessionDir));
+
+            ImageCropper.CleanupSession(session);
+            Assert.False(Directory.Exists(sessionDir));
+
+            // Second call is a no-op and must not throw.
+            ImageCropper.CleanupSession(session);
+            ImageCropper.CleanupSession(null);
+            ImageCropper.CleanupSession("   ");
+        }
+        finally
+        {
+            Cleanup(dir);
+        }
+    }
+
+    [Fact]
+    public async Task CleanupAll_Removes_Every_Session_Directory()
+    {
+        var dir = NewTempDir();
+        var sessionA = NewSessionId();
+        var sessionB = NewSessionId();
+        try
+        {
+            var source = WritePng(dir, "photo.png", 40, 30);
+            await ImageCropper.CropAsync(sessionA, "n1", source, 0, 0, 20, 20);
+            await ImageCropper.CropAsync(sessionB, "n1", source, 0, 0, 20, 20);
+
+            ImageCropper.CleanupAll();
+
+            Assert.False(Directory.Exists(Path.Combine(ImageCropper.CropsRootDirectory, sessionA)));
+            Assert.False(Directory.Exists(Path.Combine(ImageCropper.CropsRootDirectory, sessionB)));
+        }
+        finally
+        {
+            ImageCropper.CleanupSession(sessionA);
+            ImageCropper.CleanupSession(sessionB);
             Cleanup(dir);
         }
     }

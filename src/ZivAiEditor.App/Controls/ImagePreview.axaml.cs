@@ -70,10 +70,14 @@ public partial class ImagePreview : Window
     /// <summary>The preview's tool state (diagnostics / tests).</summary>
     public ToolStateMachine ToolState => _tools;
 
-    /// <summary>Loads (or clears) the preview image. A repeat path is ignored.</summary>
-    public void LoadImage(string? path)
+    /// <summary>
+    /// Loads (or clears) the preview image. A repeat path is ignored unless
+    /// <paramref name="force"/> is set — the crop temp file is overwritten in place on
+    /// re-crop, so confirming a crop reloads the same path to show the new content.
+    /// </summary>
+    public void LoadImage(string? path, bool force = false)
     {
-        if (string.Equals(path, _path, StringComparison.OrdinalIgnoreCase))
+        if (!force && string.Equals(path, _path, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }

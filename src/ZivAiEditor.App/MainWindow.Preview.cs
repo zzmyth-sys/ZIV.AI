@@ -53,7 +53,7 @@ public partial class MainWindow
 
         // The clicked path may be the node's own image or its crop result; always pass the
         // node's own image as the crop source so re-cropping never chains.
-        _imagePreview.LoadNode(node?.NodeId, node?.ImagePath ?? path, node?.Crop);
+        _imagePreview.LoadNode(_vm.Session.SessionId, node?.NodeId, node?.ImagePath ?? path, node?.Crop);
 
         // Swipe-compare reference: the parent node's pipeline image (Step 9C.6-B); null
         // for the root image, which disables the compare button.

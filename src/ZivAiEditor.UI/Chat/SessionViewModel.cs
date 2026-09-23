@@ -3,6 +3,7 @@ using ZivAiEditor.Agent;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.UI.Imaging;
 using TaskStatus = ZivAiEditor.Contracts.Enums.TaskStatus;
 
 namespace ZivAiEditor.UI.Chat;
@@ -119,6 +120,8 @@ public sealed class SessionViewModel
     {
         if (options.ImagePath is { Length: > 0 } image)
         {
+            // Replacing the root drops the previous DAG, so its crop temp files are orphans.
+            ImageCropper.CleanupSession(_session.SessionId);
             _writer.SetRoot(image);
         }
 
@@ -242,6 +245,8 @@ public sealed class SessionViewModel
             return;
         }
 
+        // Resetting the root drops the existing DAG, so its crop temp files are orphans.
+        ImageCropper.CleanupSession(_session.SessionId);
         _writer.ResetToRoot(imagePath);
         RefreshHistory();
         RebuildContext();

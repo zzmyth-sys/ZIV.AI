@@ -1624,3 +1624,62 @@ V4（App 装配统一）、#6（删死状态写入）、#7（导入事件命名�
 - **S1/S2 已修**：pending 气泡按身份替换（防生成中重建越界）；裁切激活时 `LoadNode` 载原图。
 - 修订后：`dotnet build` 0/0；非 GPU 全量 **228 通过 / 0 失败**。
 - 9C.6B.10 交互改为「整框移动 + 8 手柄缩放」（上表 9C.6B.10 行已同步）。
+
+---
+
+## Step 9C.6-B2 验收：裁切图生命周期（临时区 + 覆盖 + 清理）
+
+**目标**：裁切结果（中间产物）改放**程序目录临时区** `_cache/crops/{sessionId}/{nodeId}.png`，
+每节点最多一个（覆盖），会话关闭 / 重置 / 启动兜底清理；不再污染原图目录、不再累积。
+范围外：GPU 端到端（Z29/Z30），真机由用户执行。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 仅改 UI / App / Agent（导出读取）；无新增项目引用 | ✅ |
+| G3 | 接口与 FROZEN 一致 | **无签名变化**；`CropSpec.ResultImagePath` 位置语义变化已在 `FROZEN` 9C.6-B2 记录 | ✅ |
+| G4 | 未授权修改检查 | 无既有冻结签名被改；无契约成员变更 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `FROZEN` 追加 Step 9C.6-B2 | ✅ |
+| G6 | 便携性未破 | 临时区随程序目录 `AppContext.BaseDirectory/_cache`（Z14） | ✅ |
+| G7 | AI 推理进程隔离未破 | 纯本地文件操作（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.6B2.1 | 新路径规则 | `ImageCropperTests` | `_cache/crops/{sessionId}/{nodeId}.png` | ✅ |
+| 9C.6B2.2 | 每节点覆盖 | `ImageCropperTests` | 二次裁切同一文件（`Single` 文件），不累积 | ✅ |
+| 9C.6B2.3 | 旧规则删除 | 查 `ImageCropper` | 无 `_crop_<timestamp>` / `ResolveOutputPath` | ✅ |
+| 9C.6B2.4 | 关闭清理 | 查 `App.axaml.cs` | `desktop.Exit` → `CleanupSession(sessionId)` | ✅ |
+| 9C.6B2.5 | 重置清理 | 查 `SessionViewModel` | `SetRootImage` / `ApplyRequest` 重置前 `CleanupSession` | ✅ |
+| 9C.6B2.6 | 启动兜底 | 查 `Program.Main` | 首实例 `CleanupAll()` | ✅ |
+| 9C.6B2.7 | 清理容错 | 查 `ImageCropper` / `ImageCropperTests` | 逐文件 try-catch；目录不存在 no-op；不抛；幂等 | ✅ |
+| 9C.6B2.8 | 导出适配 | `SessionExporterTests` | 从新位置拷到 `{NodeId}_crop.png`；不改 JSON 相对名 | ✅ |
+| 9C.6B2.9 | 强制重载 | 查 `ImagePreview.LoadImage` | `force:true` 同路径重载（覆盖后显示新内容） | ✅ |
+| 9C.6B2.10 | LoadImage 唯一性核查 | 查 `LoadImage` / `LoadAsync` | `_generation`/`_bitmap` 无路径唯一性假设被破坏 | ✅ |
+| 9C.6B2.11 | Z8 行数 | 查改动文件 | 均 < 600 行（`ImagePreview.axaml.cs` 588） | ✅ |
+| 9C.6B2.12 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；非 GPU 231 通过 | ✅ |
+| 9C.6B2.13 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29/Z30） | ✅ |
+| 9C.6B2.14 | 真机交互 | 用户执行一次真机验收 | 临时区生成/覆盖、关闭清理、重启无孤儿、导出含裁切图、原图目录无 `_crop_` | ⏳ 待用户确认 |
+| 9C.6B2.15 | 启动 / 无残留 | 启动 exe + 进程表 | 窗口正常、无新 Python 进程；结束无残留、未占 GPU | ⏳ 待用户确认 |
+
+### Step 9C.6-B2 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.6B2.1–9C.6B2.13 全过；9C.6B2.14 / 9C.6B2.15 由用户真机确认。
+
+### Step 9C.6-B2 遗留说明（非阻断）
+
+- **`_cache` 总量上限 / 淘汰策略**：属 Z12 缓存有界，单独立步。
+- **旧版（9C.4）已产生的 `_crop_` 文件不自动清理**：用户手动清。
+- `ResolveCropPath` 未做 id 清洗（生产为 GUID hex，不可达）；`CleanupAll` 仅靠调用点保证单实例。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### Step 9C.6-B2 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 9C.6-B2 记录（本步已完成）
+2. 在「验收记录」追加"Step 9C.6-B2 通过，日期：____"（待签）
+3. 进入后续 Step（`_cache` 有界 / 9C.4-B 外扩 / 9C.5-C / 9C.5-D 等，由用户决定）

@@ -3114,3 +3114,89 @@ root 节点进入 `GetHistory()` 后被 `SessionExporter` 自动拷为 `{rootNod
 
 - 无契约变更；未改 python / chrome / ToolStateMachine / 分辨率选择器 / 导入 UI；无新 NuGet。
 - 裁切编码不再经 Magick（此前 AOT 验证针对 Magick 路径；现编码为 SkiaSharp，AOT 更简单）。
+
+---
+
+## [Step 9C.6-B2] - 2026-09-23
+
+### 目标
+
+**裁切图生命周期**：裁切结果是中间产物，改放**程序目录临时区**，每节点最多一个（覆盖），
+会话结束 / 重置 / 启动兜底清理。**不再污染用户原图目录、不再累积**。流程：只读核查 → 用户裁决 →
+实施 → 独立复审 → 验证。
+
+### 只读核查结论（7 项）
+
+1. 路径原在 `ImageCropper.ResolveOutputPath`（源图目录 + `_crop_<ts>`），`CropAsync` 调用，
+   未传 sessionId/nodeId。
+2. `EditSession.SessionId`（`init`、GUID）**进程内稳定**，已在 `IEditSession.SessionId` 暴露；
+   `CropSpec`/`EditNode` 无需持有。
+3. 程序目录统一 `AppContext.BaseDirectory`（`SettingsLoader` / `AppContext.ResolveCommandsPath`）。
+4. 启动钩子 `Program.Main`（单实例判定后）；关闭钩子 `App.OnFrameworkInitializationCompleted`
+   的 `desktop.Exit`。
+5. **无「切换会话」概念**（单会话/进程；`ResetToRoot` 保持同一 `SessionId`）。
+6. 导出从 `node.Crop.ResultImagePath`（绝对）拷到 `{NodeId}_crop.png`，字段驱动。
+7. `ResultImagePath` 消费点（导出 / 预览 / 对比 / 聊天 / 节点解析）**全部经该字段，无硬编码**。
+
+### 裁决落实
+
+- **临时区** = `{AppContext.BaseDirectory}/_cache/crops/{sessionId}/{nodeId}.png`（Z14）。
+- **每节点覆盖**同一文件；**删**旧 `_crop_<timestamp>` 规则。
+- **清理**：关闭（`desktop.Exit`）+ **重置根**（`SetRootImage`/`ApplyRequest` 调 `ResetToRoot`/`SetRoot`
+  前）+ **启动兜底**（`Program.Main` 首实例 `CleanupAll`）。
+- **容错**：每个 `File.Delete` 单独 try-catch；目录不存在 no-op；绝不抛。
+- 导出源改新位置；导出后**不删**临时文件。
+
+### 做了什么
+
+- **`ImageCropper`**：删 `ResolveOutputPath`；新增 `CropsRootDirectory`、`ResolveCropPath(sessionId,nodeId)`；
+  `CropAsync(sessionId,nodeId,source,x,y,w,h)`（`Directory.CreateDirectory` + `File.Create` 覆盖）；
+  `CleanupSession(sessionId)` / `CleanupAll()`（`DeleteDirectorySafe` 逐文件容错）。
+- **`ImagePreview.axaml.cs`**：`LoadImage(path, force=false)` —— 覆盖后同路径**强制重载**。
+- **`ImagePreview.Crop.cs`**：`LoadNode(sessionId,nodeId,originalPath,crop)`；确认调
+  `CropAsync(_sessionId,_nodeId,…)` + `LoadImage(output, force:true)`。
+- **`MainWindow.Preview.cs`**：`LoadNode(_vm.Session.SessionId, …)`。
+- **`SessionViewModel`**：`ApplyRequest` / `SetRootImage` 在重置前 `ImageCropper.CleanupSession(_session.SessionId)`
+  （App/UI 层触发，`EditSession` 不碰文件系统）。
+- **`Program.Main`**：首实例 `ImageCropper.CleanupAll()`（单实例 ⇒ 无活跃会话，清理上一轮孤儿）。
+- **`App.axaml.cs`**：`desktop.Exit` 调 `CleanupSession(ctx.Session.SessionId)`（导出已完成）。
+- **测试**：`ImageCropperTests` 重写（路径规则 / 覆盖单文件 / 清理幂等 / CleanupAll / 空 id）；
+  `SessionExporterTests` 源改用 `ResolveCropPath`。
+- **文档**：本段 + `ACCEPTANCE.MD` Step 9C.6-B2 + `FROZEN.md` 尾部 9C.6-B2。
+
+### `LoadImage` 路径唯一性核查（用户要求）
+
+- `force:true` 时跳过同路径早退，仍 `++_generation` + `DisposeBitmap()`（同步释放旧位图）。
+- `LoadAsync` 用 `generation != _generation` 丢弃在途旧解码；`_bitmap` 为单字段、重载即释放，
+  **无路径键缓存** → `force` 安全，未发现「路径唯一性」被破坏。
+- 确认裁切后 `ExitCropMode()` 先执行（`_crop` 非激活），故 `LoadAsync` 末尾的 `RefreshCropBounds` no-op。
+
+### 独立复审（只读子代理）
+
+- **无 Blocker**。核心（路径 / 覆盖 / 清理容错 / 导出顺序 / force 重载）全部核实正确。
+- Should-fix 均为文档/潜在项：`CleanupAll` 为 public 且仅靠调用点保证单实例（已在 XML 注明）；
+  `ResolveCropPath` 未做 id 清洗（生产为 GUID hex，不可达 `../`）。
+- Nit：`AppContext.BaseDirectory` 与 ARCHITECTURE 所述 `Environment.ProcessPath` 在单文件模式可能不同
+  （已按用户裁决用 `AppContext.BaseDirectory`）；`_cache/crops` 下非会话目录会被 `CleanupAll` 删除（私有目录）。
+- 补测：新增空 `sessionId`/`nodeId` 返回 null 的用例。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **231 通过 / 0 失败**。
+- **未跑 GPU**（Z29 / Z30）。**Z8**：改动文件均 < 600 行（`ImagePreview.axaml.cs` 588、
+  `ImagePreview.Crop.cs` 450、`ImageCropper.cs` 175）。
+
+### 遗留项
+
+- **`_cache` 总量上限 / 淘汰策略**：属 Z12 缓存有界，单独立步。
+- **旧版（9C.4）已产生的 `_crop_` 文件不自动清理**：用户手动清。
+- `ResolveCropPath` 未做 id 清洗（生产不可达）；`CleanupAll` 仅靠调用点保证单实例。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未改** Contracts 既有成员 / `python/server/*` / `ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；
+  **未新增 NuGet**；**未改** chrome / `ToolStateMachine` / 分辨率选择器 / 图片导入 UI / 裁切交互。
+- `CropSpec.ResultImagePath` 仍为绝对路径（**位置语义**变化，非签名），`FROZEN.md` 尾部追加记录。

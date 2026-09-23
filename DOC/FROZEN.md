@@ -2122,3 +2122,47 @@ Agent 编排，应下沉至 Agent；涉及 `IExecutor` 设计变更，单独立�
   `Crop.ResultImagePath`（聊天气泡可能携带裁切结果路径）。
 - **无新增契约**：本次修订仅行为语义与实现，`CropSpec` / `IEditNode.Crop` / 3 个方法签名不变。
 - 修订后：`dotnet build` 0 错误 0 警告；非 GPU 全量 **228 通过 / 0 失败**。
+
+---
+
+## Step 9C.6-B2（日期：2026-09-23）
+
+> **修订说明（Step 9C.6-B2 · 裁切图生命周期：临时区 + 覆盖 + 清理）**
+>
+> 本段为 Step 9C.6-B2 **只增**记录。目标：裁切结果（中间产物）改放程序目录临时区
+> `_cache/crops/{sessionId}/{nodeId}.png`，每节点覆盖、会话关闭 / 重置 / 启动兜底清理。
+> **无契约签名变化**。**不改动 Step 0–9C.6-B 已冻结行**；本段为**纯追加**。
+
+### 9C.6-B2.1 `CropSpec.ResultImagePath` 位置语义（冻结 · 语义变化，非签名）
+
+- 值仍为**绝对路径**，但位置由「源图目录 `<stem>_crop_<timestamp>.png`」改为
+  **程序目录临时区** `{AppContext.BaseDirectory}/_cache/crops/{sessionId}/{nodeId}.png`（Z14）。
+- **每节点一个文件，反复裁切覆盖**（不再累积）；旧 9C.4 的 `_crop_<timestamp>` 规则删除。
+- `CropSpec` / `IEditNode` / `IEditSession` / `IEditSessionWriter` **签名与成员不变**。
+
+### 9C.6-B2.2 清理策略（冻结 · 非契约）
+
+- **会话关闭**：`App` 的 `desktop.Exit` → `ImageCropper.CleanupSession(sessionId)`。
+- **重置根**（导入 / 二实例换图）：`SessionViewModel.SetRootImage` / `ApplyRequest` 在
+  `ResetToRoot`/`SetRoot` 前调 `CleanupSession`（App/UI 层触发；**`EditSession` 不碰文件系统**）。
+- **启动兜底**：`Program.Main` 首实例 `ImageCropper.CleanupAll()`（单实例 ⇒ 无活跃会话）。
+- **容错**：逐文件 `try-catch`、目录不存在 no-op、绝不抛异常。
+- **导出**：`SessionExporter` 从新位置拷贝到导出目录 `{NodeId}_crop.png`（相对名不变），
+  导出后**不删**临时文件。
+
+### 9C.6-B2.3 覆盖后的强制重载（冻结 · 非契约）
+
+- `ImagePreview.LoadImage(path, force)`：裁切临时文件按节点覆盖（路径不变），确认后以
+  `force:true` 重载同路径以显示新内容；`_generation` / `_bitmap` 逻辑经核查无「路径唯一性」假设。
+
+### 9C.6-B2.4 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：`ImageCropperTests` / `SessionExporterTests` 等受影响类全过；
+  非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **231 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 9C.6-B2.5 遗留项（冻结）
+
+- **`_cache` 总量上限 / 淘汰策略**：属 Z12 缓存有界，单独立步。
+- **旧版（9C.4）`_crop_` 文件不自动清理**：用户手动清。

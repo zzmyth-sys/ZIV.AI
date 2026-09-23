@@ -52,6 +52,9 @@ public partial class ImagePreview
     private bool _cropBusy;
     private int _cropToastGeneration;
 
+    /// <summary>The session owning the shown node (its crop temp directory is keyed by it).</summary>
+    private string? _sessionId;
+
     /// <summary>The node currently shown (its crop is edited in crop mode).</summary>
     private string? _nodeId;
 
@@ -106,8 +109,9 @@ public partial class ImagePreview
     /// it, and shows the node's crop result when it has one. The node's original image is
     /// kept for cropping and for the compare "right" side.
     /// </summary>
-    public void LoadNode(string? nodeId, string originalPath, CropSpec? crop)
+    public void LoadNode(string? sessionId, string? nodeId, string originalPath, CropSpec? crop)
     {
+        _sessionId = sessionId;
         _nodeId = nodeId;
         _nodeOriginalPath = originalPath;
         _nodeCrop = crop;
@@ -309,7 +313,8 @@ public partial class ImagePreview
 
     private async Task ConfirmCropAsync()
     {
-        if (_crop is null || _cropBusy || _nodeId is null || string.IsNullOrWhiteSpace(_nodeOriginalPath))
+        if (_crop is null || _cropBusy || _sessionId is null || _nodeId is null
+            || string.IsNullOrWhiteSpace(_nodeOriginalPath))
         {
             return;
         }
@@ -320,6 +325,7 @@ public partial class ImagePreview
             return;
         }
 
+        var sessionId = _sessionId;
         var nodeId = _nodeId;
         var source = _nodeOriginalPath;
         _cropBusy = true;
@@ -329,8 +335,8 @@ public partial class ImagePreview
         {
             // Crop + encode run off the UI thread inside ImageCropper (Z11). The rectangle
             // is in the node's own image coordinates, so the source is the original —
-            // never a previous crop.
-            var output = await ImageCropper.CropAsync(source, x, y, width, height);
+            // never a previous crop. The temp file is overwritten per node.
+            var output = await ImageCropper.CropAsync(sessionId, nodeId, source, x, y, width, height);
 
             if (string.IsNullOrEmpty(output))
             {
@@ -350,7 +356,9 @@ public partial class ImagePreview
             _nodeCrop = spec;
             _displayPath = output;
             ExitCropMode();
-            LoadImage(output);
+            // Force: the crop temp file is overwritten in place, so the path is unchanged
+            // but its content is new.
+            LoadImage(output, force: true);
             CropCompleted?.Invoke(this, new CropCompletedEventArgs(nodeId, spec));
         }
         catch (Exception ex)

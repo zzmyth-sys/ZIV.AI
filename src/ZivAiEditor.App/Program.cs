@@ -1,6 +1,7 @@
 using System;
 using Avalonia;
 using ZivAiEditor.UI;
+using ZivAiEditor.UI.Imaging;
 
 namespace ZivAiEditor.App;
 
@@ -21,6 +22,10 @@ internal static class Program
             single.SendToExistingInstance(options);
             return;
         }
+
+        // Step 9C.6-B2: the app is single-instance, so any crop temp directory left under
+        // _cache/crops is an orphan from a previous run — clean it before the session starts.
+        ImageCropper.CleanupAll();
 
         var builder = BuildAvaloniaApp();
         builder.AfterSetup(b =>

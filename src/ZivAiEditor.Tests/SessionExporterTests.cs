@@ -1,5 +1,6 @@
 using ZivAiEditor.Agent;
 using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.UI.Imaging;
 using Xunit;
 
 namespace ZivAiEditor.Tests;
@@ -108,15 +109,21 @@ public class SessionExporterTests
         var sourceDir = NewTempDir();
         var outputDir = NewTempDir();
         var exporter = new SessionExporter();
+        var sessionId = Guid.NewGuid().ToString("N");
 
         try
         {
             var root = WriteSourceImage(sourceDir, "root.png");
-            var cropSource = WriteSourceImage(sourceDir, "root_crop_src.png");
 
             var session = new EditSession();
             session.SetRoot(root);
             var rootNode = session.GetHistory()[0];
+
+            // Step 9C.6-B2: the crop result lives in the program-directory cache.
+            var cropSource = ImageCropper.ResolveCropPath(sessionId, rootNode.NodeId);
+            Directory.CreateDirectory(Path.GetDirectoryName(cropSource)!);
+            File.WriteAllBytes(cropSource, new byte[] { 9, 8, 7, 6 });
+
             session.SetNodeCrop(rootNode.NodeId, new CropSpec
             {
                 X = 5,
@@ -140,6 +147,7 @@ public class SessionExporterTests
         }
         finally
         {
+            ImageCropper.CleanupSession(sessionId);
             Cleanup(sourceDir);
             Cleanup(outputDir);
         }
