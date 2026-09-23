@@ -2380,3 +2380,17 @@ Agent 编排，应下沉至 Agent；涉及 `IExecutor` 设计变更，单独立�
 - **FROZEN 9C.4.4** 记落盘规则 `<stem>_crop_<timestamp>.png`，已被 **9C.6-B2** 的
   `_cache/crops/{sessionId}/{nodeId}.png` 取代。
 - 上述两行**按修改铁律不改**，仅在此登记。
+
+### 9C.4-B-P2 修订说明（2026-09-24 · 冻结 · 非契约）
+
+> **只增**记录。**不改动 9C.4-B.1–9C.4-B.5 既有行**，仅追加。
+
+- **问题**：9C.4-B 的 16 MP 像素上限（`MaxPixelCount`）对**内裁也生效**——源图 >16 MP 时，
+  纯内裁（含默认 75% 框）输出被意外缩小，与「裁出原始分辨率」预期不符。
+- **修复**：`CropState.ClampToLimits` 的面积上限改为**仅外扩时生效**（新增 `IsOutpaint`：
+  矩形任一边越出图像即视为外扩，含 1e-6 浮点容差）；`SetDefaultRect` 不再做面积缩放
+  （默认框恒为内裁）。
+- **不变**：边上限（2×）与位置重叠钳制保持（对内裁为 no-op）；`MaxPixelCount` 仍约束
+  **外扩**画布；`CropSpec` 签名 / `session.json` 格式零变化。
+- **测试**：`CropStateTests` 新增 `SetRect_Inner_Crop_Not_Capped_By_Pixels` /
+  `SetDefaultRect_Not_Capped_For_Large_Source`；`dotnet build` 0/0；非 GPU 全量 **272 通过 / 0 失败**。

@@ -96,6 +96,38 @@ public class CropStateTests
     }
 
     [Fact]
+    public void SetRect_Inner_Crop_Not_Capped_By_Pixels()
+    {
+        var state = new CropState();
+        state.SetImageBounds(6000, 6000); // 36 MP source, larger than the outpaint cap
+        state.Enter();
+
+        // Full-image inner crop must keep the source resolution (9C.4-B-P2).
+        state.SetRect(0, 0, 6000, 6000);
+
+        Assert.True(state.HasRect);
+        Assert.Equal(0, state.X);
+        Assert.Equal(0, state.Y);
+        Assert.Equal(6000, state.Width);
+        Assert.Equal(6000, state.Height);
+    }
+
+    [Fact]
+    public void SetDefaultRect_Not_Capped_For_Large_Source()
+    {
+        var state = new CropState();
+        state.SetImageBounds(6000, 6000); // 75% = 4500x4500 = 20.25 MP > 16 MP
+        state.Enter();
+
+        state.SetDefaultRect();
+
+        Assert.Equal(4500, state.Width);
+        Assert.Equal(4500, state.Height);
+        Assert.Equal(750, state.X);
+        Assert.Equal(750, state.Y);
+    }
+
+    [Fact]
     public void SetRect_Below_MinSize_Clears_HasRect()
     {
         var state = NewState();

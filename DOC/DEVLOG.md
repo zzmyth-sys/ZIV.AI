@@ -3512,3 +3512,39 @@ N3（clamp-then-round）、N5（默认框面积缩放后居中）、N6（pending
   图片导入 / 分辨率选择器 / 项目列表 / 大图保存。
 - `FROZEN.md` 尾部追加 9C.4-B（语义 + 行为变化 + 附带发现，**不改已冻结行**）；
   `ACCEPTANCE.MD` 追加 Step 9C.4-B 验收段。
+
+---
+
+## [Step 9C.4-B-P2] - 2026-09-24
+
+### 目标
+
+修复 9C.4-B 后置复审 P2#1：16 MP 像素上限**仅外扩时生效**，避免源图 >16 MP 时纯内裁被
+意外缩小（与「裁出原始分辨率」预期不符）。
+
+### 根因
+
+`CropState.ClampToLimits` 无条件应用 `MaxPixelCount`；`SetDefaultRect` 也做了面积缩放。
+源图 >16 MP（如 6000×6000=36 MP）时，全图内裁 / 默认 75% 框（20.25 MP）被缩到 16 MP。
+
+### 修复
+
+- `ClampToLimits`：面积上限增加 `IsOutpaint(x,y,w,h)` 条件——矩形任一边越出图像才算外扩
+  （含 `BoundaryEpsilon=1e-6` 浮点容差，恰好贴边算内裁）；内裁跳过像素上限。
+- `SetDefaultRect`：去掉面积缩放（默认框恒为内裁，保持原分辨率）。
+- 边上限（2×）与位置重叠钳制保留（对内裁为 no-op）。
+
+### 测试
+
+- 新增 `SetRect_Inner_Crop_Not_Capped_By_Pixels`（6000×6000 全图内裁 → 6000×6000）、
+  `SetDefaultRect_Not_Capped_For_Large_Source`（→ 4500×4500 居中）。
+- `SetRect_Clamps_To_MaxPixels`（外扩）仍通过。
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**；
+  受影响类 **70 通过 / 0 失败**；非 GPU 全量 **272 通过 / 0 失败**。
+- **未跑 GPU**（Z29 / Z30）。
+
+### 备注
+
+- 无契约变化（`CropSpec` 签名 / `session.json` 格式零变化）；未改 Contracts / python /
+  chrome / ToolStateMachine 等；无新 NuGet。
+- `FROZEN.md` 尾部追加 9C.4-B-P2 修订说明（**不改已冻结行**）。

@@ -48,8 +48,11 @@ public sealed class CropState
     /// <summary>Largest output edge, as a multiple of the corresponding image edge (D2).</summary>
     public const double MaxExpandFactor = 2.0;
 
-    /// <summary>Largest output area, in pixels (D2) — bounds the canvas allocation.</summary>
+    /// <summary>Largest output area, in pixels (D2) — bounds an outpaint canvas allocation.</summary>
     public const double MaxPixelCount = 16_000_000.0;
+
+    /// <summary>Absorbs floating-point noise when testing whether a rect leaves the image.</summary>
+    private const double BoundaryEpsilon = 1e-6;
 
     private double _imageWidth;
     private double _imageHeight;
@@ -153,8 +156,8 @@ public sealed class CropState
     }
 
     /// <summary>
-    /// Selects a centered rectangle covering <see cref="DefaultFraction"/> of the image,
-    /// area-scaled and re-centered when it would exceed <see cref="MaxPixelCount"/>.
+    /// Selects a centered rectangle covering <see cref="DefaultFraction"/> of the image. It
+    /// is an inner crop, so it is never scaled by the outpaint pixel cap (9C.4-B-P2).
     /// </summary>
     public void SetDefaultRect()
     {
@@ -163,17 +166,10 @@ public sealed class CropState
             return;
         }
 
-        var width = _imageWidth * DefaultFraction;
-        var height = _imageHeight * DefaultFraction;
-        if (width * height > MaxPixelCount)
-        {
-            var scale = Math.Sqrt(MaxPixelCount / (width * height));
-            width *= scale;
-            height *= scale;
-        }
-
-        _width = width;
-        _height = height;
+        // The default box is always an inner crop, so it keeps the source resolution even
+        // when the source itself exceeds the outpaint pixel cap (9C.4-B-P2).
+        _width = _imageWidth * DefaultFraction;
+        _height = _imageHeight * DefaultFraction;
         _x = (_imageWidth - _width) / 2.0;
         _y = (_imageHeight - _height) / 2.0;
         HasRect = _width >= MinSize && _height >= MinSize;
@@ -431,6 +427,10 @@ public sealed class CropState
     /// <see cref="MaxExpandFactor"/>× the image, area up to <see cref="MaxPixelCount"/>, and
     /// a positive-area overlap with the source. Position is limited only for a non-empty
     /// rectangle so a zero-size build candidate is left untouched.
+    ///
+    /// <para><b>9C.4-B-P2</b>: the pixel cap applies <b>only to an outpaint</b> (a rectangle
+    /// that reaches outside the image). A pure inner crop keeps the source resolution, even
+    /// when the source itself is larger than <see cref="MaxPixelCount"/>.</para>
     /// </summary>
     private void ClampToLimits(ref double x, ref double y, ref double width, ref double height)
     {
@@ -442,7 +442,8 @@ public sealed class CropState
         width = Math.Clamp(width, 0, MaxWidth);
         height = Math.Clamp(height, 0, MaxHeight);
 
-        if (width > 0 && height > 0 && width * height > MaxPixelCount)
+        if (width > 0 && height > 0 && width * height > MaxPixelCount
+            && IsOutpaint(x, y, width, height))
         {
             var scale = Math.Sqrt(MaxPixelCount / (width * height));
             width *= scale;
@@ -461,4 +462,14 @@ public sealed class CropState
             y = Math.Clamp(y, minY, Math.Max(minY, maxY));
         }
     }
+
+    /// <summary>
+    /// True when the rectangle reaches outside the image (an outpaint). A tolerance absorbs
+    /// floating-point noise so a crop that sits exactly on the edge counts as an inner crop.
+    /// </summary>
+    private bool IsOutpaint(double x, double y, double width, double height)
+        => x < -BoundaryEpsilon
+           || y < -BoundaryEpsilon
+           || x + width > _imageWidth + BoundaryEpsilon
+           || y + height > _imageHeight + BoundaryEpsilon;
 }
