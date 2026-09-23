@@ -9,10 +9,12 @@ using ZIV.Imaging.Codecs.Skia;
 namespace ZivAiEditor.UI.Imaging;
 
 /// <summary>
-/// Crops a source image to a pixel rectangle and writes the result as a new PNG
-/// (Step 9C.6-B2). It reuses the shared ZIV.Imaging <see cref="SkiaCodec"/> for decode
-/// and Skia's <c>SKImage.Subset</c> + native PNG encode for the crop — ZIV.Imaging exposes
-/// no crop primitive. The source file is never modified (Z24).
+/// Crops (or outpaints) a source image to a pixel rectangle and writes the result as a new
+/// PNG (Step 9C.6-B2 / 9C.4-B). It reuses the shared ZIV.Imaging <see cref="SkiaCodec"/> for
+/// decode and SkiaSharp directly for the composite (ZIV.Imaging exposes no crop / canvas
+/// primitive). The rectangle is in source-image coordinates; a negative X / Y means the
+/// source is pasted inside a larger canvas whose remaining area is filled with grey 0.5
+/// (matching <c>python/server/outpaint.py</c>). The source file is never modified (Z24).
 ///
 /// <para><b>Temporary area</b> (Z14): the crop is an intermediate product, so it is
 /// written under the <b>program directory</b> at
@@ -40,11 +42,16 @@ public static class ImageCropper
     public static string ResolveCropPath(string sessionId, string nodeId)
         => Path.Combine(CropsRootDirectory, sessionId, nodeId + PngExtension);
 
+    /// <summary>Grey 0.5 outpaint fill — matches <c>outpaint.CANVAS_FILL</c> (D1).</summary>
+    private static readonly SKColor CanvasFill = new(128, 128, 128);
+
     /// <summary>
-    /// Crops <paramref name="sourceImagePath"/> to the given pixel rectangle and writes
-    /// (overwriting) <c>_cache/crops/{sessionId}/{nodeId}.png</c>. Returns the output path,
-    /// or <c>null</c> on any failure (missing source, blank ids, decode / encode failure,
-    /// empty rectangle). The whole operation runs off the caller's thread (Z11).
+    /// Crops / outpaints <paramref name="sourceImagePath"/> to the given pixel rectangle and
+    /// writes (overwriting) <c>_cache/crops/{sessionId}/{nodeId}.png</c>. X / Y may be
+    /// negative (outpaint); the output canvas is <paramref name="width"/>×<paramref name="height"/>
+    /// and the source is pasted at <c>(-x, -y)</c>. Returns the output path, or <c>null</c> on
+    /// any failure (missing source, blank ids, decode / encode failure, empty rectangle). The
+    /// whole operation runs off the caller's thread (Z11).
     /// </summary>
     public static Task<string?> CropAsync(
         string sessionId,
@@ -77,16 +84,20 @@ public static class ImageCropper
                 return null;
             }
 
-            var rect = SKRectI.Intersect(
-                new SKRectI(x, y, x + width, y + height),
-                new SKRectI(0, 0, full.Width, full.Height));
-            if (rect.Width <= 0 || rect.Height <= 0)
+            // The output canvas is the selection rectangle (may extend beyond the source);
+            // the source is pasted at (-x, -y). Premul + Src keeps the source's own alpha
+            // where it exists, so an inner crop of an alpha PNG is unchanged; the remaining
+            // outpaint area stays opaque grey.
+            using var canvas = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
+            using (var surface = new SKCanvas(canvas))
             {
-                return null;
+                surface.Clear(CanvasFill);
+                using var paint = new SKPaint { BlendMode = SKBlendMode.Src };
+                surface.DrawImage(full, -x, -y, paint);
             }
 
-            using var cropped = full.Subset(rect);
-            if (cropped is null)
+            using var image = SKImage.FromBitmap(canvas);
+            if (image is null)
             {
                 return null;
             }
@@ -96,7 +107,7 @@ public static class ImageCropper
 
             // Skia's native PNG writer: far fewer copies than the shared Magick path and no
             // OpenMP thread pool. File.Create truncates, so a re-crop overwrites in place.
-            using var data = cropped.Encode(SKEncodedImageFormat.Png, 100);
+            using var data = image.Encode(SKEncodedImageFormat.Png, 100);
             using (var stream = File.Create(output))
             {
                 data.SaveTo(stream);

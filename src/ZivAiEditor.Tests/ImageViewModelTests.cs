@@ -204,4 +204,63 @@ public class ImageViewModelTests
         vm.SetZoomAt(1, 0, 0);
         Assert.Equal(ImageViewModel.MinZoomPercent, vm.ZoomPercent);
     }
+
+    [Fact]
+    public void FitWithMargin_Scales_Fit_And_Centers()
+    {
+        var vm = new ImageViewModel();
+        vm.SetViewport(500, 500);
+        vm.SetImage(1000, 1000); // fit = 50%
+
+        vm.FitWithMargin(0.65);
+
+        Assert.Equal(32, vm.ZoomPercent); // truncate(50 * 0.65) = 32
+        Assert.False(vm.IsAtFit);
+        // Smaller than the viewport -> centered, so offset is zero.
+        Assert.Equal(0, vm.OffsetX, 6);
+        Assert.Equal(0, vm.OffsetY, 6);
+    }
+
+    [Fact]
+    public void FitWithMargin_Clears_Pending_Fit_Across_Resize()
+    {
+        var vm = new ImageViewModel();
+        vm.SetViewport(500, 500);
+        vm.SetImage(1000, 1000);
+        vm.FitWithMargin(0.65);
+
+        vm.SetViewport(1000, 1000); // must not snap back to fit
+
+        Assert.Equal(32, vm.ZoomPercent);
+    }
+
+    [Fact]
+    public void RestoreView_Restores_Zoom_And_Offset()
+    {
+        var vm = new ImageViewModel();
+        vm.SetViewport(400, 300);
+        vm.SetImage(1000, 1000);
+        vm.SetZoomAt(150, 100, 80);
+
+        var (zoom, ox, oy) = (vm.ZoomPercent, vm.OffsetX, vm.OffsetY);
+        vm.FitWithMargin(0.65);
+        vm.RestoreView(zoom, ox, oy);
+
+        Assert.Equal(zoom, vm.ZoomPercent);
+        Assert.Equal(ox, vm.OffsetX, 6);
+        Assert.Equal(oy, vm.OffsetY, 6);
+    }
+
+    [Fact]
+    public void RestoreView_Clamps_Offset_To_Bounds()
+    {
+        var vm = new ImageViewModel();
+        vm.SetViewport(400, 300);
+        vm.SetImage(1000, 1000);
+
+        vm.RestoreView(100, 99999, -99999);
+
+        Assert.Equal(1000 - 400, vm.OffsetX, 6);
+        Assert.Equal(0, vm.OffsetY, 6);
+    }
 }

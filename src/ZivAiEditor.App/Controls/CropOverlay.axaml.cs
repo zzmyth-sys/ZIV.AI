@@ -18,6 +18,10 @@ namespace ZivAiEditor.App.Controls;
 public partial class CropOverlay : UserControl
 {
     private static readonly IBrush MaskBrush = new SolidColorBrush(Color.FromArgb(0x99, 0x00, 0x00, 0x00));
+
+    /// <summary>Outpaint canvas preview — matches the cropper's grey 0.5 fill (Step 9C.4-B).</summary>
+    private static readonly IBrush GrayBrush = new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0x80));
+
     private static readonly IPen BorderPen = new Pen(Brushes.White, 2);
     private static readonly IBrush HandleFill = Brushes.White;
     private static readonly IPen HandlePen = new Pen(new SolidColorBrush(Color.FromRgb(0x3A, 0x6D, 0xF0)), 1);
@@ -67,18 +71,24 @@ public partial class CropOverlay : UserControl
             return;
         }
 
-        var full = new Rect(0, 0, Bounds.Width, Bounds.Height);
-        var frame = rect.Intersect(full);
-        if (frame.Width <= 0 || frame.Height <= 0)
+        var (imageLeft, imageTop) = model.ImageToViewport(0, 0);
+        var (imageRight, imageBottom) = model.ImageToViewport(model.ImageWidth, model.ImageHeight);
+
+        // Grey the crop frame outside the image (the outpaint canvas), then darken
+        // everything outside the frame. The two regions are disjoint.
+        foreach (var band in CropOverlayGeometry.GrayBands(
+                     left, top, right - left, bottom - top,
+                     imageLeft, imageTop, imageRight - imageLeft, imageBottom - imageTop,
+                     Bounds.Width, Bounds.Height))
         {
-            return;
+            context.FillRectangle(GrayBrush, new Rect(band.X, band.Y, band.Width, band.Height));
         }
 
-        // Darken everything outside the frame with four surrounding bands.
-        context.FillRectangle(MaskBrush, new Rect(0, 0, full.Width, frame.Top));
-        context.FillRectangle(MaskBrush, new Rect(0, frame.Bottom, full.Width, full.Height - frame.Bottom));
-        context.FillRectangle(MaskBrush, new Rect(0, frame.Top, frame.Left, frame.Height));
-        context.FillRectangle(MaskBrush, new Rect(frame.Right, frame.Top, full.Width - frame.Right, frame.Height));
+        foreach (var band in CropOverlayGeometry.DarkenBands(
+                     left, top, right - left, bottom - top, Bounds.Width, Bounds.Height))
+        {
+            context.FillRectangle(MaskBrush, new Rect(band.X, band.Y, band.Width, band.Height));
+        }
 
         // Border + 8 handles.
         context.DrawRectangle(null, BorderPen, rect);

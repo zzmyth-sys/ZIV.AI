@@ -78,8 +78,8 @@ public partial class ImagePreview : Window
 
     /// <summary>
     /// Loads (or clears) the preview image. A repeat path is ignored unless
-    /// <paramref name="force"/> is set — the crop temp file is overwritten in place on
-    /// re-crop, so confirming a crop reloads the same path to show the new content.
+    /// <paramref name="force"/> is set, which reloads the path to pick up content changed
+    /// in place (e.g. an overwritten temp file).
     /// </summary>
     public void LoadImage(string? path, bool force = false)
     {
@@ -149,6 +149,7 @@ public partial class ImagePreview : Window
         _model.SetImage(bitmap.Size.Width, bitmap.Size.Height);
         ApplyModel();
         RefreshCropBounds();
+        ApplyPendingViewRestore();
 
         if (_emptyLabel is not null)
         {
@@ -516,6 +517,8 @@ public partial class ImagePreview : Window
     private void ShowEmpty(string message)
     {
         _model.ClearImage();
+        _pendingViewRestore = null;
+        _viewBeforeCrop = null;
 
         if (_box is not null)
         {

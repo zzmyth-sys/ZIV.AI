@@ -29,6 +29,26 @@ public class ImageCropperTests
         return path;
     }
 
+    private static string WriteAlphaPng(string directory, string name, int width, int height)
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, name);
+
+        var info = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
+        using var bitmap = new SKBitmap(info);
+        bitmap.Erase(SKColors.Transparent);
+        using (var canvas = new SKCanvas(bitmap))
+        {
+            using var paint = new SKPaint { Color = SKColors.CornflowerBlue };
+            canvas.DrawRect(new SKRect(0, 0, width, height / 2f), paint);
+        }
+
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        File.WriteAllBytes(path, data.ToArray());
+        return path;
+    }
+
     [Fact]
     public void ResolveCropPath_Is_Under_Program_Cache()
     {
@@ -98,7 +118,7 @@ public class ImageCropperTests
     }
 
     [Fact]
-    public async Task CropAsync_Clamps_Rectangle_To_Image()
+    public async Task CropAsync_Expands_Canvas_With_Gray_Fill()
     {
         var dir = NewTempDir();
         var session = NewSessionId();
@@ -106,12 +126,78 @@ public class ImageCropperTests
         {
             var source = WritePng(dir, "photo.png", 40, 30);
 
-            var output = await ImageCropper.CropAsync(session, "n1", source, 20, 10, 100, 100);
+            // Negative origin -> output canvas is the rect; source pasted at (10, 5).
+            var output = await ImageCropper.CropAsync(session, "n1", source, -10, -5, 60, 40);
+
+            Assert.NotNull(output);
+            using var decoded = SKBitmap.Decode(output);
+            Assert.Equal(60, decoded.Width);
+            Assert.Equal(40, decoded.Height);
+
+            // Grey 0.5 fill outside the source (D1).
+            var gray = new SKColor(128, 128, 128);
+            Assert.Equal(gray, decoded.GetPixel(0, 0));
+            Assert.Equal(gray, decoded.GetPixel(59, 39));
+            Assert.Equal(gray, decoded.GetPixel(0, 39));
+            Assert.Equal(gray, decoded.GetPixel(59, 0));
+
+            // Source pixels at the (-x, -y) offset.
+            Assert.Equal(SKColors.CornflowerBlue, decoded.GetPixel(10, 5));
+            Assert.Equal(SKColors.CornflowerBlue, decoded.GetPixel(49, 34));
+        }
+        finally
+        {
+            ImageCropper.CleanupSession(session);
+            Cleanup(dir);
+        }
+    }
+
+    [Fact]
+    public async Task CropAsync_Inner_Crop_Has_No_Fill()
+    {
+        var dir = NewTempDir();
+        var session = NewSessionId();
+        try
+        {
+            var source = WritePng(dir, "photo.png", 40, 30);
+
+            // R5: legacy inner-crop data (positive X/Y) still behaves as before.
+            var output = await ImageCropper.CropAsync(session, "n1", source, 5, 5, 20, 15);
+
+            Assert.NotNull(output);
+            using var decoded = SKBitmap.Decode(output);
+            Assert.Equal(20, decoded.Width);
+            Assert.Equal(15, decoded.Height);
+            Assert.Equal(SKColors.CornflowerBlue, decoded.GetPixel(0, 0));
+            Assert.Equal(SKColors.CornflowerBlue, decoded.GetPixel(19, 14));
+        }
+        finally
+        {
+            ImageCropper.CleanupSession(session);
+            Cleanup(dir);
+        }
+    }
+
+    [Fact]
+    public async Task CropAsync_Inner_Crop_Preserves_Source_Alpha()
+    {
+        var dir = NewTempDir();
+        var session = NewSessionId();
+        try
+        {
+            var source = WriteAlphaPng(dir, "alpha.png", 40, 30);
+
+            var output = await ImageCropper.CropAsync(session, "n1", source, 0, 0, 20, 20);
 
             Assert.NotNull(output);
             using var decoded = SKBitmap.Decode(output);
             Assert.Equal(20, decoded.Width);
             Assert.Equal(20, decoded.Height);
+
+            // Top half is opaque source; the transparent source region must stay transparent
+            // (Src blend), not become the grey fill.
+            Assert.Equal(SKColors.CornflowerBlue, decoded.GetPixel(5, 5));
+            Assert.Equal(0, decoded.GetPixel(5, 18).Alpha);
         }
         finally
         {

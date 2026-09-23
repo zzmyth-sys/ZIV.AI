@@ -26,10 +26,16 @@ public enum CropHandle
 /// new rectangle. The initial rectangle is the node's previous crop when one exists,
 /// otherwise a 75% centered box (<see cref="SetDefaultRect"/>).</para>
 ///
+/// <para><b>Outpaint</b> (Step 9C.4-B): the rectangle may extend <b>outside</b> the image,
+/// producing a larger output canvas whose remaining area is filled (see <c>ImageCropper</c>).
+/// The rectangle is therefore not clamped inside the image; it is limited only to
+/// <see cref="MaxExpandFactor"/>× the image edge, <see cref="MaxPixelCount"/> total pixels,
+/// and a positive-area overlap with the source.</para>
+///
 /// Lifecycle: <see cref="Enter"/> → (<see cref="SetRect"/> / <see cref="SetDefaultRect"/>
 /// / drag) → <see cref="BeginDrag"/> / <see cref="UpdateDrag"/> / <see cref="EndDrag"/> →
-/// <see cref="Exit"/>. The rectangle is always clamped inside the image and never smaller
-/// than <see cref="MinSize"/> on either edge.
+/// <see cref="Exit"/>. The rectangle is never smaller than <see cref="MinSize"/> on either
+/// edge.
 /// </summary>
 public sealed class CropState
 {
@@ -38,6 +44,12 @@ public sealed class CropState
 
     /// <summary>Fraction of the image used by the default (centered) rectangle.</summary>
     public const double DefaultFraction = 0.75;
+
+    /// <summary>Largest output edge, as a multiple of the corresponding image edge (D2).</summary>
+    public const double MaxExpandFactor = 2.0;
+
+    /// <summary>Largest output area, in pixels (D2) — bounds the canvas allocation.</summary>
+    public const double MaxPixelCount = 16_000_000.0;
 
     private double _imageWidth;
     private double _imageHeight;
@@ -115,8 +127,9 @@ public sealed class CropState
 
     /// <summary>
     /// Sets the rectangle explicitly (used to restore a node's previous crop). The
-    /// rectangle is clamped to the image; <see cref="HasRect"/> ends up <c>false</c> when
-    /// the clamped size is below <see cref="MinSize"/> (e.g. the image changed size).
+    /// rectangle is limited by <see cref="ClampToLimits"/> (outer bounds, area, overlap);
+    /// <see cref="HasRect"/> ends up <c>false</c> when the size is below
+    /// <see cref="MinSize"/> (e.g. the image changed size). X / Y may be negative (outpaint).
     /// </summary>
     public void SetRect(double x, double y, double width, double height)
     {
@@ -126,19 +139,23 @@ public sealed class CropState
             return;
         }
 
-        var left = Math.Clamp(x, 0, _imageWidth);
-        var top = Math.Clamp(y, 0, _imageHeight);
-        var right = Math.Clamp(x + width, 0, _imageWidth);
-        var bottom = Math.Clamp(y + height, 0, _imageHeight);
+        var cx = x;
+        var cy = y;
+        var cw = Math.Max(0, width);
+        var ch = Math.Max(0, height);
+        ClampToLimits(ref cx, ref cy, ref cw, ref ch);
 
-        _x = left;
-        _y = top;
-        _width = Math.Max(0, right - left);
-        _height = Math.Max(0, bottom - top);
+        _x = cx;
+        _y = cy;
+        _width = cw;
+        _height = ch;
         HasRect = _width >= MinSize && _height >= MinSize;
     }
 
-    /// <summary>Selects a centered rectangle covering <see cref="DefaultFraction"/> of the image.</summary>
+    /// <summary>
+    /// Selects a centered rectangle covering <see cref="DefaultFraction"/> of the image,
+    /// area-scaled and re-centered when it would exceed <see cref="MaxPixelCount"/>.
+    /// </summary>
     public void SetDefaultRect()
     {
         if (!HasImage)
@@ -146,8 +163,17 @@ public sealed class CropState
             return;
         }
 
-        _width = _imageWidth * DefaultFraction;
-        _height = _imageHeight * DefaultFraction;
+        var width = _imageWidth * DefaultFraction;
+        var height = _imageHeight * DefaultFraction;
+        if (width * height > MaxPixelCount)
+        {
+            var scale = Math.Sqrt(MaxPixelCount / (width * height));
+            width *= scale;
+            height *= scale;
+        }
+
+        _width = width;
+        _height = height;
         _x = (_imageWidth - _width) / 2.0;
         _y = (_imageHeight - _height) / 2.0;
         HasRect = _width >= MinSize && _height >= MinSize;
@@ -242,10 +268,13 @@ public sealed class CropState
 
         if (hit == CropHandle.None)
         {
+            // Build from the raw pointer position (may be outside the image) so a drag that
+            // starts in the gray margin and crosses the image produces a valid outpaint rect.
+            // The raw rect is finalized by EndDrag → Normalize.
             _building = true;
             DragHandle = CropHandle.None;
-            _x = Math.Clamp(imageX, 0, _imageWidth);
-            _y = Math.Clamp(imageY, 0, _imageHeight);
+            _x = imageX;
+            _y = imageY;
             _width = 0;
             _height = 0;
             HasRect = true;
@@ -268,17 +297,13 @@ public sealed class CropState
             return;
         }
 
-        var cx = Math.Clamp(imageX, 0, _imageWidth);
-        var cy = Math.Clamp(imageY, 0, _imageHeight);
-
         if (_building)
         {
-            var sx = Math.Clamp(_startX, 0, _imageWidth);
-            var sy = Math.Clamp(_startY, 0, _imageHeight);
-            var left = Math.Min(sx, cx);
-            var top = Math.Min(sy, cy);
-            var right = Math.Max(sx, cx);
-            var bottom = Math.Max(sy, cy);
+            // Raw build: the rect may be outside the image; EndDrag → Normalize limits it.
+            var left = Math.Min(_startX, imageX);
+            var top = Math.Min(_startY, imageY);
+            var right = Math.Max(_startX, imageX);
+            var bottom = Math.Max(_startY, imageY);
             _x = left;
             _y = top;
             _width = right - left;
@@ -289,11 +314,12 @@ public sealed class CropState
         if (DragHandle == CropHandle.Move)
         {
             // Use the raw pointer delta so the rectangle tracks the cursor even when the
-            // pointer leaves the image; the result is clamped.
-            _x = Math.Clamp(_origX + (imageX - _startX), 0, Math.Max(0, _imageWidth - _origWidth));
-            _y = Math.Clamp(_origY + (imageY - _startY), 0, Math.Max(0, _imageHeight - _origHeight));
+            // pointer leaves the image; the result is limited by ClampToLimits.
+            _x = _origX + (imageX - _startX);
+            _y = _origY + (imageY - _startY);
             _width = _origWidth;
             _height = _origHeight;
+            ClampToLimits(ref _x, ref _y, ref _width, ref _height);
             return;
         }
 
@@ -302,30 +328,33 @@ public sealed class CropState
         var rightE = _origX + _origWidth;
         var bottomE = _origY + _origHeight;
 
+        // Only the min-size relationship is enforced here; the outer / area / overlap
+        // limits are applied once by ClampToLimits below (edges may drag outside the image).
         if (DragHandle is CropHandle.Left or CropHandle.TopLeft or CropHandle.BottomLeft)
         {
-            leftE = Math.Clamp(cx, 0, rightE - MinSize);
+            leftE = Math.Min(imageX, rightE - MinSize);
         }
 
         if (DragHandle is CropHandle.Right or CropHandle.TopRight or CropHandle.BottomRight)
         {
-            rightE = Math.Clamp(cx, leftE + MinSize, _imageWidth);
+            rightE = Math.Max(imageX, leftE + MinSize);
         }
 
         if (DragHandle is CropHandle.Top or CropHandle.TopLeft or CropHandle.TopRight)
         {
-            topE = Math.Clamp(cy, 0, bottomE - MinSize);
+            topE = Math.Min(imageY, bottomE - MinSize);
         }
 
         if (DragHandle is CropHandle.Bottom or CropHandle.BottomLeft or CropHandle.BottomRight)
         {
-            bottomE = Math.Clamp(cy, topE + MinSize, _imageHeight);
+            bottomE = Math.Max(imageY, topE + MinSize);
         }
 
         _x = leftE;
         _y = topE;
         _width = Math.Max(MinSize, rightE - leftE);
         _height = Math.Max(MinSize, bottomE - topE);
+        ClampToLimits(ref _x, ref _y, ref _width, ref _height);
     }
 
     /// <summary>
@@ -357,8 +386,9 @@ public sealed class CropState
     }
 
     /// <summary>
-    /// Projects the rectangle onto integer pixel coordinates inside the image. Returns
-    /// <c>false</c> when there is no usable (non-empty) rectangle.
+    /// Projects the rectangle onto integer pixel coordinates (X / Y may be negative for an
+    /// outpaint). Returns <c>false</c> when there is no usable (non-empty) rectangle. The
+    /// stored rectangle is already limited, so this only rounds.
     /// </summary>
     public bool TryGetPixelRect(out int x, out int y, out int width, out int height)
     {
@@ -368,10 +398,10 @@ public sealed class CropState
             return false;
         }
 
-        var left = (int)Math.Round(Math.Clamp(_x, 0, _imageWidth));
-        var top = (int)Math.Round(Math.Clamp(_y, 0, _imageHeight));
-        var right = (int)Math.Round(Math.Clamp(_x + _width, 0, _imageWidth));
-        var bottom = (int)Math.Round(Math.Clamp(_y + _height, 0, _imageHeight));
+        var left = (int)Math.Round(_x);
+        var top = (int)Math.Round(_y);
+        var right = (int)Math.Round(_x + _width);
+        var bottom = (int)Math.Round(_y + _height);
         width = right - left;
         height = bottom - top;
         if (width <= 0 || height <= 0)
@@ -386,9 +416,49 @@ public sealed class CropState
 
     private void Normalize()
     {
-        _width = Math.Clamp(_width, MinSize, _imageWidth);
-        _height = Math.Clamp(_height, MinSize, _imageHeight);
-        _x = Math.Clamp(_x, 0, Math.Max(0, _imageWidth - _width));
-        _y = Math.Clamp(_y, 0, Math.Max(0, _imageHeight - _height));
+        _width = Math.Clamp(_width, MinSize, MaxWidth);
+        _height = Math.Clamp(_height, MinSize, MaxHeight);
+        ClampToLimits(ref _x, ref _y, ref _width, ref _height);
+    }
+
+    /// <summary>Largest allowed output width / height (D2).</summary>
+    private double MaxWidth => Math.Max(MinSize, _imageWidth * MaxExpandFactor);
+
+    private double MaxHeight => Math.Max(MinSize, _imageHeight * MaxExpandFactor);
+
+    /// <summary>
+    /// Limits a rectangle to the outpaint budget (D2): edges up to
+    /// <see cref="MaxExpandFactor"/>× the image, area up to <see cref="MaxPixelCount"/>, and
+    /// a positive-area overlap with the source. Position is limited only for a non-empty
+    /// rectangle so a zero-size build candidate is left untouched.
+    /// </summary>
+    private void ClampToLimits(ref double x, ref double y, ref double width, ref double height)
+    {
+        if (!HasImage)
+        {
+            return;
+        }
+
+        width = Math.Clamp(width, 0, MaxWidth);
+        height = Math.Clamp(height, 0, MaxHeight);
+
+        if (width > 0 && height > 0 && width * height > MaxPixelCount)
+        {
+            var scale = Math.Sqrt(MaxPixelCount / (width * height));
+            width *= scale;
+            height *= scale;
+        }
+
+        if (width > 0 && height > 0)
+        {
+            // Keep >= 1px overlap with the source and the right/bottom edge within budget.
+            var minX = Math.Max(-_imageWidth, -width + 1);
+            var maxX = Math.Min(_imageWidth - 1, MaxWidth - width);
+            x = Math.Clamp(x, minX, Math.Max(minX, maxX));
+
+            var minY = Math.Max(-_imageHeight, -height + 1);
+            var maxY = Math.Min(_imageHeight - 1, MaxHeight - height);
+            y = Math.Clamp(y, minY, Math.Max(minY, maxY));
+        }
     }
 }

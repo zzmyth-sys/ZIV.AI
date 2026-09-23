@@ -64,6 +64,43 @@ public class SessionStoreTests
     }
 
     [Fact]
+    public async Task Save_Then_Load_RoundTrips_Negative_Crop_Origin()
+    {
+        var root = NewRoot();
+        var source = NewRoot();
+
+        try
+        {
+            var store = new SessionStore(root);
+            var session = new EditSession();
+            session.SetRoot(WriteFile(source, "root.png"));
+            var rootNode = session.GetHistory()[0];
+
+            // Step 9C.4-B: an outpaint origin is negative and must persist as-is.
+            session.SetNodeCrop(rootNode.NodeId, new CropSpec
+            {
+                X = -12, Y = -7, Width = 60, Height = 45,
+                ResultImagePath = WriteFile(source, "crop.png"),
+            });
+
+            await store.SaveAsync(session, "外扩");
+            var loaded = await store.LoadAsync(session.SessionId);
+
+            var loadedRoot = loaded.Session.GetHistory().Single(n => n.NodeId == rootNode.NodeId);
+            Assert.NotNull(loadedRoot.Crop);
+            Assert.Equal(-12, loadedRoot.Crop!.X);
+            Assert.Equal(-7, loadedRoot.Crop.Y);
+            Assert.Equal(60, loadedRoot.Crop.Width);
+            Assert.Equal(45, loadedRoot.Crop.Height);
+        }
+        finally
+        {
+            Cleanup(root);
+            Cleanup(source);
+        }
+    }
+
+    [Fact]
     public async Task Save_Writes_Relative_Image_Names()
     {
         var root = NewRoot();

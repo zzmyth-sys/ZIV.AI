@@ -53,17 +53,46 @@ public class CropStateTests
     }
 
     [Fact]
-    public void SetRect_Restores_And_Clamps_To_Image()
+    public void SetRect_Allows_Negative_X()
     {
         var state = NewState();
 
-        state.SetRect(-100, -100, 5000, 5000);
+        state.SetRect(-100, -50, 500, 400);
 
         Assert.True(state.HasRect);
-        Assert.Equal(0, state.X);
-        Assert.Equal(0, state.Y);
-        Assert.Equal(W, state.Width);
-        Assert.Equal(H, state.Height);
+        Assert.Equal(-100, state.X);
+        Assert.Equal(-50, state.Y);
+        Assert.Equal(500, state.Width);
+        Assert.Equal(400, state.Height);
+    }
+
+    [Fact]
+    public void SetRect_Clamps_To_MaxMargin()
+    {
+        var state = NewState();
+
+        // Far beyond the image: limited to 2x each edge (D2).
+        state.SetRect(-99999, -99999, 99999, 99999);
+
+        Assert.True(state.HasRect);
+        Assert.Equal(-W, state.X);
+        Assert.Equal(-H, state.Y);
+        Assert.Equal(W * 2, state.Width);
+        Assert.Equal(H * 2, state.Height);
+    }
+
+    [Fact]
+    public void SetRect_Clamps_To_MaxPixels()
+    {
+        var state = new CropState();
+        state.SetImageBounds(4000, 4000);
+        state.Enter();
+
+        // 8000x8000 = 64 MP > 16 MP cap -> scaled by 0.5.
+        state.SetRect(0, 0, 8000, 8000);
+
+        Assert.Equal(4000, state.Width);
+        Assert.Equal(4000, state.Height);
     }
 
     [Fact]
@@ -93,7 +122,7 @@ public class CropStateTests
     }
 
     [Fact]
-    public void Move_Is_Clamped_To_Image_Bounds()
+    public void Move_Is_Clamped_To_MaxMargin()
     {
         var state = StateWithRect(100, 100, 400, 300);
 
@@ -101,8 +130,42 @@ public class CropStateTests
         state.UpdateDrag(9999, 9999);
         state.EndDrag();
 
-        Assert.Equal(W - 400, state.X);
-        Assert.Equal(H - 300, state.Y);
+        // The rect may sit past the image but must keep a positive overlap with it.
+        Assert.Equal(W - 1, state.X);
+        Assert.Equal(H - 1, state.Y);
+    }
+
+    [Fact]
+    public void EndDrag_OverImage_ExpandsCanvas()
+    {
+        var state = NewState();
+
+        // Start inside the image, drag out to the top-left -> negative origin (outpaint).
+        state.BeginDrag(300, 200, Tol);
+        state.UpdateDrag(-100, -50);
+        state.EndDrag();
+
+        Assert.True(state.HasRect);
+        Assert.Equal(-100, state.X);
+        Assert.Equal(-50, state.Y);
+        Assert.Equal(400, state.Width);
+        Assert.Equal(250, state.Height);
+    }
+
+    [Fact]
+    public void BuildDrag_From_Margin_Across_Image_Keeps_Start()
+    {
+        var state = NewState();
+
+        // Press in the gray margin (outside the image) and drag across it.
+        state.BeginDrag(-80, -40, Tol);
+        state.UpdateDrag(120, 60);
+        state.EndDrag();
+
+        Assert.Equal(-80, state.X);
+        Assert.Equal(-40, state.Y);
+        Assert.Equal(200, state.Width);
+        Assert.Equal(100, state.Height);
     }
 
     [Theory]

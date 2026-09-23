@@ -3396,3 +3396,119 @@ sessions/last_project.txt  # 上次打开的 sessionId
   `EditSession.SessionId` 改可写属**实现类内部变化**，`FROZEN.md` 尾部记录。
 - `session.json` **格式变化**：新增 `version:1` + `name`，`image_path` 由绝对路径改为**相对名**
   （`FROZEN.md` 尾部记录）。
+
+---
+
+## [Step 9C.4-B] - 2026-09-24
+
+### 目标
+
+**裁切外扩**：裁切框可拖到图像边界之外，确认后生成含「灰 0.5 背景填充」的更大画布
+（纯几何外扩，无 AI）。内裁行为不变。流程：只读调查 → 用户裁决 → light-rip（Medium：
+inline plan → 前置复审 → 实施 → 验证 → 后置复审）。
+
+### 只读调查结论（摘要）
+
+- `CropState` 在 `SetRect` / `BeginDrag` / `UpdateDrag` / `Normalize` / `TryGetPixelRect`
+  五处 `Math.Clamp(..., 0, imageW/H)` —— 内裁约束根源。
+- `ImageCropper.CropAsync` 走 `SKImage.Subset`（**只能裁小**）；`ZIV.Imaging` 无 Crop / Pad /
+  Canvas / Fill 任何原语（全目录确认）。
+- `ImageViewModel.ViewportToImage` / `ImageToViewport` 支持负坐标、无钳制；但 `ClampOffset`
+  使 fit 时不可平移 → 外扩区在视口外不可见（故进入裁切需缩到 65%）。
+- `python/server/outpaint.py` 的 `build_outpaint` 为「灰 `(128,128,128)` 画布 + 偏移 paste」，
+  与 C# 外扩几何同构（C# 不调用 Python）。
+
+### 用户裁决（D1–D5）
+
+- **D1** = 灰 0.5（`128,128,128`，与 outpaint 一致）。
+- **D2** = 边长 ≤ 2× 原图 + 总像素 ≤ 16 MP；**钳制在 `CropState`**，`ImageCropper` 不二次钳制。
+- **D3** = `CropOverlay` 框内图像外填灰 + 进入裁切缩到 **65%** 居中、退出恢复原 Zoom/Offset；
+  提示「拖到图像边界外可外扩」。
+- **D4** = 复用字段，X/Y 允许负；语义 =「输出画布在原图坐标系中的矩形」；原图位置 = `(-X, -Y)`。
+- **D5** = 同一 UI，无模式切换。
+
+### 前置复审（只读子代理）
+
+三轮：首轮 P1（视图保存/恢复时序、遗漏的 cropper 测试、`SetDefaultRect` 绕过上限）→ 修订；
+次轮新 P1（建框起点重叠钳制会吞掉外扩起点）→ 修订；三轮 **Approved**。N2（`MinSize` 保持谓词）、
+N3（clamp-then-round）、N5（默认框面积缩放后居中）、N6（pending restore 清理）、N7（`SKPaint` Dispose）
+一并落实；N4（`Src` 混合 alpha 边界与 Python 差异）记录接受。
+
+### 做了什么
+
+- **`CropState.cs`**：新增 `MaxExpandFactor=2.0` / `MaxPixelCount=16_000_000` 与私有
+  `ClampToLimits`（边上限 + 面积按比例缩 + ≥1px 重叠）。放开边界钳制；建框起点不再钳到图像内
+  （外扩起点保留），`EndDrag → Normalize` 统一限幅；`SetRect` 的 `MinSize` 保持谓词。
+- **`ImageCropper.cs`**：`CropAsync` 改 SkiaSharp 直连——`SKBitmap(w,h,Rgba8888,Premul)` +
+  `SKCanvas.Clear(灰)` + `DrawImage(full,-x,-y,{BlendMode=Src})` + `Encode(Png)`；保留缓存路径 /
+  覆盖 / 清理逻辑；不再 `Subset`。
+- **`CropOverlayGeometry.cs`（新增，纯逻辑）**：`GrayBands`（框内减图像）与 `DarkenBands`
+  （视口减框），返回至多 4 个矩形；无 Avalonia，可单测。
+- **`CropOverlay.axaml.cs`**：框内图像外填 `#808080`，框外暗化；用 `CropOverlayGeometry` 精确算交集。
+- **`ImageViewModel.cs`**：新增 `FitWithMargin(factor)` / `RestoreView(z,ox,oy)`（清 `_pendingFit`、
+  重新 `ClampOffset`）。
+- **`ImagePreview.Crop.cs` / `ImagePreview.axaml.cs`**：进入裁切先存视图 → 加载原图 →
+  `RefreshCropBounds` 内 `FitWithMargin(0.65)`；退出置 `_pendingViewRestore`，`LoadAsync` 完成后
+  `ApplyPendingViewRestore` 恢复；进入提示；确认走 `ExitCropMode` 加载结果图（去掉重复 force 加载）。
+- **测试**：`CropStateTests` 删两条内裁钳制断言，加 `SetRect_Allows_Negative_X` /
+  `SetRect_Clamps_To_MaxMargin` / `SetRect_Clamps_To_MaxPixels` / `Move_Is_Clamped_To_MaxMargin` /
+  `EndDrag_OverImage_ExpandsCanvas` / `BuildDrag_From_Margin_Across_Image_Keeps_Start`；
+  `ImageCropperTests` 删 `CropAsync_Clamps_Rectangle_To_Image`，加扩展画布灰填充 / 内裁无填充 /
+  内裁保留源 alpha；`ImageViewModelTests` 加 `FitWithMargin` / `RestoreView` 4 例；新增
+  `CropOverlayGeometryTests` 6 例；`SessionStoreTests` 加负原点裁切持久化 1 例。
+- **文档**：本段 + `FROZEN.md` 尾部 9C.4-B + `ACCEPTANCE.MD` Step 9C.4-B。
+
+### 外扩几何算法
+
+输出画布 = 裁切框矩形 `R=[X,X+W]×[Y,Y+H]`（原图坐标，X/Y 可负）；原图贴到 `(-X,-Y)`；
+其余填灰。上限：`W ≤ 2·imgW`、`H ≤ 2·imgH`、`W·H ≤ 16MP`，且 `R` 与原图 ≥1px 重叠。
+
+### 填充实现
+
+`SKBitmap(Premul)` → `Clear((128,128,128,255))` → `DrawImage(full, -x, -y, paint{Src})`：
+无源区为不透明灰，源区保留源像素（含 alpha）→ 内裁 alpha PNG 行为不变。
+
+### 预览方案
+
+`CropOverlay` 在框内、图像外画灰（与结果一致）；进入裁切缩到 65% 让四周留白可拖；
+退出恢复进入前视图。
+
+### `CropSpec` 字段变化
+
+**零签名变化**——复用 `X/Y/Width/Height/ResultImagePath`；仅 `X/Y` 语义扩展为可负。
+
+### 附带发现（仅登记，不改既有行）
+
+- **FROZEN 9C.4.1**：`CropCompletedEventArgs` 记的是 `SourceImagePath`/`OutputPath`，但 9C.6-B
+  已改为 `NodeId`/`CropSpec` —— 过时。
+- **FROZEN 9C.4.4**：落盘规则 `<stem>_crop_<timestamp>.png` 已被 9C.6-B2 的
+  `_cache/crops/{sessionId}/{nodeId}.png` 取代 —— 过时。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：受影响类 **68 通过 / 0 失败**；非 GPU 全量（排除 `Ipc*` /
+  `PlannerIntegration`）→ **270 通过 / 0 失败**。
+- `dotnet publish src\ZivAiEditor.App -c Release -r win-x64` → NativeAOT **成功**。
+- **未跑 GPU**（Z29 / Z30）；本步不启动 Python、不加载模型、不占 GPU。
+- **Z8**：改动 / 新增文件均 < 600 行（`ImagePreview.Crop.cs`、`CropState.cs`、`CropOverlayGeometry.cs` 等）。
+- **Z9 / Z11**：`SKBitmap` / `SKCanvas` / `SKImage` / `SKPaint` 全 `using`；裁切在 `Task.Run` 后台线程。
+- **Z24**：输出新文件，源图字节级不变（`ImageCropperTests` 断言）。
+
+### 遗留项
+
+- **`_cache` 总量上限 / 淘汰策略**：属 Z12，另立步。
+- **outpaint 精确对齐**（outpaint 几何回传）：另立步。
+- **划像对比内容**改为「父 pipeline 图 vs 当前原图」：9C.6-B 遗留，另立。
+- 确认后恢复的是进入裁切前的视图（D3）；结果图尺寸不同，视觉上可能略异（已接受）。
+- 真机交互由用户执行。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未改** Contracts 既有成员（`CropSpec` 签名零变化）/ `python/server/*` / `ipc-protocol.md` /
+  `C:\AI\ComfyUI_PIC`；**未新增 NuGet**；**未改** chrome / `ToolStateMachine` / `CompareState` /
+  图片导入 / 分辨率选择器 / 项目列表 / 大图保存。
+- `FROZEN.md` 尾部追加 9C.4-B（语义 + 行为变化 + 附带发现，**不改已冻结行**）；
+  `ACCEPTANCE.MD` 追加 Step 9C.4-B 验收段。

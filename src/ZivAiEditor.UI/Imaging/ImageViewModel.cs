@@ -161,6 +161,38 @@ public sealed class ImageViewModel
         ClampOffset();
     }
 
+    /// <summary>
+    /// Fits the image then scales by <paramref name="factor"/> (e.g. 0.65 to leave room for
+    /// outpaint dragging), centered. Used by the crop tool (Step 9C.4-B); clears the pending
+    /// fit so a later resize does not snap back to full fit.
+    /// </summary>
+    public void FitWithMargin(double factor)
+    {
+        if (factor <= 0)
+        {
+            factor = 1.0;
+        }
+
+        ZoomPercent = Clamp((int)(FitZoomPercent * factor));
+        OffsetX = 0;
+        OffsetY = 0;
+        _pendingFit = false;
+        ClampOffset();
+    }
+
+    /// <summary>
+    /// Restores a previously saved zoom / offset (Step 9C.4-B). Clears the pending fit and
+    /// re-clamps the offset for the current image / viewport.
+    /// </summary>
+    public void RestoreView(int zoomPercent, double offsetX, double offsetY)
+    {
+        ZoomPercent = Clamp(zoomPercent);
+        OffsetX = offsetX;
+        OffsetY = offsetY;
+        _pendingFit = false;
+        ClampOffset();
+    }
+
     /// <summary>Toggles between the fit view and actual size (double-click action).</summary>
     public void ToggleFitActual()
     {

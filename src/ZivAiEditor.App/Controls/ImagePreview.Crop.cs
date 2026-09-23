@@ -40,6 +40,9 @@ public partial class ImagePreview
 {
     private const double CropHandlePaddingPx = 8.0;
 
+    /// <summary>Fit factor applied while cropping so the gray margin is reachable (D3).</summary>
+    private const double CropViewMarginFactor = 0.65;
+
     private CropState? _crop;
     private CropOverlay? _cropOverlay;
     private Border? _cropActions;
@@ -66,6 +69,12 @@ public partial class ImagePreview
 
     /// <summary>What the preview shows when compare is off: the crop result, else the original.</summary>
     private string? _displayPath;
+
+    /// <summary>View (zoom / offset) saved on entering crop, restored on exit (D3).</summary>
+    private (int Zoom, double OffsetX, double OffsetY)? _viewBeforeCrop;
+
+    /// <summary>View to restore after the next preview load completes (exit-crop path).</summary>
+    private (int Zoom, double OffsetX, double OffsetY)? _pendingViewRestore;
 
     /// <summary>Raised after a crop is written (App stores it on the node).</summary>
     public event EventHandler<CropCompletedEventArgs>? CropCompleted;
@@ -119,6 +128,8 @@ public partial class ImagePreview
         _nodeOriginalPath = originalPath;
         _nodeCrop = crop;
         _displayPath = crop is { ResultImagePath.Length: > 0 } ? crop.ResultImagePath : originalPath;
+        _pendingViewRestore = null;
+        _viewBeforeCrop = null;
 
         // While cropping, show the original (crop coordinates are original-relative);
         // RefreshCropBounds runs after the decode and re-seeds the rectangle.
@@ -158,6 +169,11 @@ public partial class ImagePreview
             _crop.Enter();
             _lastClickAt = DateTime.MinValue;
 
+            // Save the current view before any (async) load so it can be restored on exit;
+            // the 65% crop fit is applied later by RefreshCropBounds, after the decode.
+            _viewBeforeCrop = (_model.ZoomPercent, _model.OffsetX, _model.OffsetY);
+            _pendingViewRestore = null;
+
             // Crop on the node's ORIGINAL image so the rectangle is in original-image
             // coordinates and re-cropping never chains onto a previous crop result.
             if (!string.IsNullOrWhiteSpace(_nodeOriginalPath)
@@ -172,6 +188,7 @@ public partial class ImagePreview
             }
 
             ShowCropChrome(true);
+            ShowCropToast("拖到图像边界外可外扩");
         }
         else if (!wantCrop && IsCropActive)
         {
@@ -199,12 +216,46 @@ public partial class ImagePreview
             _tools.SetTool(ToolMode.None);
         }
 
+        // Restore the pre-crop view once the display image is (re)loaded; the load is async,
+        // so the restore is applied by LoadAsync via ApplyPendingViewRestore.
+        if (_viewBeforeCrop is { } view)
+        {
+            _pendingViewRestore = view;
+            _viewBeforeCrop = null;
+        }
+
         // Show the node's crop result (or its original when uncropped) again.
         if (!string.IsNullOrWhiteSpace(_displayPath)
             && !string.Equals(_path, _displayPath, StringComparison.OrdinalIgnoreCase))
         {
             LoadImage(_displayPath);
         }
+        else
+        {
+            ApplyPendingViewRestore();
+        }
+    }
+
+    /// <summary>
+    /// Applies the view saved when crop mode was entered (D3), once the display image is
+    /// loaded. Called from <c>LoadAsync</c> after a load completes and directly on the
+    /// no-reload exit path. No-op when nothing is pending or no image is shown.
+    /// </summary>
+    private void ApplyPendingViewRestore()
+    {
+        if (_pendingViewRestore is not { } view)
+        {
+            return;
+        }
+
+        _pendingViewRestore = null;
+        if (!_model.HasImage)
+        {
+            return;
+        }
+
+        _model.RestoreView(view.Zoom, view.OffsetX, view.OffsetY);
+        ApplyModel();
     }
 
     private void ShowCropChrome(bool visible)
@@ -358,10 +409,11 @@ public partial class ImagePreview
 
             _nodeCrop = spec;
             _displayPath = output;
+
+            // ExitCropMode reloads the display image (the crop result). While cropping the
+            // preview shows the original, so the path changes and the fresh (overwritten)
+            // temp file is decoded; the saved view is restored once that load completes.
             ExitCropMode();
-            // Force: the crop temp file is overwritten in place, so the path is unchanged
-            // but its content is new.
-            LoadImage(output, force: true);
             CropCompleted?.Invoke(this, new CropCompletedEventArgs(nodeId, spec));
         }
         catch (Exception ex)
@@ -448,6 +500,10 @@ public partial class ImagePreview
         _crop.SetImageBounds(_model.ImageWidth, _model.ImageHeight);
         RestoreOrDefaultCrop();
         _cropPointerDown = false;
+
+        // Shrink to 65% of fit so the gray margin around the image is reachable by dragging.
+        _model.FitWithMargin(CropViewMarginFactor);
+        ApplyModel();
         _cropOverlay?.InvalidateVisual();
     }
 }

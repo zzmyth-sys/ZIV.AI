@@ -2319,3 +2319,64 @@ Agent 编排，应下沉至 Agent；涉及 `IExecutor` 设计变更，单独立�
 - **「另存为」入口**：`SessionStore.ExportToAsync` 保留，UI 后置。
 - **项目缩略图 / 项目导入** → 后置。
 - **App 层编排无自动化测试**：属 UI 层。
+
+---
+
+## Step 9C.4-B（日期：2026-09-24）
+
+> **修订说明（Step 9C.4-B · 裁切外扩：拖出边界 + 灰底画布）**
+>
+> 本段为 Step 9C.4-B **只增**记录。目标：裁切框可拖到图像边界之外，确认后生成含
+> 「灰 0.5 背景填充」的更大画布（纯几何外扩，无 AI）。**不改动 Step 0–9C.6-E 已冻结行**；
+> 本段为**纯追加**。**`CropSpec` 签名零变化**——复用既有字段，仅扩展 X / Y 语义（允许负值）。
+> `session.json` 格式 v1 不变。
+
+### 9C.4-B.1 `CropSpec` 语义扩展（冻结 · 非签名）
+
+- `CropSpec.X` / `Y` / `Width` / `Height` 的语义统一为「**输出画布在原图坐标系中的矩形**」：
+  - 内裁：`X ≥ 0` 且 `X + Width ≤ 原图宽`（行为不变）。
+  - 外扩：`X` / `Y` **允许为负**；原图在输出画布中的位置 = `(-X, -Y)`。
+- **字段 / 类型签名零变化**（`X` / `Y` / `Width` / `Height` / `ResultImagePath` 均 `init`）；
+  `SessionStore` / `SessionLoader` 的 `crop { x, y, width, height, result_image_path }`
+  **格式不变**（负整数正常持久化）。
+
+### 9C.4-B.2 外扩上限（冻结 · 非契约）
+
+- `CropState` 新增常量 `MaxExpandFactor = 2.0`（输出边长 ≤ 2× 原图对应边）与
+  `MaxPixelCount = 16_000_000`（输出总像素 ≤ 16 MP）。
+- 私有 `ClampToLimits` 统一钳制：边上限 + 面积上限（超限按比例缩）+ **≥1px 正面积重叠**
+  （`x ∈ [max(-imgW, -w+1), min(imgW-1, 2·imgW-w)]`，y 对称）。
+- **钳制只在 `CropState`**；`ImageCropper` 不二次钳制（仅 `width/height > 0` 防御）。
+- 内裁语义保留：`SetRect` 的 `MinSize` 仍是**谓词**（小于即 `HasRect=false`），
+  仅在 `Normalize` / 缩放时作为下限。
+
+### 9C.4-B.3 行为变化（冻结 · 非契约）
+
+| 项 | 变化 |
+|---|---|
+| `CropState` | 放开图像边界钳制（可负 / 超界）；`BeginDrag` 建框起点不再钳到图像内；`SetDefaultRect` 走面积上限并保持居中 |
+| `ImageCropper` | `CropAsync` 改 **SkiaSharp 直连**：`new SKBitmap(w,h,Rgba8888,Premul)` → `SKCanvas.Clear((128,128,128))` → `DrawImage(full, -x, -y, paint{Src})` → `Encode(Png)`；不再 `SKImage.Subset` |
+| `CropOverlay` | 框内、图像外区域填灰 `#808080`；框外暗化保留（精确交集，见 `CropOverlayGeometry`） |
+| `ImageViewModel` | 新增 `FitWithMargin(double factor)` 与 `RestoreView(int, double, double)`（纯逻辑，非契约） |
+| `CropOverlayGeometry`（新增） | 纯几何静态类（无 Avalonia），输出灰带 / 暗化带 |
+| `ImagePreview.Crop` | 进入裁切保存原 Zoom/Offset → 缩到 `FitZoomPercent×0.65` 居中；退出恢复；进入时提示「拖到图像边界外可外扩」 |
+
+- `DrawImage` 用 `SKBlendMode.Src` + `Premul`：源图自身 alpha 处保留原值（内裁 alpha PNG
+  行为不变），仅无源区为不透明灰。
+
+### 9C.4-B.4 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→
+  **270 通过 / 0 失败**；新增 `CropOverlayGeometryTests`；`CropStateTests` / `ImageCropperTests` /
+  `ImageViewModelTests` / `SessionStoreTests`（负原点持久化）扩展。
+- `dotnet publish src\ZivAiEditor.App -c Release -r win-x64` → NativeAOT **成功**。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 9C.4-B.5 附带发现（冻结 · 仅记录，不改既有行）
+
+- **FROZEN 9C.4.1** 记 `CropCompletedEventArgs` 为 `SourceImagePath` / `OutputPath`，
+  但 **9C.6-B** 已改为 `NodeId` / `CropSpec`——该行过时（9C.6-B 段已覆盖新语义）。
+- **FROZEN 9C.4.4** 记落盘规则 `<stem>_crop_<timestamp>.png`，已被 **9C.6-B2** 的
+  `_cache/crops/{sessionId}/{nodeId}.png` 取代。
+- 上述两行**按修改铁律不改**，仅在此登记。

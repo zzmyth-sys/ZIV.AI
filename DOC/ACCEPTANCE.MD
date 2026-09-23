@@ -1862,3 +1862,68 @@ V4（App 装配统一）、#6（删死状态写入）、#7（导入事件命名�
 1. 追加 `DEVLOG.md` 的 Step 9C.6-E 记录（本步已完成）
 2. 在「验收记录」追加"Step 9C.6-E 通过，日期：____"（待签）
 3. 进入后续 Step（9C.5-D 多图管线 / 另存为入口 / 9C.4-B 外扩 等，由用户决定）
+
+---
+
+## Step 9C.4-B 验收：裁切外扩（拖出边界 + 灰底画布）
+
+**目标**：裁切框可拖到图像边界之外，确认后生成含「灰 0.5 背景填充」的更大画布（纯几何外扩，
+无 AI）。内裁行为不变。范围外：GPU 端到端（Z29 / Z30），真机交互由用户执行。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 仅改/增 UI / App 内部；无新增项目引用、无反向 / 循环依赖 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `CropSpec` 签名**零变化**（仅 X/Y 语义扩展）；新增类型均非契约 | ✅ |
+| G4 | 未授权修改检查 | 无既有冻结签名被改；语义扩展已在 `FROZEN` 9C.4-B 记录 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `FROZEN` 追加 Step 9C.4-B | ✅ |
+| G6 | 便携性未破 | 输出仍落程序目录 `_cache/crops`（Z14） | ✅ |
+| G7 | AI 推理进程隔离未破 | 外扩为纯本地 Skia 处理，不加载 Python（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.4B.1 | 框可拖出边界 | `CropStateTests` | 负 X / 超界右 / 下均允许（`SetRect_Allows_Negative_X`） | ✅ |
+| 9C.4B.2 | 边长上限 | `CropStateTests` | 超限钳到 2× 原图（`SetRect_Clamps_To_MaxMargin`） | ✅ |
+| 9C.4B.3 | 像素上限 | `CropStateTests` | 超 16MP 按比例缩（`SetRect_Clamps_To_MaxPixels`） | ✅ |
+| 9C.4B.4 | 建框外扩起点 | `CropStateTests` | 从灰边按下拖过图像保留起点（`BuildDrag_From_Margin_Across_Image_Keeps_Start`） | ✅ |
+| 9C.4B.5 | 拖动外扩 | `CropStateTests` | 拖出图像得负原点的框（`EndDrag_OverImage_ExpandsCanvas`） | ✅ |
+| 9C.4B.6 | 内裁谓词保留 | `CropStateTests` | `SetRect_Below_MinSize_Clears_HasRect` 仍过 | ✅ |
+| 9C.4B.7 | 扩展画布尺寸 | `ImageCropperTests` | 输出 = 框尺寸（`CropAsync_Expands_Canvas_With_Gray_Fill`） | ✅ |
+| 9C.4B.8 | 灰填充 | `ImageCropperTests` | 无源区 = (128,128,128) | ✅ |
+| 9C.4B.9 | 原图位置 | `ImageCropperTests` | 源贴到 `(-X,-Y)` | ✅ |
+| 9C.4B.10 | 旧数据兼容 | `ImageCropperTests` | 内裁（正 X/Y）无填充（`CropAsync_Inner_Crop_Has_No_Fill`） | ✅ |
+| 9C.4B.11 | 原图不覆盖 | `ImageCropperTests` | 源图字节级不变（Z24） | ✅ |
+| 9C.4B.12 | 叠加渲染 | `CropOverlayGeometryTests` | 框内图像外灰带 + 框外暗化带（精确交集） | ✅ |
+| 9C.4B.13 | 预览视图 | 查 `ImagePreview.Crop.cs` | 进入存视图 + `FitWithMargin(0.65)`；退出 `RestoreView` | ✅ |
+| 9C.4B.14 | 提示 | 查 `ImagePreview.Crop.cs` | 进入裁切提示「拖到图像边界外可外扩」 | ✅ |
+| 9C.4B.15 | AOT | `dotnet publish -r win-x64` | NativeAOT 成功 | ✅ |
+| 9C.4B.16 | Z8 行数 | 查改动文件 | 均 < 600 行 | ✅ |
+| 9C.4B.17 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；受影响 68；非 GPU 全量 270 通过 | ✅ |
+| 9C.4B.18 | 无 GPU 负载 | 测试 / publish 过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.4B.19 | 真机交互 | 用户执行一次真机验收 | 拖出边界允许 / 灰底反馈 / 确认生成更大图 + 预览切结果 / 反复调整覆盖 / 内裁正常 / 无回归 | ⏳ 待用户确认 |
+| 9C.4B.20 | 启动 / 无残留 | 启动 exe + 进程表 | 窗口正常、无新 Python 进程；结束无残留、未占 GPU | ⏳ 待用户确认 |
+
+### Step 9C.4-B 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.4B.1–9C.4B.18 全过；9C.4B.19 / 9C.4B.20 由用户真机确认。
+
+### Step 9C.4-B 遗留说明（非阻断）
+
+- **outpaint 精确对齐**（outpaint 几何回传）：另立步。
+- **划像对比内容**改为「父 pipeline 图 vs 当前原图」：9C.6-B 遗留，另立。
+- **`_cache` 总量上限 / 淘汰策略**：属 Z12，另立。
+- 确认后恢复进入裁切前视图（D3）；结果图尺寸不同，视觉上可能略异。
+- **FROZEN 9C.4.1 / 9C.4.4 行过时**（CropCompletedEventArgs 字段 / 旧落盘规则）：已登记，不改既有行。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### Step 9C.4-B 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 9C.4-B 记录（本步已完成）
+2. 在「验收记录」追加"Step 9C.4-B 通过，日期：____"（待签）
+3. 进入后续 Step（outpaint 精确对齐 / 9C.5-D 多图管线 / 另存为入口 等，由用户决定）
