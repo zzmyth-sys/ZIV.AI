@@ -1,0 +1,26 @@
+namespace ZivAiEditor.Contracts.Planning;
+
+/// <summary>
+/// Read-only projection of one executed edit in the session DAG (Step 9C.5). The
+/// concrete node lives in the Agent layer (<c>EditNode</c>); the UI consumes only
+/// this interface, so it no longer references the Agent implementation type (V1).
+///
+/// Fields mirror the frozen <c>EditNode</c> exactly — no geometry is added here
+/// (precise outpaint geometry is a separate follow-up).
+/// </summary>
+public interface IEditNode
+{
+    /// <summary>Stable node id (unique within the session).</summary>
+    string NodeId { get; }
+
+    /// <summary>Parent node id; <c>null</c> for a direct child of the root image.</summary>
+    string? ParentNodeId { get; }
+
+    /// <summary>The output image produced by this node (always a new file — Z24).</summary>
+    string ImagePath { get; }
+
+    /// <summary>The user input that produced this node (shown in the history list).</summary>
+    string Command { get; }
+
+    DateTimeOffset CreatedAt { get; }
+}

@@ -40,7 +40,8 @@ public partial class MainWindow : Window
 
     private SessionViewModel _vm = null!;
     private ISessionExporter _exporter = null!;
-    private IModelProfileRegistry _modelProfiles = new ModelProfileRegistry();
+    private IModelProfileRegistry _modelProfiles = null!;
+    private EditSession _session = null!;
     private ImagePreview? _imagePreview;
     private CancellationTokenSource? _cts;
     private bool _closing;
@@ -63,16 +64,17 @@ public partial class MainWindow : Window
         ICommandParser commandParser,
         IExecutor executor,
         ISessionExporter sessionExporter,
-        LaunchOptions? launchOptions = null,
-        IModelProfileRegistry? modelProfiles = null)
+        IModelProfileRegistry modelProfiles,
+        LaunchOptions? launchOptions = null)
     {
         _exporter = sessionExporter ?? throw new ArgumentNullException(nameof(sessionExporter));
-        if (modelProfiles is not null)
-        {
-            _modelProfiles = modelProfiles;
-        }
+        _modelProfiles = modelProfiles ?? throw new ArgumentNullException(nameof(modelProfiles));
+        _session = session ?? throw new ArgumentNullException(nameof(session));
 
-        _vm = new SessionViewModel(session, commandParser, executor);
+        // Step 9C.5: the same EditSession instance is passed as both the read-only
+        // session view and the writer (it implements IEditSession / IEditSessionWriter);
+        // the UI view model never references the Agent implementation type.
+        _vm = new SessionViewModel(session, session, commandParser, executor);
 
         InitializeComponent();
         if (this.FindControl<ChromeTitleBar>("PART_Chrome") is { } chrome)
@@ -464,7 +466,12 @@ public partial class MainWindow : Window
             send.IsEnabled = !busy;
         }
 
-        SetStatus(busy ? "处理中…" : "就绪");
+        // No "就绪" write: SetStatus only updates the pending bubble, and when not busy
+        // there is none, so it would be a no-op (Step 9C.3-R #6).
+        if (busy)
+        {
+            SetStatus("处理中…");
+        }
     }
 
     private void ScrollToEnd()
@@ -527,7 +534,7 @@ public partial class MainWindow : Window
         }
 
         // An empty session has nothing to save; close without prompting.
-        var hasContent = _vm.History.Count > 0 || !string.IsNullOrEmpty(_vm.Session.RootImagePath);
+        var hasContent = _vm.History.Count > 0 || !string.IsNullOrEmpty(_session.RootImagePath);
         if (!hasContent)
         {
             return;
@@ -542,7 +549,7 @@ public partial class MainWindow : Window
             if (save == true && await PickFolderAsync() is { Length: > 0 } directory)
             {
                 // A failed export returns null and must not block the close (INTERACTION.md §4).
-                await _exporter.ExportAsync(_vm.Session, directory);
+                await _exporter.ExportAsync(_session, directory);
             }
         }
         catch (Exception ex)

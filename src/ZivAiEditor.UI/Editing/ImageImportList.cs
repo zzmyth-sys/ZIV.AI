@@ -23,7 +23,7 @@ public sealed class ImageImportChangedEventArgs : EventArgs
 /// owns the actual file decoding.
 ///
 /// <para>De-duplication compares paths with <see cref="StringComparison.OrdinalIgnoreCase"/>
-/// (Windows file paths are case-insensitive). A batch add raises <see cref="Changed"/>
+/// (Windows file paths are case-insensitive). A batch add raises <see cref="ImagesChanged"/>
 /// exactly once, so a multi-image drop is a single atomic transition.</para>
 /// </summary>
 public sealed class ImageImportList
@@ -31,7 +31,7 @@ public sealed class ImageImportList
     private readonly List<string> _paths = new();
 
     /// <summary>Raised once per mutating operation that actually changed the list.</summary>
-    public event EventHandler<ImageImportChangedEventArgs>? Changed;
+    public event EventHandler<ImageImportChangedEventArgs>? ImagesChanged;
 
     /// <summary>The imported image paths, oldest first.</summary>
     public IReadOnlyList<string> Paths => _paths;
@@ -44,7 +44,7 @@ public sealed class ImageImportList
         => !string.IsNullOrWhiteSpace(path) && _paths.Any(p => Same(p, path));
 
     /// <summary>
-    /// Adds a batch of paths, skipping blanks and duplicates. Raises <see cref="Changed"/>
+    /// Adds a batch of paths, skipping blanks and duplicates. Raises <see cref="ImagesChanged"/>
     /// once when at least one path was added. Returns the number of paths added.
     /// </summary>
     public int AddRange(IEnumerable<string>? paths)
@@ -102,7 +102,7 @@ public sealed class ImageImportList
     }
 
     private void RaiseChanged(int before)
-        => Changed?.Invoke(this, new ImageImportChangedEventArgs
+        => ImagesChanged?.Invoke(this, new ImageImportChangedEventArgs
         {
             CountBefore = before,
             CountAfter = _paths.Count,

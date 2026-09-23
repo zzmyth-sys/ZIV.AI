@@ -20,7 +20,22 @@ public interface ICommandParser
     /// Parses <paramref name="input"/> into an <see cref="EditPlan"/> using the
     /// current working image from <paramref name="session"/> as the source.
     /// </summary>
-    Task<ParseResult> ParseAsync(string input, EditSession session, CancellationToken ct = default);
+    Task<ParseResult> ParseAsync(string input, IEditSession session, CancellationToken ct = default);
+
+    /// <summary>
+    /// Parses <paramref name="input"/> as <see cref="ParseAsync(string, IEditSession, CancellationToken)"/>
+    /// and, when the produced plan carries no resolution of its own, stamps
+    /// <paramref name="resolution"/> onto <see cref="EditPlan.Resolution"/> (V3: moved
+    /// down from the UI, which used to rebuild the whole plan). The UI-selected
+    /// resolution therefore never overrides a resolution the parser already produced
+    /// (e.g. the explicit <c>/扩图</c> width / height). A <c>null</c>
+    /// <paramref name="resolution"/> leaves the plan unchanged.
+    /// </summary>
+    Task<ParseResult> ParseAsync(
+        string input,
+        IEditSession session,
+        ResolutionPolicy? resolution,
+        CancellationToken ct = default);
 }
 
 /// <summary>Outcome of <see cref="ICommandParser.ParseAsync"/>.</summary>
@@ -98,7 +113,14 @@ public sealed class CommandParser : ICommandParser
     /// <summary>The loaded command set (file or built-in default).</summary>
     public IReadOnlyList<CommandDefinition> Commands => _commands;
 
-    public Task<ParseResult> ParseAsync(string input, EditSession session, CancellationToken ct = default)
+    public Task<ParseResult> ParseAsync(string input, IEditSession session, CancellationToken ct = default)
+        => ParseAsync(input, session, resolution: null, ct);
+
+    public Task<ParseResult> ParseAsync(
+        string input,
+        IEditSession session,
+        ResolutionPolicy? resolution,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(session);
         ct.ThrowIfCancellationRequested();
@@ -113,10 +135,43 @@ public sealed class CommandParser : ICommandParser
             ? ParseSlashCommand(text, session)
             : ParseNaturalLanguage(text, session);
 
-        return Task.FromResult(result);
+        return Task.FromResult(ApplyResolution(result, resolution));
     }
 
-    private ParseResult ParseSlashCommand(string text, EditSession session)
+    /// <summary>
+    /// Stamps the UI-selected <paramref name="resolution"/> onto a plan that does not
+    /// carry one of its own (V3). The parser-produced resolution (explicit
+    /// <c>/扩图</c> width / height) always wins; a <c>null</c> resolution or a failed /
+    /// planless parse is returned unchanged. <see cref="EditPlan"/> is init-only, so
+    /// this rebuilds the plan to set the field.
+    /// </summary>
+    private static ParseResult ApplyResolution(ParseResult result, ResolutionPolicy? resolution)
+    {
+        if (resolution is null || result.Plan is not { Resolution: null } plan)
+        {
+            return result;
+        }
+
+        return new ParseResult
+        {
+            Success = result.Success,
+            MatchedCommand = result.MatchedCommand,
+            ErrorMessage = result.ErrorMessage,
+            Plan = new EditPlan
+            {
+                PlanId = plan.PlanId,
+                SourcePrompt = plan.SourcePrompt,
+                MainImagePath = plan.MainImagePath,
+                ReferenceImagePath = plan.ReferenceImagePath,
+                Mask = plan.Mask,
+                Steps = plan.Steps,
+                CreatedAt = plan.CreatedAt,
+                Resolution = resolution,
+            },
+        };
+    }
+
+    private ParseResult ParseSlashCommand(string text, IEditSession session)
     {
         var parts = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         var name = parts[0];
@@ -166,7 +221,7 @@ public sealed class CommandParser : ICommandParser
         };
     }
 
-    private ParseResult ParseNaturalLanguage(string prompt, EditSession session)
+    private ParseResult ParseNaturalLanguage(string prompt, IEditSession session)
     {
         var mainImage = session.GetCurrentImagePath();
         if (string.IsNullOrWhiteSpace(mainImage) && string.IsNullOrWhiteSpace(prompt))

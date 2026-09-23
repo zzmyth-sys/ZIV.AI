@@ -362,6 +362,13 @@ TaskState 变化 ──► SQLite 持久化（App 订阅 / 写入，Z20）
 
 规则：**下层不引用上层**；所有跨模块接线发生在 `ZivAiEditor.App`（对应 Z2 / Z6）。
 
+### 6.1 状态依赖规则（9C.5 追加）
+
+- 工具域状态（`ToolStateMachine` / `CompareState`）**可读取**会话域状态（如 `HasImage`）
+- 会话域状态**不可读取**工具域状态
+- 后端域状态（`PythonBackendState`）**独立**，不被其他域读取
+- UI 局部状态（pending 气泡 / 分辨率选择）只属于 `SessionViewModel`
+
 ## 7. 模块树
 
 ```

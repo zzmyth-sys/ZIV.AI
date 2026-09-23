@@ -27,8 +27,8 @@ public partial class App : Application
                 _context.CommandParser,
                 _context.Executor,
                 _context.SessionExporter,
-                options,
-                _context.ModelProfiles);
+                _context.ModelProfiles,
+                options);
             desktop.MainWindow = window;
 
             // Backend preview frames (0x02) → pending bubble, marshalled to the UI thread.

@@ -11,20 +11,25 @@ namespace ZivAiEditor.App.Controls;
 /// Self-drawn swipe-compare overlay (Step 9C.2-C). It renders on top of the
 /// <c>AdvancedImageBox</c> (which keeps showing the current image on the right side):
 /// the overlay draws the <b>parent</b> (reference) image on the left of a vertical
-/// divider and fills everything outside the parent with the canvas background.
+/// divider.
 ///
 /// <para><b>Why self-drawn</b> (see DEVLOG Step 9C.2-C): drawing both bitmaps through
 /// the shared <see cref="ImageViewModel"/> transform guarantees the two layers stay
-/// pixel-aligned through pan / zoom, and gives exact control over the background fill
-/// for the "simplified alignment" case — without reparenting a second <c>Image</c>
-/// into the renderer's template, and with no new NuGet.</para>
+/// pixel-aligned through pan / zoom — without reparenting a second <c>Image</c> into
+/// the renderer's template, and with no new NuGet.</para>
 ///
-/// <para><b>Simplified alignment</b>: when the parent size differs from the current
-/// canvas (typical after an outpaint), the parent is drawn <b>centered</b> on the
-/// current image rect and the surrounding region is filled with the canvas background
-/// (not scaled to fit). Precise outpaint geometry is a registered follow-up — it is
-/// not currently carried through <c>EditNode</c> / the IPC <c>result</c> frame, so the
-/// offset is unavailable in C# (see DEVLOG / OPTIMIZATION legacy items).</para>
+/// <para><b>Alignment (current implementation)</b>: the edit pipeline resizes the
+/// source to the target size before inference, so the output canvas and the (resized)
+/// source share dimensions. The parent is therefore drawn over the <b>full current-image
+/// rect</b> (<c>DrawImage(parent, currentRect)</c>), matching the current image 1:1.
+/// Precise outpaint geometry (parent offset inside the output canvas) is not carried
+/// through <c>EditNode</c> / the IPC <c>result</c> frame, so it remains a registered
+/// follow-up (see DEVLOG / OPTIMIZATION legacy items).</para>
+///
+/// <para><b>Note</b>: the 9C.2C.9 acceptance text described an earlier
+/// "centered + background fill" design; the implementation was changed to "fill the
+/// current-image rect" and this comment was updated to match (Step 9C.3-R #10). The
+/// discrepancy is recorded in the 9C.3-R DEVLOG entry.</para>
 /// </summary>
 public partial class CompareOverlay : UserControl
 {
@@ -41,7 +46,13 @@ public partial class CompareOverlay : UserControl
         IsHitTestVisible = false;
     }
 
-    /// <summary>Canvas background fill used outside the parent image (matches the image area).</summary>
+    /// <summary>
+    /// Retained background brush (set from XAML). <b>Currently unused by
+    /// <see cref="Render"/></b>: the parent now fills the whole current-image rect, so
+    /// there is no exposed background region to paint (Step 9C.3-R #10). Kept to avoid
+    /// churning the XAML binding; do not rely on it until a background-fill design
+    /// returns.
+    /// </summary>
     public IBrush BackgroundFill
     {
         get => _background;

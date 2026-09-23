@@ -134,6 +134,57 @@ public class CommandParserTests
     }
 
     [Fact]
+    public async Task ResolutionOverload_Stamps_Resolution_When_Plan_Has_None()
+    {
+        var parser = ParserWithoutFile();
+        var resolution = new ResolutionPolicy { Mode = ResolutionMode.Side, Side = 1536 };
+
+        var result = await parser.ParseAsync("把天空换成日落", SessionWithImage(), resolution);
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.Plan!.Resolution);
+        Assert.Equal(ResolutionMode.Side, result.Plan.Resolution!.Mode);
+        Assert.Equal(1536, result.Plan.Resolution.Side);
+    }
+
+    [Fact]
+    public async Task ResolutionOverload_Keeps_Parser_Resolution()
+    {
+        var parser = ParserWithoutFile();
+        var injected = new ResolutionPolicy { Mode = ResolutionMode.Side, Side = 1536 };
+
+        // /扩图 carries its own explicit resolution, which must win over the injected one.
+        var result = await parser.ParseAsync("/扩图 2048 1280", SessionWithImage(), injected);
+
+        Assert.True(result.Success);
+        Assert.Equal(ResolutionMode.Explicit, result.Plan!.Resolution!.Mode);
+        Assert.Equal(2048, result.Plan.Resolution.Width);
+        Assert.Equal(1280, result.Plan.Resolution.Height);
+    }
+
+    [Fact]
+    public async Task ResolutionOverload_Null_Leaves_Plan_Unchanged()
+    {
+        var parser = ParserWithoutFile();
+
+        var result = await parser.ParseAsync("把天空换成日落", SessionWithImage(), resolution: null);
+
+        Assert.True(result.Success);
+        Assert.Null(result.Plan!.Resolution);
+    }
+
+    [Fact]
+    public async Task Old_Overload_Leaves_Resolution_Null()
+    {
+        var parser = ParserWithoutFile();
+
+        var result = await parser.ParseAsync("把天空换成日落", SessionWithImage());
+
+        Assert.True(result.Success);
+        Assert.Null(result.Plan!.Resolution);
+    }
+
+    [Fact]
     public async Task CommandsJson_Missing_Uses_Default()
     {
         var parser = ParserWithoutFile();

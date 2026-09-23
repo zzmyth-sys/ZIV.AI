@@ -1265,3 +1265,147 @@ JSON payload）；`SPEC.md` §3.4 / §7 授权修订。范围外：URL 协议注
 | 9C.3.26 | 输入区居中不拉通 | 查 `MainWindow.axaml` | 输入区 `Grid MaxWidth="760"`（居中，不占满整窗） | ✅ |
 | 9C.3.27 | opencode 按钮风格 | 无头探针 + 查 `ChromeStyles.axaml` | 发送 `Button.ocSend`（灰底圆角 + ↑ 箭头）、附件 `Button.oc` | ✅ |
 | 9C.3.28 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；非 GPU 158 通过 | ✅ |
+
+---
+
+## Step 9C.3-R 验收：清理 + 字段统一（纯重构 + 注释 + 少量下沉）
+
+**目标**：修复 Step 9C.1–9C.3 期间引入的分层耦合与字段一致性问题（**不改行为**）。九项：
+V2（会话 DAG 查询下沉 Agent）、V3（分辨率注入下沉 Agent，新增 `ICommandParser` 重载）、
+V4（App 装配统一）、#6（删死状态写入）、#7（导入事件命名统一）、#4（Width/Height 注释）、
+#5（MaxPixels / 无消费者字段注释）、#9（InferenceProgressDetail 注释）、#10（CompareOverlay
+注释与实现同步）、#2（三个 Duration 口径注释）。范围外：精确对齐（9C.3-G）、GPU 端到端（Z29 / Z30）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | DAG 遍历下沉 Agent；UI 只经接口；无反向 / 循环依赖；无新增项目引用 | ✅ |
+| G3 | 接口与 FROZEN 一致 | V3 为 `ICommandParser` **新增重载**（非改签名），已在 `FROZEN.md` 尾部追加修订说明；旧重载保留；`Contracts` 零变更 | ✅ |
+| G4 | 未授权修改检查 | 无既有冻结签名被改；V3 为新增（已记录）；V2 / V4 / #6 / #7 为内部实现 / UI 层 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `FROZEN` 追加 Step 9C.3-R | ✅ |
+| G6 | 便携性未破 | 无注册表 / 外部路径配置 | ✅ |
+| G7 | AI 推理进程隔离未破 | 纯本地重构 / 注释，不加载 Python（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.3-R.1 | V2 下沉 | 查 `EditSession.cs` / `SessionViewModel.cs` | `GetParentImagePath` / `GetPathToCurrent` / `GetDepth` 在 Agent；UI 删除本地遍历 | ✅ |
+| 9C.3-R.2 | V2 行为不变 | `EditSessionTests` + `SessionViewModelTests` | 根 / 直接子 / 孙 / 未知 / 大小写不敏感；既有用例全过 | ✅ |
+| 9C.3-R.3 | V3 新增重载 | 查 `CommandParser.cs` | `ParseAsync(input, session, resolution, ct)` 存在；旧重载委托新重载 | ✅ |
+| 9C.3-R.4 | V3 注入语义 | `CommandParserTests` | 注入写入 `EditPlan.Resolution`；parser 自带分辨率优先；`null` 不变 | ✅ |
+| 9C.3-R.5 | V3 UI 不再重建 | 查 `SessionViewModel.SubmitAsync` | 无 `new EditPlan` 重建块 | ✅ |
+| 9C.3-R.6 | V4 装配统一 | 查 `MainWindow.axaml.cs` / `App.axaml.cs` | 字段默认值删除；`modelProfiles` 必填；调用点已调整 | ✅ |
+| 9C.3-R.7 | #6 删死状态 | 查 `MainWindow.SetBusy` | 无非忙 `SetStatus("就绪")` | ✅ |
+| 9C.3-R.8 | #7 命名统一 | 查 `ImageImportList` / `ImageImportBar` / 订阅点 | 两层均 `ImagesChanged`；订阅点同步 | ✅ |
+| 9C.3-R.9 | #4 注释 | 查五处 `Width/Height` | 均有语义边界 XML 注释；未改名 | ✅ |
+| 9C.3-R.10 | #5 注释 | 查 `ResolutionPolicy.MaxPixels` / `ModelProfile` | 注明权威来源 / 无消费者 | ✅ |
+| 9C.3-R.11 | #9 注释 | 查 `InferenceProgressDetail` | 注明 Backend 诊断 / 两种投影 | ✅ |
+| 9C.3-R.12 | #10 注释同步 | 查 `CompareOverlay.axaml.cs` | 类注释 = 实现（父图铺满当前图矩形） | ✅ |
+| 9C.3-R.13 | #2 注释 | 查三处 Duration | 各自作用域已注明；不改行为 / 契约 | ✅ |
+| 9C.3-R.14 | Z8 行数 | 查改动文件 | 均 < 600 行（`MainWindow.axaml.cs` 589） | ✅ |
+| 9C.3-R.15 | Z9 / Z11 | 查 diff | 无新增 `Bitmap`、无耗时操作 | ✅ |
+| 9C.3-R.16 | 构建 / 测试 | `dotnet build` / `dotnet test`（受影响类 + 非 GPU 全量） | 0 错误 0 警告；受影响 48 通过；非 GPU 169 通过 | ✅ |
+| 9C.3-R.17 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.3-R.18 | 真机交互 | 用户执行一次真机验收 | 导入 / 分辨率 / 发送 / 历史点击 / 划像对比 / Esc 无回归 | ⏳ 待用户确认 |
+| 9C.3-R.19 | 启动 / 无残留 | 启动 exe + 进程表 | 窗口正常、无新 Python 进程；结束无残留、未占 GPU | ⏳ 待用户确认 |
+
+### Step 9C.3-R 通过标准
+
+- 通用 G1–G8 全过
+- 专属 9C.3-R.1–9C.3-R.17 全过；9C.3-R.18 / 9C.3-R.19 由用户真机确认
+
+### Step 9C.3-R 遗留说明（非阻断）
+
+- **9C.2C.9 验收描述与实际实现不符**：原描述「居中 + 背景填充」，实现为「父图铺满当前图矩形」；
+  本步已同步代码注释，**未改**既有验收行。精确对齐属 **9C.3-G**。
+- **`CompareOverlay.BackgroundFill` 现为死状态**（`Render` 不再读取），保留并注释标明。
+- **`ResultReceived` 无生产订阅者**；三个 Duration 口径不互相校验，本步仅注释。
+- **V1（`SessionViewModel` 直接持有 `EditSession`）延后 9C.5**。
+
+### Step 9C.3-R 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 9C.3-R 记录（本步已完成）
+2. 在「验收记录」追加"Step 9C.3-R 通过，日期：____"（待签）
+3. 进入后续 Step（精确对齐 9C.3-G / `@` 引用 / 遮罩绘制等，由用户决定）
+
+---
+
+## Step 9C.5 验收：架构底座重构（会话接口抽象到 Contracts）
+
+**目标**：修复 V1 硬违规（UI 直接持有 Agent 实现类 `EditSession` / `EditNode`），把会话接口抽象
+到 `Contracts`（`IEditSession` / `IEditNode` / `IEditSessionWriter`），`SessionViewModel` 改持接口。
+**纯重构，行为不变**。范围外：GPU 端到端（Z29 / Z30）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 会话抽象下沉 Contracts；UI 不再引用 Agent 实现类；无反向 / 循环依赖；无新增项目引用 | ✅ |
+| G3 | 接口与 FROZEN 一致 | 新增 3 接口（`Contracts`）；`ICommandParser` 参数收窄为 `IEditSession`（已授权，`FROZEN` 9C.5.3 尾部说明）；未改 8.1 既有行 | ✅ |
+| G4 | 未授权修改检查 | 无既有冻结签名被改；`ICommandParser` 参数变更为抽象化必需，已记录；其余为内部实现 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `FROZEN` 追加 Step 9C.5；`ARCHITECTURE` §6 追加 6.1 | ✅ |
+| G6 | 便携性未破 | 无注册表 / 外部路径配置 | ✅ |
+| G7 | AI 推理进程隔离未破 | 纯本地重构，不加载 Python（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.5.1 | 新增接口 | 查 `Contracts/Planning/` | `IEditNode` / `IEditSession`（只读）/ `IEditSessionWriter`（写）存在 | ✅ |
+| 9C.5.2 | EditSession 实现 | 查 `EditSession.cs` | `EditSession : IEditSession, IEditSessionWriter`；`EditNode : IEditNode` | ✅ |
+| 9C.5.3 | UI 不再引用实现类 | `grep` UI 下 `\bEditSession\b`/`\bEditNode\b` | 0 命中 | ✅ |
+| 9C.5.4 | SessionViewModel 改持接口 | 查 `SessionViewModel.cs` | `_session: IEditSession`；`_writer: IEditSessionWriter`；`HistoryItem.Node: IEditNode` | ✅ |
+| 9C.5.5 | 写入走 writer | 查 `SessionViewModel.cs` | `SetRoot`/`ResetToRoot`/`AppendNode`/`NavigateTo` 经 `_writer` | ✅ |
+| 9C.5.6 | parser 参数收窄 | 查 `CommandParser.cs` | `ParseAsync(..., IEditSession, ...)`（两重载） | ✅ |
+| 9C.5.7 | App 装配 | 查 `MainWindow.axaml.cs` | 同一 `EditSession` 传 IEditSession + IEditSessionWriter；导出用具体 `_session` | ✅ |
+| 9C.5.8 | 行为不变 | `EditSessionTests` / `SessionViewModelTests` / `CommandParserTests` / `SessionExporterTests` | 全过（41） | ✅ |
+| 9C.5.9 | 接口边界 | `EditSessionTests` | `GetDepth(null)=0`；接口一致性用例 | ✅ |
+| 9C.5.10 | 状态依赖规则 | 查 `ARCHITECTURE.md` §6.1 | 4 条规则已追加（只增） | ✅ |
+| 9C.5.11 | BackgroundFill | 查 `ImagePreview.axaml` / `CompareOverlay` | 有绑定 → 保留并报告（不删） | ✅ |
+| 9C.5.12 | Z8 行数 | 查改动文件 | 均 < 600 行（`MainWindow.axaml.cs` 594） | ✅ |
+| 9C.5.13 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；受影响 41 通过；非 GPU 170 通过 | ✅ |
+| 9C.5.14 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.5.15 | 真机交互 | 用户执行一次真机验收 | 图片导入 / 编辑 / 历史点击 / 划像对比 / Esc 无回归 | ⏳ 待用户确认 |
+| 9C.5.16 | 启动 / 无残留 | 启动 exe + 进程表 | 窗口正常、无新 Python 进程；结束无残留、未占 GPU | ⏳ 待用户确认 |
+
+### Step 9C.5 通过标准
+
+- 通用 G1–G8 全过
+- 专属 9C.5.1–9C.5.14 全过；9C.5.15 / 9C.5.16 由用户真机确认
+
+### Step 9C.5 遗留说明（非阻断）
+
+- **UI→Agent 依赖未收窄**：保留 `ProjectReference`（因 `ICommandParser` 为 Agent 接口）；
+  彻底收窄需将 `ICommandParser` 上提 `Contracts`（另立步 / 需授权）。
+- **`CompareOverlay.BackgroundFill` 未删**：XAML 有绑定，保留（死状态）。
+- **FROZEN 8.1 既有不一致**：`ISessionExporter` / `SessionExporter` 实际在 Agent，文档记为 App；
+  本步未改既有行，仅登记。
+- **9C.5-B（不阻塞）**：`SessionViewModel.AppendNode`（执行成功回写节点）属 UI 代 Agent 编排，
+  应下沉至 Agent；涉及 `IExecutor` 设计变更，单独立步。
+
+### Step 9C.5 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 9C.5 记录（本步已完成）
+2. 在「验收记录」追加"Step 9C.5 通过，日期：____"（待签）
+3. 进入后续 Step（`ICommandParser` 上提 / 精确对齐 9C.3-G / 遮罩绘制等，由用户决定）
+
+---
+
+## 待办登记：导入图片与多图合照（9C.5-C / 9C.5-D，2026-09-23）
+
+> 用户真机反馈，**仅登记，未修**。根因与证据详见 `DEVLOG.md` 同段。本段**不改任何代码**。
+
+| # | 问题 | 严重度 | 现象 | 处理方向 |
+|---|---|---|---|---|
+| 9C.5-C | 发送后附件条未清空（图片残留输入区） | 中（UI bug） | 导入图后发送，缩略图仍在输入区上方 | 待后续小修：`MainWindow.SubmitAsync` 调 `_importBar.Clear()` |
+| 9C.5-D | 多图引用 / 合照未实现（`@图N` / 「图N」） | 高（功能缺失） | 「和图2合照」不生效，输出无合照迹象 | 待另立步：`EditRequest` 扩展参考图字段 + 工具 + Python 后端 + 解析规则（先出计划） |
+
+- 说明：9C.5-D 是 9C.3 已登记遗留（「`@` 引用未实现」）的延续；端到端涉及契约与后端，
+  单独立步。
+- 9C.5-C 为独立小修，与 9C.5-D 无依赖。

@@ -2326,3 +2326,257 @@ GPU 端到端（Z29 / Z30）。
 - **踩坑**：`RenderTransform="translate(0,4)"` 内联字符串**运行时崩溃**
   （退出码 `0xE0434352`），XAML 编译期却通过；改用**元素式** `<TranslateTransform Y="4"/>` 正常。
 - **验证**：`dotnet build` **0/0**；exe 启动正常（`HasExited=False`）。
+
+---
+
+## [Step 9C.3-R] - 2026-09-23
+
+### 目标
+
+修复 Step 9C.1–9C.3 期间引入的**分层耦合**与**字段一致性**问题（**纯重构 + 注释 + 少量下沉，
+不改行为**）。九项：V2（会话 DAG 查询下沉 Agent）、V3（分辨率注入下沉 Agent）、V4（App 装配
+统一）、#6（删死状态写入）、#7（导入事件命名统一）、#4（Width/Height 注释）、#5（MaxPixels /
+无消费者字段注释）、#9（InferenceProgressDetail 注释）、#10（CompareOverlay 注释与实现同步）、
+#2（三个 Duration 口径注释）。
+
+### 做了什么（逐项）
+
+- **V2 — 会话 DAG 查询下沉 Agent**：`EditSession` 新增
+  `GetParentImagePath(string?)` / `GetPathToCurrent()` / `GetDepth(EditNode?)`
+  （`ZivAiEditor.Agent/EditSession.cs:97-183`）；`SessionViewModel` 删除本地 DAG 遍历
+  （原 `GetParentImagePath` / `PathToCurrent` / `DepthOf` / `MaxTreeDepth`），改为委托
+  `EditSession`；`GetParentImagePath` 保留为薄委托（`MainWindow` 调用点不变）。
+  **不改** `SessionViewModel` 持有 `EditSession` 的现状（V1 延后 9C.5）。
+- **V3 — 分辨率注入下沉 Agent**：`ICommandParser` 新增重载
+  `ParseAsync(input, session, ResolutionPolicy? resolution, ct)`（`CommandParser.cs:17-41`）；
+  `CommandParser` 实现（`CommandParser.cs:104-164`）：解析后在 plan 无自带分辨率时设
+  `Resolution = resolution`（parser 自带分辨率优先）。旧单参重载保留并委托新重载（传 `null`）。
+  `SessionViewModel.SubmitAsync` 改为 `_parser.ParseAsync(text, _session, Resolution, ct)`，
+  **删除重建 `EditPlan` 的代码块**（原 `:161-175`）。
+- **V4 — App 装配统一**：删除 `MainWindow` 字段默认值 `new ModelProfileRegistry()`
+  （`MainWindow.axaml.cs:43`）；构造参数 `IModelProfileRegistry? modelProfiles = null`
+  → 必填 `IModelProfileRegistry modelProfiles`（置于 `sessionExporter` 之后、`launchOptions`
+  之前）；`App.axaml.cs` 调用点调整参数顺序。
+- **#6 — 删除死状态写入**：`MainWindow.SetBusy` 删除 `SetStatus("就绪")`（`MainWindow.axaml.cs:467`）；
+  非忙时无 pending 气泡，原调用为 no-op。
+- **#7 — 导入变更事件命名统一**：`ImageImportList.Changed` → `ImageImportList.ImagesChanged`；
+  `ImageImportBar` 订阅点与 `ImageImportListTests`（8 处）同步。**选 `ImagesChanged`**（理由见下）。
+- **#4 — Width/Height 名称过载（加注释，不改名）**：`ResolutionPolicy.Width/Height`（请求目标）、
+  `AspectPreset.Width/Height`（比例预设）、`InferenceResultDetail.Width/Height`（后端实际输出）、
+  `ImageViewModel.ImageWidth/ImageHeight`（源图像素）、`MaskSpec.Width/Height`（遮罩原始像素）。
+- **#5 — MaxPixels 双定义 / 无消费者字段（加注释）**：`ResolutionPolicy.MaxPixels` 注明权威来源
+  为 `ModelProfile.MaxPixels`；`ModelProfile` 的 `NativeSide` / `SafeMaxSide` / `MinSide` /
+  `MultipleOf` / `Presets` 注明「能力元数据，当前无生产消费者（仅注册与测试用）」。
+- **#9 — InferenceProgressDetail 语义澄清**：类级注释注明「仅 Backend 诊断 / 事件富集用；
+  契约边界传 `InferenceProgress`（`Fraction` / `Message`）；两者是同一帧的两种投影」。
+- **#10 — CompareOverlay 注释与实现同步**：类注释由「居中 + 背景填充」改为与实现一致的
+  「父图铺满当前图矩形」（`DrawImage(parent, currentRect)`）。**不改** `ACCEPTANCE.md` /
+  `DEVLOG.md` 既有行；在遗留登记「9C.2C.9 验收描述与实际实现不符」。不实现精确对齐（属 9C.3-G）。
+- **#2 — 三个 Duration 口径（仅注释）**：`InferenceResultDetail.DurationMs`（后端采样 + 解码）、
+  `ToolResult.Duration`（一次 IPC 提交，含惰性加载与排队）、`SessionViewModel.SubmitAsync`
+  的 `Stopwatch`（点击到气泡替换的端到端墙钟）三处加注释，说明各自作用域，**不互相校验**；
+  另在遗留登记「`ResultReceived` 无生产订阅者」。
+
+### 关键决策
+
+1. **#7 命名选择：`ImagesChanged`**。理由：① `ImageImportBar` 是 **App 面向的接缝**，控件事件名
+   应自描述——`bar.ImagesChanged` 可读，`bar.Changed` 有歧义；② 该名已是 App 消费点
+   （`MainWindow.Import.cs`）与转发事件的既有名称，改动面最小；③ 数据层 `ImageImportList` 是
+   内部管线，同步同名后两层一致、消除「`Changed` vs `ImagesChanged`」的命名分叉。
+2. **V2 保留 `SessionViewModel.GetParentImagePath` 薄委托**：`MainWindow` 与
+   `SessionViewModelTests` 的调用点不变，仅遍历实现下沉；避免扩散改动。
+3. **V3 下沉后 UI 不再重建 `EditPlan`**：`EditPlan` 为 init-only，重建逻辑改在 Agent 内部
+   （`CommandParser.ApplyResolution`），UI 只传 `Resolution`。
+4. **V4 参数顺序**：因 C# 要求必填参数先于可选参数，将 `modelProfiles` 移到 `launchOptions`
+   之前；`App.axaml.cs` 调用点相应调整（任务原述「应无需改」受此约束不成立，已在报告说明）。
+5. **#6 仅删「就绪」分支**：保留忙时 `SetStatus("处理中…")`，最小改动。
+6. **#10 不动 `BackgroundFill` 属性**：`Render` 已不读取，属死状态；保留以避免改 XAML 绑定，
+   仅注释标明，登记遗留。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：`EditSessionTests` / `CommandParserTests` /
+  `SessionViewModelTests` / `ImageImportListTests` **48 通过 / 0 失败**；非 GPU 全量
+  （排除 `Ipc*` / `PlannerIntegration`）→ **169 通过 / 0 失败**（9C.3 基线 158，本步 +11：
+  `EditSessionTests` +7、`CommandParserTests` +4）。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步不加载模型、不启动 Python、不占 GPU。
+- **Z8**：改动文件均 < 600 行（`MainWindow.axaml.cs` 589、`CommandParser.cs` 357、
+  `SessionViewModel.cs` 282、`EditSession.cs` 201）。
+- **Z9 / Z11**：本步无新增 `Bitmap`、无耗时操作。
+
+### 遇到的问题与解决
+
+1. **EditSessionTests 编辑后多出一个 `}`**：替换末尾方法时重复了类闭合括号 → 构建
+   `CS1022`；删除多余 `}` 后恢复。
+2. **V4 参数顺序**：任务原述「`App.axaml.cs` 应无需改」，但必填参数不能位于可选参数之后；
+   将 `modelProfiles` 前移并同步调用点（见关键决策 4）。
+
+### 遗留项
+
+- **9C.2C.9 验收描述与实际实现不符**：原描述「居中 + 背景填充」，实现为「父图铺满当前图矩形」；
+  本步已同步代码注释，**未改** `ACCEPTANCE.md` / `DEVLOG.md` 既有行。精确对齐（outpaint 几何
+  补齐）属 **9C.3-G**，另立步。
+- **`CompareOverlay.BackgroundFill` 现为死状态**（`Render` 不再读取）：保留属性，仅注释标明。
+- **`ResultReceived` 无生产订阅者**（仅测试订阅）：三个 Duration 口径不互相校验，本步仅注释。
+- **V1（`SessionViewModel` 直接持有 `EditSession`）仍未解**：延后 9C.5；`SessionViewModel` 仍
+  直接读 `_session.CurrentNodeId` / `RootImagePath` / `GetHistory()`（属 V1 同一范围）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未修改** Contracts（V3 的新增重载在 **Agent** 层 `ICommandParser`，不触 Contracts 项目）/
+  `python/server/*` / `contracts/ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；**未新增 NuGet**；
+  **未改** chrome 三控件 / `EditorToolbar` / `CompareState` / `ToolStateMachine` 逻辑。
+- `FROZEN.md` 尾部追加 V2 / V3 / V4 / #6 / #7 / #4#5#9#10#2 修订说明（**不改 8.1 既有行**）。
+
+---
+
+## [Step 9C.5] - 2026-09-23
+
+### 目标
+
+修复 **V1 硬违规**（UI 直接持有 Agent 实现类 `EditSession` / `EditNode`）：把会话接口抽象到
+`Contracts`（`IEditSession` / `IEditNode` / `IEditSessionWriter`），`SessionViewModel` 改持接口，
+收窄 UI 对 Agent 的依赖。**纯重构，行为不变**。流程：前置只读调查 → 实施 → 验证。
+
+### 前置只读调查结论
+
+**UI 对 Agent 的引用点清单**（UI 下唯一引用文件 = `SessionViewModel.cs`）：
+- `SessionViewModel.cs:2` `using ZivAiEditor.Agent;`
+  - `:39` `EditNode`（`HistoryItem.Node`）— **实现类**
+  - `:58/62/70` `EditSession`（字段 / 构造 / `Session` 属性）— **实现类**
+  - `:59/62` `ICommandParser`（字段 / 构造）— **Agent 接口**
+  - `:258` doc `<see cref="EditSession.GetParentImagePath"/>`
+- `ZivAiEditor.UI.csproj:13` `ProjectReference → Agent`
+- **UI 对 Tools / Backend 零引用**（无 using、无类型）。
+
+**`EditSession` 公开成员**：`SessionId` / `RootImagePath` / `Nodes` / `CurrentNodeId` / `CreatedAt`；
+`SetRoot` / `ResetToRoot` / `AppendNode→EditNode` / `NavigateTo→bool` / `GetHistory→IReadOnlyList<EditNode>` /
+`GetCurrentImagePath` / `GetParentImagePath` / `GetPathToCurrent→IReadOnlyList<EditNode>` / `GetDepth(EditNode?)`。
+**`EditNode` 公开成员**：`NodeId` / `ParentNodeId?` / `ImagePath` / `Command` / `CreatedAt`。
+
+**调查发现的两处规格矛盾（已报告并解决）**：
+1. **无法删 UI→Agent 引用**：UI 需要 `ICommandParser`（Agent 接口，FROZEN 8.1 冻结），删引用会
+   编译失败 → 按任务「还有其他引用 → 保守处理」**保留 Agent ProjectReference**。
+2. **`IEditSession` 只读不够**：`SessionViewModel` 实际调用 `SetRoot` / `ResetToRoot` /
+   `AppendNode` / `NavigateTo` 四处**写入**；仅只读接口无法编译。为同时满足「只读接口」与
+   「行为不变」，**新增写接口 `IEditSessionWriter`**，`SessionViewModel` 注入两者。
+
+**实施中新发现的第三处耦合（已解决）**：`ICommandParser.ParseAsync` 参数为具体 `EditSession`，
+且解析时调用 `GetCurrentImagePath()`（任务成员清单遗漏）→ 将 `GetCurrentImagePath()` 补入
+`IEditSession`，并把 `ICommandParser` 两个重载的 `session` 参数由 `EditSession` 收窄为
+`IEditSession`（既有冻结签名变更，已在 FROZEN 9C.5.3 记录）。
+
+### 做了什么
+
+- **新增契约**（`ZivAiEditor.Contracts/Planning/`）：`IEditNode.cs` / `IEditSession.cs`（只读）/
+  `IEditSessionWriter.cs`（写）。
+- **`EditSession` / `EditNode`**（`ZivAiEditor.Agent/EditSession.cs`）：分别实现
+  `IEditSession`+`IEditSessionWriter` / `IEditNode`；`GetHistory` / `GetPathToCurrent` 返回
+  `IReadOnlyList<IEditNode>`，`GetDepth(IEditNode?)`，`AppendNode→IEditNode`；写方法保留。
+- **`ICommandParser` / `CommandParser`**（`ZivAiEditor.Agent/CommandParser.cs`）：两个重载的
+  `session` 参数 `EditSession → IEditSession`；私有 `ParseSlashCommand` / `ParseNaturalLanguage`
+  同步。
+- **`SessionViewModel`**（`ZivAiEditor.UI/Chat/SessionViewModel.cs`）：`_session` → `IEditSession`，
+  新增 `_writer` → `IEditSessionWriter`；构造 `(IEditSession, IEditSessionWriter, ICommandParser, IExecutor)`；
+  `HistoryItem.Node` → `IEditNode`；`Session` 属性 → `IEditSession`；写入调用改走 `_writer`。
+- **`MainWindow`**（`ZivAiEditor.App/MainWindow.axaml.cs`）：保存具体 `EditSession` 字段 `_session`
+  （供 `ISessionExporter`，App 可依赖实现）；`new SessionViewModel(session, session, parser, executor)`；
+  `OnClosing` 的导出 / 内容判断改用 `_session`。
+- **`ARCHITECTURE.md` §6** 末尾追加「### 6.1 状态依赖规则（9C.5 追加）」（只增不改）。
+- **测试**：`SessionViewModelTests` 构造加 `session` 参数（8 处）；`EditSessionTests` 新增 1 例
+  接口一致性（`EditSession is IEditSession/IEditSessionWriter`、`EditNode is IEditNode`）。
+- **文档**：`DEVLOG` 本段 + `ACCEPTANCE.MD` Step 9C.5 + `FROZEN.md` 尾部 9C.5 修订说明。
+
+### 关键决策
+
+1. **只读 / 写接口分离**：`IEditSession`（只读）+ `IEditSessionWriter`（写）。尊重任务「IEditSession
+   只读」的明确要求，同时保证 `SessionViewModel` 写入行为不变；只读消费者（对比叠加 / 未来遮罩）
+   无法改会话。
+2. **UI 依赖未收窄**：保留 Agent `ProjectReference`，因 `ICommandParser` 是 Agent 接口。**V1 已解**
+   （UI 不再引用 Agent 实现类）。彻底收窄需把 `ICommandParser` 上提 Contracts（另立步）。
+3. **`ICommandParser` 参数收窄到 `IEditSession`**：这是抽象会话的必然结果；属既有冻结签名变更，
+   已按「只增不改既有行 + 尾部修订说明」处理（FROZEN 9C.5.3）。
+4. **`GetCurrentImagePath()` 补入 `IEditSession`**：parser 需要，任务清单遗漏。
+5. **`BackgroundFill` 不删**：`ImagePreview.axaml:58` 有绑定，按任务分支保留并报告。
+6. **`ISessionExporter` 仍接受具体 `EditSession`**：其 DTO 用到 `CreatedAt`（不在 `IEditSession`），
+   且它位于 Agent 层，无需抽象；`MainWindow`（App）保留具体实例传入。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：`EditSessionTests` / `SessionViewModelTests` /
+  `CommandParserTests` / `SessionExporterTests` **41 通过 / 0 失败**；非 GPU 全量
+  （排除 `Ipc*` / `PlannerIntegration`）→ **170 通过 / 0 失败**（9C.3-R 基线 169，+1）。
+- **UI 实现类引用归零**：`grep` UI 下 `\bEditSession\b|\bEditNode\b` → **0 命中**；仅剩
+  `ICommandParser`（Agent 接口）。
+- **Z8**：改动文件均 < 600 行（`MainWindow.axaml.cs` 594、`CommandParser.cs` 357、
+  `SessionViewModel.cs` 291、`EditSession.cs` 207）。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步不加载模型、不启动 Python、不占 GPU。
+
+### 遇到的问题与解决
+
+1. **编译错误 CS1503**（`SessionViewModel.cs:146`）：`_parser.ParseAsync(text, _session, ...)` 的
+   `_session` 现为 `IEditSession`，而 `ICommandParser` 参数为 `EditSession`。
+   → 解决：`ICommandParser` 参数收窄为 `IEditSession`，并把 `GetCurrentImagePath()` 补入只读接口。
+2. **规格矛盾（只读接口 vs 写入调用）**：见前置调查矛盾 2 → 新增 `IEditSessionWriter`。
+3. **规格矛盾（无法删 UI→Agent 引用）**：见前置调查矛盾 1 → 保留引用。
+
+### 遗留项
+
+- **UI→Agent 依赖未收窄**：保留 `ProjectReference`（`ICommandParser`）；彻底收窄需将
+  `ICommandParser` 上提 Contracts（另立步 / 需授权）。
+- **`CompareOverlay.BackgroundFill` 未删**：XAML 有绑定，保留（死状态）。
+- **FROZEN 8.1 既有不一致**：`ISessionExporter` / `SessionExporter` 实际在 Agent，文档记为 App；
+  本步未改既有行，仅登记。
+- **9C.5-B（不阻塞）**：`SessionViewModel.AppendNode`（执行成功回写节点）属 UI 代 Agent 编排，
+  应下沉至 Agent；涉及 `IExecutor` 设计变更，单独立步。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未修改** `python/server/*` / `contracts/ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；**未新增 NuGet**；
+  **未改** chrome 三控件 / `EditorToolbar` / `CompareState` / `ToolStateMachine` 逻辑；
+  **未改** `Contracts` 既有成员（仅新增 3 个接口）。
+- `FROZEN.md` 尾部追加 9C.5 修订说明（**不改 8.1 既有行**）；`ARCHITECTURE.md` §6 追加 6.1（只增）。
+
+---
+
+## [问题登记] - 2026-09-23 · 导入图片与多图合照（9C.5-C / 9C.5-D，待后续）
+
+> 用户真机反馈（9C.5 收尾期间）。**本段仅登记，不改代码**；由后续 Step 处理。
+
+### 现象
+
+导入图片后输入「和图2合照」并发送：
+1. 导入的图片缩略图**仍保留在输入区**（未随发送清空）。
+2. 输出图像**没有合照迹象**（未使用第二张图）。
+
+### 根因（只读调查，含证据）
+
+1. **附件条发送后未清空（UI bug，9C.5-C）**：`MainWindow.SubmitAsync`
+   （`src/ZivAiEditor.App/MainWindow.axaml.cs:185-217`）只清 `input.Text`（:198），从未清空
+   `_importBar`；`ImageImportBar.Clear()`（`Controls/ImageImportBar.axaml.cs:58`）**无调用者**。
+2. **多图引用整链路未实现（功能缺失，9C.5-D；9C.3 已登记遗留）**：
+   - 导入：`MainWindow.Import.cs:60-70` 仅「空 → 恰好 1 张」设主图；多张仅收集，不参与编辑。
+   - 解析：`CommandParser` 从不设置 `EditPlan.ReferenceImagePath`（仅 `:165` 透传，来源恒为
+     null）；无 `@图N` / 「图N」解析规则。
+   - 工具：`QwenImage21EditTool.cs:81-94` 只用 `input.MainImagePath` / `input.Mask` 构造
+     `EditRequest`，**忽略 `ToolInput.ReferenceImagePath`**（`Executor.cs:166` 已把 plan 的引用图
+     传入）。
+   - 契约 / 后端：`EditRequest`（`Contracts/Inference/EditRequest.cs`）只有 `ImagePath` /
+     `MaskPath`，**无第二张图字段**。
+
+### 待办（后续 Step）
+
+- [ ] **9C.5-C（小修）**：发送时清空 `_importBar`（调用已有 `Clear()`），图片不残留输入区。
+- [ ] **9C.5-D（功能）**：多图引用端到端——需 `EditRequest` 扩展参考图字段 + 工具 + Python 后端，
+      以及 `@图N` / 「图N」解析规则；**另立步并先出计划**。
+
+### 备注
+
+- 本登记**未改任何代码**；无契约变更；无 GPU 参与。
+- 即使修复 9C.5-C，输出仍不会「合照」——多图参考在契约层与后端就无承载字段（9C.5-D）。

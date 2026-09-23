@@ -1755,3 +1755,187 @@ public interface ILlmClient : IDisposable
   改用**元素式** `<TranslateTransform Y="4"/>`。
 - **影响哪些接口**：仅样式 / `ResolutionPicker.axaml`；**`Contracts` 零变更**。
 - **测试**：`dotnet build` 0/0；exe 启动正常。
+
+---
+
+## Step 9C.3-R（日期：2026-09-23）
+
+> **修订说明（Step 9C.3-R · 清理 + 字段统一）**
+>
+> 本段为 Step 9C.3-R **只增**记录。目标：修复 9C.1–9C.3 期间引入的分层耦合与字段一致性问题
+> （纯重构 + 注释 + 少量下沉，不改行为）。**不改动 Step 0–9C.3 已冻结行**；本段为**纯追加**
+> （文件尾部）。唯一契约相关变更见 V3（`ICommandParser` **新增重载**，不破坏既有签名）。
+
+### 9C.3-R.V2 会话 DAG 查询下沉（冻结 · 非契约）
+
+- **新增**：`EditSession.GetParentImagePath(string?)` / `EditSession.GetPathToCurrent()` /
+  `EditSession.GetDepth(EditNode?)`（`ZivAiEditor.Agent/EditSession.cs`）。语义与原
+  `SessionViewModel` 私有实现一致，仅**新增方法**，不改 `EditSession` 既有成员。
+- **修改**：`SessionViewModel` 删除本地 DAG 遍历，改为委托 `EditSession`；`GetParentImagePath`
+  保留为薄委托（App 调用点不变）。
+- **不改**：`SessionViewModel` 持有 `EditSession` 的现状（V1 硬违规延后 9C.5，本步不动）。
+
+### 9C.3-R.V3 `ICommandParser` 新增重载（冻结 · 契约新增）
+
+> **2026-09-23，用户裁决授权：`ICommandParser` 新增 `ParseAsync(input, session, resolution, ct)`
+> 重载（新增，不破坏既有签名）。**
+
+- **改了什么**：`ZivAiEditor.Agent/CommandParser.cs` 的 `ICommandParser` 新增
+  `Task<ParseResult> ParseAsync(string input, EditSession session, ResolutionPolicy? resolution, CancellationToken ct = default)`；
+  `CommandParser` 实现之：解析后在产出的 `EditPlan` 上设 `Resolution = resolution`（当 plan
+  无自带分辨率时；parser 自带分辨率——如 `/扩图` 显式宽高——优先）。
+- **为什么**：`SessionViewModel.SubmitAsync`（UI）原先为注入 `Resolution` 而**重建整个
+  `EditPlan`**；下沉到 Agent 后 UI 只传参。
+- **不改 8.1 既有行**：原单参重载 `ParseAsync(input, session, ct)` **保留不动**，内部委托新重载
+  （传 `null`）。**`Contracts` 项目零变更**。
+- **影响哪些接口**：仅 Agent 层 `ICommandParser`（新增重载）；`EditPlan` 字段未改。
+- **测试**：`CommandParserTests` 新增 4 例（注入生效 / parser 分辨率优先 / null 不变 / 旧重载不变）。
+
+### 9C.3-R.V4 App 装配统一（冻结 · 非契约）
+
+- **改了什么**：删除 `MainWindow` 字段默认值 `new ModelProfileRegistry()`；构造参数
+  `IModelProfileRegistry? modelProfiles = null` 改为**必填**（`IModelProfileRegistry modelProfiles`，
+  置于 `ISessionExporter` 之后、`LaunchOptions?` 之前）；`App.axaml.cs` 调用点相应调整参数顺序。
+- **为什么**：消除与 `AppContext` 的重复构造（单一装配来源）。
+
+### 9C.3-R.6 删除死状态写入（冻结 · 非契约）
+
+- **改了什么**：`MainWindow.SetBusy` 删除非忙分支的 `SetStatus("就绪")`（`SetStatus` 只写
+  pending 气泡，非忙时无气泡 → 原调用为 no-op）。
+
+### 9C.3-R.7 导入变更事件命名统一（冻结 · 非契约）
+
+- **改了什么**：`ImageImportList.Changed` **重命名**为 `ImageImportList.ImagesChanged`，与
+  `ImageImportBar.ImagesChanged` 统一。理由：控件是 App 面向的接缝，`ImagesChanged` 自描述、
+  调用点可读；数据层同步同名消除歧义。
+- **影响**：`ImageImportBar` 订阅点、`ImageImportListTests`（8 处订阅）同步更新。
+
+### 9C.3-R.4 / #5 / #9 / #10 / #2 注释与文档（冻结 · 非契约）
+
+- **#4**：为 `ResolutionPolicy.Width/Height`（请求目标）、`AspectPreset.Width/Height`（比例预设）、
+  `InferenceResultDetail.Width/Height`（后端实际输出）、`ImageViewModel.ImageWidth/ImageHeight`
+  （源图像素）、`MaskSpec.Width/Height`（遮罩原始像素）补 XML 注释，**不改名**。
+- **#5**：`ResolutionPolicy.MaxPixels` 注明权威来源为 `ModelProfile.MaxPixels`；`ModelProfile`
+  的 `NativeSide` / `SafeMaxSide` / `MinSide` / `MultipleOf` / `Presets` 注明「能力元数据，
+  当前无生产消费者」。
+- **#9**：`InferenceProgressDetail` 类级注释注明「仅 Backend 诊断 / 事件富集用；契约边界传
+  `InferenceProgress`；两者是同一帧的两种投影」。
+- **#10**：`CompareOverlay` 类注释与当前实现（父图**铺满当前图矩形**）同步；不改
+  `ACCEPTANCE.md` / `DEVLOG.md` 既有行。**9C.2C.9 验收描述与实际实现不符，已记入遗留**
+  （不实现「精确对齐」，属 9C.3-G）。
+- **#2**：`InferenceResultDetail.DurationMs`（后端采样 + 解码）、`ToolResult.Duration`（一次
+  IPC 提交，含惰性加载与排队）、`SessionViewModel.SubmitAsync` 的 `Stopwatch`（点击到气泡替换
+  的端到端墙钟）三处加注释，说明各自作用域，**不互相校验**。
+
+### 9C.3-R 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：`EditSessionTests` / `CommandParserTests` /
+  `SessionViewModelTests` / `ImageImportListTests` **48 通过 / 0 失败**；非 GPU 全量
+  （排除 `Ipc*` / `PlannerIntegration`）→ **169 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步不加载模型、不启动 Python、不占 GPU。
+
+### 9C.3-R 遗留项（冻结）
+
+- **9C.2C.9 验收描述与实现不符**：原描述「居中 + 背景填充」，实现为「父图铺满当前图矩形」；
+  本步已同步代码注释，**不改** `ACCEPTANCE.md` / `DEVLOG.md` 既有行。精确对齐（outpaint 几何
+  补齐）属 **9C.3-G**，另立步。
+- **`CompareOverlay.BackgroundFill` 现为死状态**（`Render` 不再读取）：保留属性以避免改动
+  XAML 绑定，已在注释标明当前未使用；后续如需背景填充设计再恢复。
+- **V1（`SessionViewModel` 直接持有 `EditSession`）仍未解**：延后至 9C.5，本步不动。
+- **`SessionViewModel` 仍直接读 `_session.CurrentNodeId` / `RootImagePath` / `GetHistory()`**：
+  属 V1 同一违规范围（简单属性 / 列表读取，非遍历），随 9C.5 一并处理。
+
+---
+
+## Step 9C.5（日期：2026-09-23）
+
+> **修订说明（Step 9C.5 · 架构底座重构：会话接口抽象到 Contracts）**
+>
+> 本段为 Step 9C.5 **只增**记录。目标：修复 V1 硬违规（UI 直接持有 Agent 实现类
+> `EditSession` / `EditNode`），把会话接口抽象到 `Contracts`，收窄 UI 对 Agent 的依赖。
+> **纯重构，行为不变**。**不改动 Step 0–9C.3-R 已冻结行**；本段为**纯追加**（文件尾部）。
+
+### 9C.5.1 新增契约（冻结）
+
+| 类型 | 文件 | 说明 |
+|---|---|---|
+| `IEditNode`（接口） | `ZivAiEditor.Contracts/Planning/IEditNode.cs` | `NodeId` / `ParentNodeId?` / `ImagePath` / `Command` / `CreatedAt`（`EditNode` 的只读投影，**不补几何**） |
+| `IEditSession`（接口） | `ZivAiEditor.Contracts/Planning/IEditSession.cs` | **只读**：`SessionId` / `RootImagePath?` / `CurrentNodeId?` / `GetCurrentImagePath()` / `GetHistory()` / `GetParentImagePath(string?)` / `GetPathToCurrent()` / `GetDepth(IEditNode?)`；**不含** `SetRoot` / `ResetToRoot` / `AppendNode` / `NavigateTo` |
+| `IEditSessionWriter`（接口） | `ZivAiEditor.Contracts/Planning/IEditSessionWriter.cs` | **写**：`SetRoot(string)` / `ResetToRoot(string)` / `AppendNode(string?, string, string) → IEditNode` / `NavigateTo(string) → bool` |
+
+- **`GetCurrentImagePath()` 归入只读接口**：`ICommandParser` 解析时以当前工作图为 plan 源，
+  故只读视图必须暴露它（任务原始成员清单遗漏，已补入）。
+- **`Contracts` 新增接口**（既有成员零修改）；`IEditSession` / `IEditSessionWriter` 分离，
+  使只读消费者（对比叠加 / 未来遮罩）不能改会话。
+
+### 9C.5.2 `EditSession` / `EditNode` 实现契约（冻结）
+
+- `EditNode` → `public sealed class EditNode : IEditNode`（字段不变）。
+- `EditSession` → `public sealed class EditSession : IEditSession, IEditSessionWriter`。
+- **签名变化（因接口实现需精确匹配返回类型）**：
+  - `GetHistory()` 返回类型 `IReadOnlyList<EditNode>` → `IReadOnlyList<IEditNode>`
+  - `GetPathToCurrent()` 返回类型 `IReadOnlyList<EditNode>` → `IReadOnlyList<IEditNode>`
+  - `GetDepth(EditNode?)` 参数类型 → `GetDepth(IEditNode?)`
+  - `AppendNode(...)` 返回类型 `EditNode` → `IEditNode`
+- 写入方法（`SetRoot` / `ResetToRoot` / `AppendNode` / `NavigateTo`）**保留在 `EditSession` 上**。
+
+### 9C.5.3 `ICommandParser` 签名修订（冻结 · 既有签名变更，已授权）
+
+> **修订说明**：`ICommandParser.ParseAsync` 的 `session` 参数类型由 **`EditSession`（Agent 实现类）
+> 改为 `IEditSession`（Contracts 接口）**——两个重载同步。**不改动 8.1 既有行**（原文保留），
+> 以本小节为准。
+>
+> - **为什么**：`SessionViewModel`（UI）现持有 `IEditSession`，无法再传具体 `EditSession`；
+>   且 UI 不应引用 Agent 实现类（V1）。参数收窄到接口后，UI 只依赖 Contracts 抽象。
+> - **兼容性**：`CommandParserTests` 传入 `EditSession` 实例，隐式转 `IEditSession`，无需改测试；
+>   实现内部 `session.GetCurrentImagePath()` 经接口调用。
+
+### 9C.5.4 UI 依赖方向（冻结 · 未收窄）
+
+- **UI 对 Agent 的 `ProjectReference` 保留**：UI 仍使用 **`ICommandParser`**（Agent 层接口，
+>   FROZEN 8.1 冻结），删引用会编译失败。故 `ZivAiEditor.UI.csproj` **未改**。
+- **V1 已解**：UI 不再引用 Agent **实现类**（`EditSession` / `EditNode` 在 UI 内零引用）；
+  `SessionViewModel` 字段 / 构造 / `HistoryItem.Node` 全部改用 Contracts 接口。
+- **后续建议**（另立步 / 需授权）：若要把 UI 依赖彻底收窄为「仅 Contracts」，需将
+  `ICommandParser` 上提到 Contracts——属契约搬迁，超出本步范围。
+
+### 9C.5.5 清理与遗留（冻结）
+
+- **`CompareOverlay.BackgroundFill` 未删除**：`ImagePreview.axaml:58` 存在 XAML 绑定引用，
+  按任务分支「有绑定 → 报告后不删」，保留字段（`Render` 已不读取，属死状态）。
+- **既有文档不一致（报告，不改）**：FROZEN 8.1 记 `ISessionExporter` / `SessionExporter` 位于
+  `ZivAiEditor.App/SessionExporter.cs`，**实际位于 `ZivAiEditor.Agent/SessionExporter.cs`**；
+  本步未改该既有行，仅登记。
+
+### 9C.5.6 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：`EditSessionTests` / `SessionViewModelTests` /
+  `CommandParserTests` / `SessionExporterTests` **41 通过 / 0 失败**；非 GPU 全量
+  （排除 `Ipc*` / `PlannerIntegration`）→ **170 通过 / 0 失败**（9C.3-R 基线 169，本步 +1：
+  `EditSessionTests` 接口一致性用例）。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步不加载模型、不启动 Python、不占 GPU。
+
+---
+
+## Step 9C.5 收尾（日期：2026-09-23）
+
+> **修订说明（2026-09-23 · Step 9C.5 用户授权）**
+>
+> 用户明确授权：`ICommandParser` 的 `session` 参数类型由 `EditSession` 收窄为
+> `IEditSession`（Contracts 层只读接口）。原因：Step 9C.5 修复 V1（UI 直接持有 Agent
+> 实现类）后，UI 仅持 `IEditSession`，`ParseAsync` 必须同步接 `IEditSession`，否则
+> 无法编译。性质：改冻结签名（FROZEN 8.1），**已获授权**。
+
+同时确认以下 3 项**不改**：
+
+- **`IEditSessionWriter`：保留**（`NavigateTo` / `ResetToRoot` / `SetRoot` 为用户动作，
+  经核查为真 UI 主动变更，非 UI 代 Agent 编排）
+- **`GetCurrentImagePath()` 进 `IEditSession`：非新增 API**（Step 8 起即为 `EditSession`
+  公开方法），仅暴露到接口
+- **UI 保留 Agent `ProjectReference`**：因 `ICommandParser` 仍在 Agent 层；彻底收窄需
+  将 `ICommandParser` 上提 Contracts，另立步
+
+**遗留（9C.5-B，不阻塞）**：`SessionViewModel.AppendNode`（执行成功回写节点）属 UI 代
+Agent 编排，应下沉至 Agent；涉及 `IExecutor` 设计变更，单独立步。

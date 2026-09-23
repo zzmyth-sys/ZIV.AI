@@ -8,6 +8,13 @@ namespace ZivAiEditor.Backend;
 /// <c>stage</c> / <c>sub_stage</c> fields introduced in Step 2.2 are surfaced
 /// here so callers (and tests) can observe the lazy-load lifecycle without
 /// touching the frozen contract.
+///
+/// <para><b>Boundary (Step 9C.3-R #9)</b>: this type is for <b>Backend
+/// diagnostics / event enrichment only</b> — it never crosses the frozen contract
+/// boundary. The boundary carries <see cref="ZivAiEditor.Contracts.Inference.InferenceProgress"/>
+/// (<c>Fraction</c> / <c>Message</c>) instead. The two are two projections of the
+/// same frame: this detail is the richer one, <c>InferenceProgress</c> the minimal
+/// frozen one.</para>
 /// </summary>
 public sealed class InferenceProgressDetail
 {
@@ -40,9 +47,25 @@ public sealed class InferenceResultDetail
 {
     public string? TaskId { get; init; }
     public string? OutputPath { get; init; }
+
+    /// <summary>
+    /// Backend-reported duration of the sampling + VAE-decode work only (Python
+    /// <c>result.duration_ms</c>). It excludes IPC submission, lazy model load and
+    /// queue wait — see <c>ToolResult.Duration</c> (one IPC submit) and the UI's
+    /// end-to-end stopwatch (Step 9C.3-R #2).
+    /// </summary>
     public double DurationMs { get; init; }
+
+    /// <summary>
+    /// Actual width of the image the backend produced. This is the <b>output</b> size
+    /// (after any resize / fallback), not the requested target
+    /// (<c>ResolutionPolicy.Width</c>) nor a preset (<c>AspectPreset.Width</c>).
+    /// </summary>
     public int Width { get; init; }
+
+    /// <summary>Actual output height produced by the backend (not the request target).</summary>
     public int Height { get; init; }
+
     public long Seed { get; init; }
 }
 

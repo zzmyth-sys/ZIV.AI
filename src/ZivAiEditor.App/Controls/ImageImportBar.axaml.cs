@@ -36,7 +36,7 @@ public partial class ImageImportBar : UserControl
         Init();
     }
 
-    /// <summary>Forwarded from <see cref="ImageImportList.Changed"/> (carries counts).</summary>
+    /// <summary>Forwarded from <see cref="ImageImportList.ImagesChanged"/> (carries counts).</summary>
     public event EventHandler<ImageImportChangedEventArgs>? ImagesChanged;
 
     /// <summary>The imported image paths, oldest first (diagnostics / tests).</summary>
@@ -62,7 +62,7 @@ public partial class ImageImportBar : UserControl
         _scroll = this.FindControl<ScrollViewer>("PART_Scroll");
         _items = this.FindControl<StackPanel>("PART_Items");
 
-        _list.Changed += (_, e) =>
+        _list.ImagesChanged += (_, e) =>
         {
             Rebuild();
             ImagesChanged?.Invoke(this, e);

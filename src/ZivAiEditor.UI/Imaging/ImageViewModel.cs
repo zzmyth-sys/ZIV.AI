@@ -30,10 +30,17 @@ public sealed class ImageViewModel
     /// <summary>True until the view has been fitted once the viewport is known.</summary>
     private bool _pendingFit = true;
 
-    /// <summary>Source image width in pixels; 0 when no image is loaded.</summary>
+    /// <summary>
+    /// Source image pixel width; 0 when no image is loaded. This is the decoded
+    /// source image's own size — not a request target (<c>ResolutionPolicy.Width</c>),
+    /// a preset (<c>AspectPreset.Width</c>) nor a backend output size.
+    /// </summary>
     public double ImageWidth { get; private set; }
 
-    /// <summary>Source image height in pixels; 0 when no image is loaded.</summary>
+    /// <summary>
+    /// Source image pixel height; 0 when no image is loaded. Not a request target,
+    /// preset nor backend output size.
+    /// </summary>
     public double ImageHeight { get; private set; }
 
     /// <summary>Visible content width in device pixels; 0 before first layout.</summary>

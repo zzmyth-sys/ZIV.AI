@@ -79,7 +79,7 @@ public class SessionViewModelTests
     public async Task Submit_Appends_Node_And_Refreshes_History()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         var ok = await vm.SubmitAsync("/去水印");
@@ -95,7 +95,7 @@ public class SessionViewModelTests
     public async Task Submit_Failure_Shows_Error_And_Adds_No_Node()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, ParserWithoutFile(), new FakeExecutor(null, success: false));
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(null, success: false));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         var ok = await vm.SubmitAsync("把天空换成日落");
@@ -109,7 +109,7 @@ public class SessionViewModelTests
     public async Task Navigate_Switches_Current_And_Rebuilds_Chat()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
 
@@ -125,7 +125,7 @@ public class SessionViewModelTests
     public void Empty_Session_Starts_Without_Messages()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
 
         vm.Start(new LaunchOptions());
 
@@ -138,7 +138,7 @@ public class SessionViewModelTests
     {
         var session = new EditSession();
         var executor = new DeferredExecutor();
-        var vm = new SessionViewModel(session, ParserWithoutFile(), executor);
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         var submit = vm.SubmitAsync("/去水印");
@@ -164,7 +164,7 @@ public class SessionViewModelTests
     public void GetParentImagePath_Is_Null_For_Root_Image()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         Assert.Null(vm.GetParentImagePath(Root));
@@ -177,7 +177,7 @@ public class SessionViewModelTests
     public async Task GetParentImagePath_Returns_Root_For_Direct_Child()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
 
@@ -189,7 +189,7 @@ public class SessionViewModelTests
     {
         const string second = @"C:\img\out2.png";
         var session = new EditSession();
-        var vm = new SessionViewModel(session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
 
@@ -204,7 +204,7 @@ public class SessionViewModelTests
     public async Task SetRootImage_Resets_Session_And_Rebuilds_Chat()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
         Assert.Single(vm.History);
@@ -221,7 +221,7 @@ public class SessionViewModelTests
     public void SetRootImage_Blank_Is_NoOp()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         vm.SetRootImage(null);

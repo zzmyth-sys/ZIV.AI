@@ -1,3 +1,5 @@
+using ZivAiEditor.Contracts.Planning;
+
 namespace ZivAiEditor.Agent;
 
 /// <summary>
@@ -10,9 +12,20 @@ namespace ZivAiEditor.Agent;
 /// selects the working image, and a new edit appends a child of the current node
 /// so historical branches are preserved. There is no concurrency control: the UI
 /// guarantees single-threaded access.
+///
+/// <para>Step 9C.5: implements the Contracts read-only <see cref="IEditSession"/> and
+/// the write <see cref="IEditSessionWriter"/>, so the UI can drive the session without
+/// referencing this concrete type (V1).</para>
 /// </summary>
-public sealed class EditSession
+public sealed class EditSession : IEditSession, IEditSessionWriter
 {
+    /// <summary>
+    /// Hard ceiling for the parent / depth walks below. The graph is built
+    /// one-parent-at-a-time by <see cref="AppendNode"/>, so a cycle cannot arise;
+    /// the guard is purely defensive against future mutation paths (V2).
+    /// </summary>
+    private const int MaxTreeDepth = 4096;
+
     public string SessionId { get; init; } = Guid.NewGuid().ToString("N");
 
     /// <summary>Source image the session started from; <c>null</c> for a T2I-first session.</summary>
@@ -46,7 +59,7 @@ public sealed class EditSession
     /// current. <paramref name="parentId"/> is <c>null</c> for a direct child of
     /// the root.
     /// </summary>
-    public EditNode AppendNode(string? parentId, string imagePath, string command)
+    public IEditNode AppendNode(string? parentId, string imagePath, string command)
     {
         var node = new EditNode
         {
@@ -73,7 +86,7 @@ public sealed class EditSession
     }
 
     /// <summary>All nodes, oldest first (stable for equal timestamps).</summary>
-    public IReadOnlyList<EditNode> GetHistory()
+    public IReadOnlyList<IEditNode> GetHistory()
         => Nodes.Values
             .OrderBy(node => node.CreatedAt)
             .ThenBy(node => node.NodeId, StringComparer.Ordinal)
@@ -94,10 +107,91 @@ public sealed class EditSession
 
         return RootImagePath;
     }
+
+    /// <summary>
+    /// The parent (reference) image path for <paramref name="imagePath"/>, used by the
+    /// swipe-compare overlay (V2, moved down from the UI): the parent node's output, or
+    /// the root image for a direct child of the root. Returns <c>null</c> for the root
+    /// image itself (no parent) or an unknown path.
+    /// </summary>
+    public string? GetParentImagePath(string? imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath))
+        {
+            return null;
+        }
+
+        foreach (var node in GetHistory())
+        {
+            if (!string.Equals(node.ImagePath, imagePath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(node.ParentNodeId))
+            {
+                return RootImagePath;
+            }
+
+            return Nodes.TryGetValue(node.ParentNodeId, out var parent)
+                ? parent.ImagePath
+                : null;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The node path from the root image down to <see cref="CurrentNodeId"/> (oldest
+    /// first). Empty when no node is current. Used by the UI to replay the chat context
+    /// (V2, moved down from the UI); the <see cref="MaxTreeDepth"/> guard is defensive.
+    /// </summary>
+    public IReadOnlyList<IEditNode> GetPathToCurrent()
+    {
+        var path = new List<IEditNode>();
+        var id = CurrentNodeId;
+        var guard = 0;
+        while (!string.IsNullOrEmpty(id)
+               && Nodes.TryGetValue(id, out var node)
+               && guard++ < MaxTreeDepth)
+        {
+            path.Add(node);
+            id = node.ParentNodeId;
+        }
+
+        path.Reverse();
+        return path;
+    }
+
+    /// <summary>
+    /// The tree depth of <paramref name="node"/> (number of ancestors: 0 for a direct
+    /// child of the root). Used by the UI for history indentation (V2, moved down from
+    /// the UI). Returns 0 when <paramref name="node"/> is <c>null</c>.
+    /// </summary>
+    public int GetDepth(IEditNode? node)
+    {
+        if (node is null)
+        {
+            return 0;
+        }
+
+        var depth = 0;
+        var id = node.ParentNodeId;
+        var guard = 0;
+        while (!string.IsNullOrEmpty(id)
+               && Nodes.TryGetValue(id, out var parent)
+               && guard++ < MaxTreeDepth)
+        {
+            depth++;
+            id = parent.ParentNodeId;
+        }
+
+        return depth;
+    }
 }
 
 /// <summary>One executed edit in the session DAG (INTERACTION.md §3).</summary>
-public sealed class EditNode
+public sealed class EditNode : IEditNode
 {
     public string NodeId { get; init; } = Guid.NewGuid().ToString("N");
 

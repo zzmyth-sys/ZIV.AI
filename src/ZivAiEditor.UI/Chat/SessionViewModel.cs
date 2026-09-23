@@ -37,7 +37,7 @@ public sealed class ChatMessage
 /// <summary>One entry in the history list, carrying its tree depth for indentation.</summary>
 public sealed class HistoryItem
 {
-    public EditNode Node { get; init; } = null!;
+    public IEditNode Node { get; init; } = null!;
 
     public int Depth { get; init; }
 
@@ -45,9 +45,11 @@ public sealed class HistoryItem
 }
 
 /// <summary>
-/// Chat-session view model (Step 9A): it drives the in-memory <see cref="EditSession"/>
-/// through the frozen Agent contracts only — <see cref="ICommandParser"/> to turn input
-/// into an <c>EditPlan</c> and <see cref="IExecutor"/> to run it. It never touches
+/// Chat-session view model (Step 9A): it drives the in-memory session through the
+/// frozen Agent contracts only — <see cref="ICommandParser"/> to turn input into an
+/// <c>EditPlan</c> and <see cref="IExecutor"/> to run it. Step 9C.5: the session is
+/// held as the Contracts <see cref="IEditSession"/> / <see cref="IEditSessionWriter"/>,
+/// so no Agent implementation type crosses into the UI (V1). It never touches
 /// <c>IInferenceClient</c> (ARCHITECTURE.md §4: the UI talks to the Agent layer through
 /// contracts; inference is the tool's job).
 ///
@@ -56,21 +58,25 @@ public sealed class HistoryItem
 /// </summary>
 public sealed class SessionViewModel
 {
-    private const int MaxTreeDepth = 4096;
-
-    private readonly EditSession _session;
+    private readonly IEditSession _session;
+    private readonly IEditSessionWriter _writer;
     private readonly ICommandParser _parser;
     private readonly IExecutor _executor;
 
-    public SessionViewModel(EditSession session, ICommandParser parser, IExecutor executor)
+    public SessionViewModel(
+        IEditSession session,
+        IEditSessionWriter writer,
+        ICommandParser parser,
+        IExecutor executor)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
+        _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _parser = parser ?? throw new ArgumentNullException(nameof(parser));
         _executor = executor ?? throw new ArgumentNullException(nameof(executor));
     }
 
-    /// <summary>The underlying session (read-only for the UI except through this VM).</summary>
-    public EditSession Session => _session;
+    /// <summary>The underlying session, exposed read-only (Step 9C.5: no Agent type crosses).</summary>
+    public IEditSession Session => _session;
 
     public ObservableCollection<ChatMessage> Messages { get; } = new();
 
@@ -113,7 +119,7 @@ public sealed class SessionViewModel
     {
         if (options.ImagePath is { Length: > 0 } image)
         {
-            _session.SetRoot(image);
+            _writer.SetRoot(image);
         }
 
         RefreshHistory();
@@ -137,7 +143,7 @@ public sealed class SessionViewModel
 
         Messages.Add(new ChatMessage { Role = ChatRole.User, Text = text });
 
-        var parsed = await _parser.ParseAsync(text, _session, ct);
+        var parsed = await _parser.ParseAsync(text, _session, Resolution, ct);
         if (!parsed.Success || parsed.Plan is null)
         {
             Messages.Add(new ChatMessage
@@ -155,24 +161,14 @@ public sealed class SessionViewModel
         IsBusy = true;
 
         var parentId = _session.CurrentNodeId;
+
+        // End-to-end wall-clock: click-to-bubble-replacement (Step 9C.3 收尾 10). This is
+        // intentionally distinct from the backend's InferenceResultDetail.DurationMs
+        // (sampling + VAE decode only) and ToolResult.Duration (one IPC submit, incl.
+        // lazy load / queue) — the three are not interchangeable (Step 9C.3-R #2).
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-        // Apply the UI-selected resolution when the plan has none of its own.
         var plan = parsed.Plan;
-        if (plan.Resolution is null && Resolution is not null)
-        {
-            plan = new EditPlan
-            {
-                PlanId = plan.PlanId,
-                SourcePrompt = plan.SourcePrompt,
-                MainImagePath = plan.MainImagePath,
-                ReferenceImagePath = plan.ReferenceImagePath,
-                Mask = plan.Mask,
-                Steps = plan.Steps,
-                CreatedAt = plan.CreatedAt,
-                Resolution = Resolution,
-            };
-        }
 
         try
         {
@@ -180,7 +176,7 @@ public sealed class SessionViewModel
             var elapsed = stopwatch.Elapsed;
             if (state.Status == TaskStatus.Succeeded && !string.IsNullOrWhiteSpace(state.OutputImagePath))
             {
-                _session.AppendNode(parentId, state.OutputImagePath, text);
+                _writer.AppendNode(parentId, state.OutputImagePath, text);
                 Messages[pendingIndex] = new ChatMessage
                 {
                     Role = ChatRole.Assistant,
@@ -221,7 +217,7 @@ public sealed class SessionViewModel
     /// </summary>
     public bool NavigateTo(string nodeId)
     {
-        if (!_session.NavigateTo(nodeId))
+        if (!_writer.NavigateTo(nodeId))
         {
             return false;
         }
@@ -245,7 +241,7 @@ public sealed class SessionViewModel
             return;
         }
 
-        _session.ResetToRoot(imagePath);
+        _writer.ResetToRoot(imagePath);
         RefreshHistory();
         RebuildContext();
     }
@@ -259,7 +255,7 @@ public sealed class SessionViewModel
             History.Add(new HistoryItem
             {
                 Node = node,
-                Depth = DepthOf(node),
+                Depth = _session.GetDepth(node),
                 IsCurrent = string.Equals(node.NodeId, _session.CurrentNodeId, StringComparison.Ordinal),
             });
         }
@@ -267,36 +263,10 @@ public sealed class SessionViewModel
 
     /// <summary>
     /// The parent (reference) image path for a chat image, used by the swipe-compare
-    /// overlay (Step 9C.2-C): the parent node's output, or the root image for a direct
-    /// child of the root. Returns <c>null</c> for the root image itself (no parent) or
-    /// an unknown path.
+    /// overlay (Step 9C.2-C). Delegates to the session DAG query (V2) — the traversal
+    /// lives in <see cref="IEditSession.GetParentImagePath"/>.
     /// </summary>
-    public string? GetParentImagePath(string? imagePath)
-    {
-        if (string.IsNullOrWhiteSpace(imagePath))
-        {
-            return null;
-        }
-
-        foreach (var node in _session.GetHistory())
-        {
-            if (!string.Equals(node.ImagePath, imagePath, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (string.IsNullOrEmpty(node.ParentNodeId))
-            {
-                return _session.RootImagePath;
-            }
-
-            return _session.Nodes.TryGetValue(node.ParentNodeId, out var parent)
-                ? parent.ImagePath
-                : null;
-        }
-
-        return null;
-    }
+    public string? GetParentImagePath(string? imagePath) => _session.GetParentImagePath(imagePath);
 
     /// <summary>Clears the chat and replays the path from the root image to the current node.</summary>
     private void RebuildContext()
@@ -308,44 +278,11 @@ public sealed class SessionViewModel
             Messages.Add(new ChatMessage { Role = ChatRole.System, Text = "起始图像", ImagePath = root });
         }
 
-        foreach (var node in PathToCurrent())
+        foreach (var node in _session.GetPathToCurrent())
         {
             Messages.Add(new ChatMessage { Role = ChatRole.User, Text = node.Command });
             Messages.Add(new ChatMessage { Role = ChatRole.Assistant, Text = "完成", ImagePath = node.ImagePath });
         }
-    }
-
-    private IReadOnlyList<EditNode> PathToCurrent()
-    {
-        var path = new List<EditNode>();
-        var id = _session.CurrentNodeId;
-        var guard = 0;
-        while (!string.IsNullOrEmpty(id)
-               && _session.Nodes.TryGetValue(id, out var node)
-               && guard++ < MaxTreeDepth)
-        {
-            path.Add(node);
-            id = node.ParentNodeId;
-        }
-
-        path.Reverse();
-        return path;
-    }
-
-    private int DepthOf(EditNode node)
-    {
-        var depth = 0;
-        var id = node.ParentNodeId;
-        var guard = 0;
-        while (!string.IsNullOrEmpty(id)
-               && _session.Nodes.TryGetValue(id, out var parent)
-               && guard++ < MaxTreeDepth)
-        {
-            depth++;
-            id = parent.ParentNodeId;
-        }
-
-        return depth;
     }
 
     private static string BuildFailureMessage(TaskState state)

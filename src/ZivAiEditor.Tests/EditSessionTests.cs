@@ -1,4 +1,5 @@
 using ZivAiEditor.Agent;
+using ZivAiEditor.Contracts.Planning;
 using Xunit;
 
 namespace ZivAiEditor.Tests;
@@ -85,5 +86,98 @@ public class EditSessionTests
         Assert.Equal(3, session.Nodes.Count);
         Assert.Equal(siblingB.NodeId, session.CurrentNodeId);
         Assert.Equal(@"C:\img\out3.png", session.GetCurrentImagePath());
+    }
+
+    [Fact]
+    public void GetParentImagePath_Is_Null_For_Root_Or_Unknown()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+
+        Assert.Null(session.GetParentImagePath(@"C:\img\root.png"));
+        Assert.Null(session.GetParentImagePath(""));
+        Assert.Null(session.GetParentImagePath("   "));
+        Assert.Null(session.GetParentImagePath(null));
+        Assert.Null(session.GetParentImagePath(@"C:\img\unknown.png"));
+    }
+
+    [Fact]
+    public void GetParentImagePath_Returns_Root_For_Direct_Child()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        session.AppendNode(null, @"C:\img\out1.png", "cmd1");
+
+        Assert.Equal(@"C:\img\root.png", session.GetParentImagePath(@"C:\img\out1.png"));
+    }
+
+    [Fact]
+    public void GetParentImagePath_Returns_Parent_Output_For_Grandchild()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var first = session.AppendNode(null, @"C:\img\out1.png", "cmd1");
+        session.AppendNode(first.NodeId, @"C:\img\out2.png", "cmd2");
+
+        Assert.Equal(@"C:\img\out1.png", session.GetParentImagePath(@"C:\img\out2.png"));
+    }
+
+    [Fact]
+    public void GetParentImagePath_Is_Case_Insensitive()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        session.AppendNode(null, @"C:\img\out1.png", "cmd1");
+
+        Assert.Equal(@"C:\img\root.png", session.GetParentImagePath(@"C:\IMG\OUT1.PNG"));
+    }
+
+    [Fact]
+    public void GetPathToCurrent_Walks_Root_To_Current()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var first = session.AppendNode(null, @"C:\img\out1.png", "cmd1");
+        var second = session.AppendNode(first.NodeId, @"C:\img\out2.png", "cmd2");
+
+        var path = session.GetPathToCurrent();
+
+        Assert.Equal(2, path.Count);
+        Assert.Equal(first.NodeId, path[0].NodeId);
+        Assert.Equal(second.NodeId, path[1].NodeId);
+    }
+
+    [Fact]
+    public void GetPathToCurrent_Is_Empty_When_No_Current_Node()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+
+        Assert.Empty(session.GetPathToCurrent());
+    }
+
+    [Fact]
+    public void GetDepth_Counts_Ancestors()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var first = session.AppendNode(null, @"C:\img\out1.png", "cmd1");
+        var second = session.AppendNode(first.NodeId, @"C:\img\out2.png", "cmd2");
+
+        Assert.Equal(0, session.GetDepth(first));
+        Assert.Equal(1, session.GetDepth(second));
+        Assert.Equal(0, session.GetDepth(null));
+    }
+
+    [Fact]
+    public void EditSession_And_EditNode_Implement_Contracts_Interfaces()
+    {
+        // Step 9C.5: the concrete types satisfy the Contracts abstractions the UI uses.
+        var session = new EditSession();
+        var node = session.AppendNode(null, @"C:\img\out1.png", "cmd1");
+
+        Assert.IsAssignableFrom<IEditSession>(session);
+        Assert.IsAssignableFrom<IEditSessionWriter>(session);
+        Assert.IsAssignableFrom<IEditNode>(node);
     }
 }

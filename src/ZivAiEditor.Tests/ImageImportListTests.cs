@@ -20,7 +20,7 @@ public class ImageImportListTests
     {
         var list = new ImageImportList();
         ImageImportChangedEventArgs? change = null;
-        list.Changed += (_, e) => change = e;
+        list.ImagesChanged += (_, e) => change = e;
 
         var added = list.AddRange(new[] { @"C:\img\a.png" });
 
@@ -37,7 +37,7 @@ public class ImageImportListTests
         var list = new ImageImportList();
         var changes = 0;
         ImageImportChangedEventArgs? last = null;
-        list.Changed += (_, e) => { changes++; last = e; };
+        list.ImagesChanged += (_, e) => { changes++; last = e; };
 
         var added = list.AddRange(new[] { @"C:\img\a.png", @"C:\img\b.png", @"C:\img\c.png" });
 
@@ -67,7 +67,7 @@ public class ImageImportListTests
         list.AddRange(new[] { @"C:\img\a.png" });
 
         var changes = 0;
-        list.Changed += (_, _) => changes++;
+        list.ImagesChanged += (_, _) => changes++;
         var added = list.AddRange(new[] { @"C:\img\a.png" });
 
         Assert.Equal(0, added);
@@ -91,7 +91,7 @@ public class ImageImportListTests
         var list = new ImageImportList();
         list.AddRange(new[] { @"C:\img\a.png", @"C:\img\b.png" });
         ImageImportChangedEventArgs? change = null;
-        list.Changed += (_, e) => change = e;
+        list.ImagesChanged += (_, e) => change = e;
 
         var removed = list.RemoveAt(0);
 
@@ -108,7 +108,7 @@ public class ImageImportListTests
         var list = new ImageImportList();
         list.AddRange(new[] { @"C:\img\a.png" });
         var changes = 0;
-        list.Changed += (_, _) => changes++;
+        list.ImagesChanged += (_, _) => changes++;
 
         Assert.False(list.RemoveAt(5));
         Assert.False(list.RemoveAt(-1));
@@ -123,7 +123,7 @@ public class ImageImportListTests
         list.AddRange(new[] { @"C:\img\a.png", @"C:\img\b.png" });
         var changes = 0;
         ImageImportChangedEventArgs? change = null;
-        list.Changed += (_, e) => { changes++; change = e; };
+        list.ImagesChanged += (_, e) => { changes++; change = e; };
 
         list.Clear();
 
@@ -138,7 +138,7 @@ public class ImageImportListTests
     {
         var list = new ImageImportList();
         var changes = 0;
-        list.Changed += (_, _) => changes++;
+        list.ImagesChanged += (_, _) => changes++;
 
         list.Clear();
 
@@ -152,7 +152,7 @@ public class ImageImportListTests
         var list = new ImageImportList();
         list.AddRange(new[] { @"C:\img\a.png", @"C:\img\b.png" });
         ImageImportChangedEventArgs? change = null;
-        list.Changed += (_, e) => change = e;
+        list.ImagesChanged += (_, e) => change = e;
 
         list.RemoveAt(1);
 

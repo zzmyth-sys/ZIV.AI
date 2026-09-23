@@ -18,16 +18,27 @@ public sealed class ResolutionPolicy
     /// <summary>Mode=<see cref="ResolutionMode.Scale"/>: multiple of the input's long edge.</summary>
     public float? Scale { get; init; }
 
-    /// <summary>Mode=<see cref="ResolutionMode.Explicit"/>: explicit target width.</summary>
+    /// <summary>
+    /// Mode=<see cref="ResolutionMode.Explicit"/>: explicit target width <b>requested</b>
+    /// by the user / command. This is an input, not the produced size — the actual
+    /// output dimensions are reported by the backend (see <c>InferenceResultDetail.Width</c>).
+    /// </summary>
     public int? Width { get; init; }
 
-    /// <summary>Mode=<see cref="ResolutionMode.Explicit"/>: explicit target height.</summary>
+    /// <summary>
+    /// Mode=<see cref="ResolutionMode.Explicit"/>: explicit target height <b>requested</b>
+    /// by the user / command. Input, not output (see <c>InferenceResultDetail.Height</c>).
+    /// </summary>
     public int? Height { get; init; }
 
     /// <summary>
     /// Safety ceiling for the total pixel count (OOM guard). It is independent of
     /// the long-edge limit, so the official 16:9 preset (2752×1536 = 4,227,072)
     /// is not clamped. Default 4,700,000 (Step 7 MaxPixels fix).
+    ///
+    /// <para><b>Provenance (Step 9C.3-R #5)</b>: the authoritative value is
+    /// <c>ModelProfile.MaxPixels</c>; callers populate this from the active profile.
+    /// The default here exists only for compatibility when no profile is supplied.</para>
     /// </summary>
     public int MaxPixels { get; init; } = 4_700_000;
 }
