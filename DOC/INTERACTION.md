@@ -105,3 +105,65 @@
 - ~~历史节点的 UI 展示形式（列表 / 时间轴 / 缩略图）~~ **已定（Step 9A）**：左栏**列表** +
   按 `ParentNodeId` **树形缩进**；点击节点切换当前上下文。
 - ~~保存目录的默认值~~ **已定（Step 9A）**：关闭时弹窗询问，由用户经系统文件夹选择器指定。
+
+## 8. 图片流入模型（Step 9C.6-C）
+
+> 本节为 **Step 9C.6-C 追加**（只增不改）。记录附件条与「输入图」的裁决，避免回退到
+> 「拖图即 root / 附件条不清空 / 第三次编辑丢图」的旧行为。
+
+- **附件条 = 一次性输入，即用即消、不持久化**。拖图 / 粘贴 / `+` 选图只把路径放进附件条，
+  **不**立即成为会话 root；点发送才消费，**成功后清空**。
+- **明确意图的直接导入**（ZIV / CLI `--image`）仍直接 `SetRoot`（不进附件条）——这是启动 /
+  二实例转发，不是聊天内一次性输入。
+- **单图 / 多图两种编辑模式**（`ImageEditMode`，UI 层）：
+  - 默认**单图**；附件加第 2 张时**自动切多图**；用户可点按钮**手动覆盖**；**不反向自动切回**。
+  - 本步多图**只做 UI + 校验 + 弹框**；多图管线（`AdditionalImages` + `<imageN>`）→ **9C.5-D**。
+- **发送校验矩阵**（用户裁决）：**附件 0 → 模式不设限**（走 T2I 或当前节点图）；**附件 1 →
+  仅单图允许**；**附件 ≥2 → 仅多图允许**；文本为空一律禁用。**无附件时模式不设限**——保留
+  自然语言 **T2I 文生图**（`/` 命令仍要求有图，见下）。
+- **发送消费决策树**：
+  - 附件空 + 有 root → 用当前节点送管线图（`GetCurrentPipelineImagePath`）。
+  - 附件空 + 无 root：`/` 命令 → **阻止** + 对话内提示「请先导入图片」；自然语言 → **放行 T2I**。
+  - 附件非空 + 无 root → 附件第一张成为 root（`SetRoot`）。
+  - 附件非空 + 有 root → 弹**三选一**：`新会话`（首图成新 root，重置 DAG）/ `参考图`（**灰化**，
+    tooltip「多图编辑暂未实现」）/ `取消`（不发送，保留附件）。
+- **提示**：模式 ↔ 附件数量不匹配时，工具行显示**内联瞬态气泡**（约 2.5s 自动隐藏），触发点为
+  **模式按钮点击**与**附件数量变化**——`单图 + 附件 ≥2` →「请选择多图编辑」；`多图 + 附件 ==1` →
+  「请再添加一张图」；`多图 + 附件 ==0` **不提示**（不设限）。对话内提示以
+  `ChatMessage{Role=System, IsError=true}` 插入聊天流，**不阻断**继续输入。
+
+> **实现状态（Step 9C.6-C）**：`ImageEditMode` / `AttachmentPreparation`（UI）、
+> `SessionViewModel.PrepareAttachments` / `CanSend` / `AddHint`、`MainWindow.Send.cs`、
+> `MultiImagePromptDialog`（App）已落地。契约与冻结记录见 `FROZEN.md` Step 9C.6-C。
+> 多图管线、参考图功能、`commands.json` 的 `mode` 字段仍后置。
+
+## 9. 项目模型（Step 9C.6-E）
+
+> 本节为 **Step 9C.6-E 追加**（只增不改）。把「单次运行一个内存会话」升级为**项目列表**。
+
+- **一次只有一个 `EditSession` 在线**（不做多会话互通）；项目 = 一个自包含目录
+  `sessions/{sessionId}/`（程序目录，Z14）：
+  `session.json`（`version:1` + `name` + `session_id` + `current_node_id` + `created_at` + `nodes[]`）
+  + 每个节点图 `{NodeId}.png` + 裁切图 `{NodeId}_crop.png`。
+- **源图自包含**：root 节点的 `{RootNodeId}.png` 副本即源图（不单独建 `source/`）。
+- **JSON 存相对名**（`{NodeId}.png` / `{NodeId}_crop.png`），加载时拼项目目录为绝对路径（可移植）。
+- **项目名** = `session.json` 的 `name`，默认取**首图文件名**（可双击改名）。
+- **左栏**：上半 = **项目列表**，下半 = **当前项目的历史节点**（切换项目只换下半）。
+- **操作**：
+  - `+`（标题栏左上）= 新建空项目（**询问保存当前**）。
+  - 点项目 = 切换（**询问保存当前**；先保存 → 清旧 `_cache/crops/{old}` → 就地 `Restore`）。
+  - `×` = 删除项目（确认 → 删整个目录；删当前项目 → 切到列表第一个 / 空项目）。
+  - 双击项目名 = 改名。
+  - 保存 = 标题栏保存按钮 + `Ctrl+S` → 写 `sessions/{sessionId}/`；关闭时**询问式**保存。
+  - **「另存为」**（导出到外部目录）= `SessionStore.ExportToAsync` **保留，UI 后置**。
+- **启动**：读 `sessions/last_project.txt` → 自动打开上次项目；无记录 / 目录缺失 → 空项目。
+- **就地恢复**：`EditSession.Restore(...)` 原地重建 DAG（实例不变）；`IEditSession` /
+  `IEditSessionWriter` **契约不变**。`_vm.Reload()` 重建聊天 / 历史。
+- **错误**：`session.json` 损坏 → 提示「项目损坏」+ 打开空项目 + **不删文件**；`version` 不匹配 →
+  「项目格式过旧 / 版本不受支持」；节点图缺失 → 跳过 + 警告。
+- **大图预览「另存为」**：`ImagePreview` 保存按钮 / `Ctrl+Shift+S` → 默认目录 = 起始图目录，
+  文件名 = `{首图名前8}_{命令名或提示词前8}.png`（非法字符清洗），保存**显示图**（裁切结果优先）。
+
+> **实现状态（Step 9C.6-E）**：`SessionStore` / `SessionLoader`（Agent，取代 `SessionExporter`）、
+> `MainWindow.Projects.cs` / `TextPromptDialog`（App）、`ProjectListItem`（UI）已落地。
+> 契约与冻结记录见 `FROZEN.md` Step 9C.6-E。多会话互通、项目缩略图、项目导入、另存为入口仍后置。

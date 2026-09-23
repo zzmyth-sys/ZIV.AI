@@ -146,9 +146,9 @@ public class ImageImportListTests
     }
 
     [Fact]
-    public void Two_To_One_Removal_Does_Not_Look_Like_A_Promotion()
+    public void Two_To_One_Removal_Reports_Counts()
     {
-        // The App layer promotes to main image only when CountBefore==0 && CountAfter==1.
+        // Step 9C.6-C removed the empty-to-one promotion; the count transition is still reported.
         var list = new ImageImportList();
         list.AddRange(new[] { @"C:\img\a.png", @"C:\img\b.png" });
         ImageImportChangedEventArgs? change = null;
@@ -160,5 +160,19 @@ public class ImageImportListTests
         Assert.Equal(2, change!.CountBefore);
         Assert.Equal(1, change.CountAfter);
         Assert.False(change.CountBefore == 0 && change.CountAfter == 1);
+    }
+
+    [Fact]
+    public void HasImages_Reflects_Count()
+    {
+        var list = new ImageImportList();
+
+        Assert.False(list.HasImages);
+
+        list.AddRange(new[] { @"C:\img\a.png" });
+        Assert.True(list.HasImages);
+
+        list.Clear();
+        Assert.False(list.HasImages);
     }
 }

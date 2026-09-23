@@ -4,9 +4,8 @@ namespace ZivAiEditor.Agent;
 
 /// <summary>
 /// In-memory edit session (INTERACTION.md §3): a DAG of edit outputs rooted at the
-/// source image. It is intentionally <b>not persisted</b> — the session lives only for
-/// the process lifetime and is exported on close by the App layer
-/// (<c>ISessionExporter</c>).
+/// source image. Since Step 9C.6-E it can be persisted as a project by the App layer
+/// (<c>SessionStore</c>) and restored in place through <see cref="Restore"/>.
 ///
 /// <para>Step 9C.6: the source image is itself the first node — <see cref="SetRoot"/> /
 /// <see cref="ResetToRoot"/> synthesize a root <see cref="EditNode"/> (<c>ParentNodeId =
@@ -34,7 +33,7 @@ public sealed class EditSession : IEditSession, IEditSessionWriter
     /// <summary>The command label given to the synthesized root ("source image") node.</summary>
     private const string RootCommand = "原图";
 
-    public string SessionId { get; init; } = Guid.NewGuid().ToString("N");
+    public string SessionId { get; set; } = Guid.NewGuid().ToString("N");
 
     /// <summary>
     /// The synthesized root ("source image") node created by <see cref="SetRoot"/> /
@@ -59,7 +58,7 @@ public sealed class EditSession : IEditSession, IEditSessionWriter
     /// </summary>
     public string? CurrentNodeId { get; set; }
 
-    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
 
     /// <summary>
     /// Sets the session root image (Step 9C.6): rebuilds the DAG with a synthesized root
@@ -86,6 +85,43 @@ public sealed class EditSession : IEditSession, IEditSessionWriter
 
         Nodes[_rootNode.NodeId] = _rootNode;
         CurrentNodeId = _rootNode.NodeId;
+    }
+
+    /// <summary>
+    /// Replaces this session's contents <b>in place</b> (Step 9C.6-E) from a persisted
+    /// project: clears the DAG, rebuilds it from <paramref name="nodes"/>, re-points the
+    /// root (the single node with no parent) and selects <paramref name="currentId"/>
+    /// (falling back to the root when it is unknown), then adopts
+    /// <paramref name="sessionId"/> / <paramref name="createdAt"/>. The instance identity
+    /// is preserved so UI consumers that captured <see cref="IEditSession"/> /
+    /// <see cref="IEditSessionWriter"/> stay valid.
+    /// </summary>
+    public void Restore(
+        IReadOnlyList<IEditNode> nodes,
+        string? currentId,
+        string sessionId,
+        DateTimeOffset createdAt)
+    {
+        Nodes.Clear();
+        foreach (var node in nodes)
+        {
+            Nodes[node.NodeId] = new EditNode
+            {
+                NodeId = node.NodeId,
+                ParentNodeId = node.ParentNodeId,
+                ImagePath = node.ImagePath,
+                Command = node.Command,
+                Crop = node.Crop,
+                CreatedAt = node.CreatedAt,
+            };
+        }
+
+        _rootNode = Nodes.Values.FirstOrDefault(node => string.IsNullOrEmpty(node.ParentNodeId));
+        CurrentNodeId = !string.IsNullOrEmpty(currentId) && Nodes.ContainsKey(currentId)
+            ? currentId
+            : _rootNode?.NodeId;
+        SessionId = sessionId;
+        CreatedAt = createdAt;
     }
 
     /// <summary>

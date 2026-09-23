@@ -71,6 +71,12 @@ public partial class ImagePreview : Window
     public ToolStateMachine ToolState => _tools;
 
     /// <summary>
+    /// Raised when the user asks to save the shown image elsewhere (Step 9C.6-E). The App
+    /// layer owns the file picker and the session context, so the window only signals intent.
+    /// </summary>
+    public event EventHandler? SaveRequested;
+
+    /// <summary>
     /// Loads (or clears) the preview image. A repeat path is ignored unless
     /// <paramref name="force"/> is set — the crop temp file is overwritten in place on
     /// re-crop, so confirming a crop reloads the same path to show the new content.
@@ -213,6 +219,12 @@ public partial class ImagePreview : Window
         {
             WindowDecorationProperties.SetElementRole(_compare, WindowDecorationsElementRole.User);
             _compare.Click += OnCompareClick;
+        }
+
+        if (this.FindControl<Button>("PART_BtnSave") is { } save)
+        {
+            WindowDecorationProperties.SetElementRole(save, WindowDecorationsElementRole.User);
+            save.Click += (_, _) => SaveRequested?.Invoke(this, EventArgs.Empty);
         }
 
         _tools.StateChanged += (_, _) => OnToolsChanged();
@@ -361,32 +373,6 @@ public partial class ImagePreview : Window
         }
 
         _box.Cursor = new Cursor(type);
-    }
-
-    private void OnKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Escape)
-        {
-            return;
-        }
-
-        e.Handled = true;
-
-        // Esc exits crop mode first, then compare mode; a further Esc closes the window.
-        if (IsCropActive)
-        {
-            ExitCropMode();
-            return;
-        }
-
-        // Esc exits compare mode first (single image); a second Esc closes the window.
-        if (_compareState.IsCompareMode)
-        {
-            _compareState.SetCompareMode(false);
-            return;
-        }
-
-        Close();
     }
 
     private void OnWheel(object? sender, PointerWheelEventArgs e)

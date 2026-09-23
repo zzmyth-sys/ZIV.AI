@@ -73,6 +73,9 @@ public partial class ImagePreview
     /// <summary>The crop selection state (diagnostics / tests).</summary>
     public CropState? Crop => _crop;
 
+    /// <summary>The image currently displayed (the crop result when one exists), or <c>null</c>.</summary>
+    public string? DisplayPath => _displayPath ?? _path;
+
     /// <summary>Wires the crop overlay / actions. Called from <see cref="Init"/>.</summary>
     private void InitCrop()
     {

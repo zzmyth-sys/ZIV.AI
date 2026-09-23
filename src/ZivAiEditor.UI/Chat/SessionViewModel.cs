@@ -3,6 +3,7 @@ using ZivAiEditor.Agent;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.UI.Editing;
 using ZivAiEditor.UI.Imaging;
 using TaskStatus = ZivAiEditor.Contracts.Enums.TaskStatus;
 
@@ -59,6 +60,9 @@ public sealed class HistoryItem
 /// </summary>
 public sealed class SessionViewModel
 {
+    /// <summary>Delay before retrying a transient CUDA-OOM failure (Step 9C.6-D).</summary>
+    private const int OomRetryDelayMs = 2000;
+
     private readonly IEditSession _session;
     private readonly IEditSessionWriter _writer;
     private readonly ICommandParser _parser;
@@ -90,6 +94,8 @@ public sealed class SessionViewModel
     /// resolution (natural-language edits). <c>null</c> = leave it to the backend default.
     /// </summary>
     public ResolutionPolicy? Resolution { get; set; }
+
+    public ImageEditMode Mode { get; set; } = ImageEditMode.Single;
 
     public LaunchOptions? LaunchOptions { get; private set; }
 
@@ -177,15 +183,35 @@ public sealed class SessionViewModel
         try
         {
             var state = await _executor.ExecuteAsync(plan, progress, ct);
-            var elapsed = stopwatch.Elapsed;
-            if (state.Status == TaskStatus.Succeeded && !string.IsNullOrWhiteSpace(state.OutputImagePath))
+
+            // Step 9C.6-D: the backend can hit a transient CUDA OOM (a run that fails while
+            // the previous run's memory is still settling). The next attempt succeeds, so
+            // retry once after a short pause before surfacing a failure.
+            if (!IsSuccess(state) && IsOutOfMemory(state) && !ct.IsCancellationRequested)
             {
-                _writer.AppendNode(parentId, state.OutputImagePath, text);
+                progress?.Report(new TaskProgress
+                {
+                    TaskId = state.TaskId,
+                    Status = TaskStatus.Running,
+                    Fraction = 0,
+                    StepIndex = 0,
+                    StepCount = 1,
+                    Message = "显存不足，正在重试…",
+                });
+                await Task.Delay(OomRetryDelayMs, ct);
+                state = await _executor.ExecuteAsync(plan, progress, ct);
+            }
+
+            var elapsed = stopwatch.Elapsed;
+            if (IsSuccess(state))
+            {
+                var outputPath = state.OutputImagePath!;
+                _writer.AppendNode(parentId, outputPath, text);
                 ReplacePending(pending, new ChatMessage
                 {
                     Role = ChatRole.Assistant,
                     Text = $"{elapsed.TotalSeconds:F1}秒 完成",
-                    ImagePath = state.OutputImagePath,
+                    ImagePath = outputPath,
                 });
                 RefreshHistory();
                 return true;
@@ -252,6 +278,75 @@ public sealed class SessionViewModel
         RebuildContext();
     }
 
+    /// <summary>Whether the session has a root node (and thus a current image).</summary>
+    public bool HasRootImage => _session.RootImagePath is { Length: > 0 };
+
+    /// <summary>
+    /// Whether the send button should be enabled (Step 9C.6-C). Blank text is never
+    /// sendable; with attachments the mode must match the count (Single &lt;= 1,
+    /// Multi &gt;= 2). With no attachments the mode does not gate the send, so
+    /// natural-language text-to-image stays available.
+    /// </summary>
+    public bool CanSend(string? input, int attachmentCount)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return false;
+        }
+
+        if (attachmentCount == 0)
+        {
+            return true;
+        }
+
+        return Mode == ImageEditMode.Single ? attachmentCount <= 1 : attachmentCount >= 2;
+    }
+
+    /// <summary>
+    /// Resolves the pending attachments for a submit (Step 9C.6-C). Mutates the session
+    /// when an attachment becomes the root. Returns <see cref="AttachmentPreparation.NoImage"/>
+    /// only for a slash command with no image and no attachment (natural language may
+    /// still build a text-to-image plan).
+    /// </summary>
+    public AttachmentPreparation PrepareAttachments(string input, IReadOnlyList<string>? attachments)
+    {
+        if (attachments is { Count: > 0 })
+        {
+            if (HasRootImage)
+            {
+                return AttachmentPreparation.NeedsDecision;
+            }
+
+            SetRootImage(attachments[0]);
+            return AttachmentPreparation.Ready;
+        }
+
+        if (HasRootImage)
+        {
+            return AttachmentPreparation.Ready;
+        }
+
+        return (input ?? "").TrimStart().StartsWith('/')
+            ? AttachmentPreparation.NoImage
+            : AttachmentPreparation.Ready;
+    }
+
+    /// <summary>
+    /// Applies the "new session" choice: the first attachment becomes the new root and
+    /// the existing DAG is reset (Step 9C.6-C). No-op when the list is empty.
+    /// </summary>
+    public void StartNewSessionFrom(IReadOnlyList<string> attachments)
+    {
+        if (attachments is { Count: > 0 })
+        {
+            SetRootImage(attachments[0]);
+        }
+    }
+
+    /// <summary>Appends a non-blocking system hint to the chat stream (Step 9C.6-C).</summary>
+    public void AddHint(string text)
+        => Messages.Add(new ChatMessage { Role = ChatRole.System, Text = text, IsError = true });
+
     /// <summary>
     /// Sets (or clears) the intrinsic crop of one node (Step 9C.6-B) and refreshes the
     /// history. A crop is a node property, not an edit step: no node is added. A no-op when
@@ -269,6 +364,17 @@ public sealed class SessionViewModel
         {
             RebuildContext();
         }
+    }
+
+    /// <summary>
+    /// Rebuilds the chat stream and history from the current session state (Step 9C.6-E).
+    /// Used after an in-place project restore so the UI reflects the opened project without
+    /// rebuilding the view model.
+    /// </summary>
+    public void Reload()
+    {
+        RefreshHistory();
+        RebuildContext();
     }
 
     /// <summary>Rebuilds <see cref="History"/> from the session's node set.</summary>
@@ -358,6 +464,21 @@ public sealed class SessionViewModel
     /// <summary>The image a node shows in the chat: its crop result, else its output.</summary>
     private static string PipelinePath(IEditNode node)
         => node.Crop is { ResultImagePath.Length: > 0 } crop ? crop.ResultImagePath : node.ImagePath;
+
+    private static bool IsSuccess(TaskState state)
+        => state.Status == TaskStatus.Succeeded && !string.IsNullOrWhiteSpace(state.OutputImagePath);
+
+    /// <summary>
+    /// True when a failed task looks like a CUDA out-of-memory error (Step 9C.6-D). The
+    /// backend surfaces <c>AcceleratorError: CUDA error: out of memory</c> / torch's
+    /// <c>CUDA out of memory</c> as the task error message.
+    /// </summary>
+    private static bool IsOutOfMemory(TaskState state)
+    {
+        var message = state.ErrorMessage ?? "";
+        return message.Contains("out of memory", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("OutOfMemory", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string BuildFailureMessage(TaskState state)
         => state.ErrorMessage

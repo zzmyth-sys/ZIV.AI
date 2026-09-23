@@ -34,7 +34,7 @@ internal sealed class AppContext : IDisposable
         IModelProfileRegistry modelProfiles,
         ICommandParser commandParser,
         EditSession session,
-        ISessionExporter sessionExporter)
+        SessionStore sessionStore)
     {
         Backend = backend;
         Client = client;
@@ -51,7 +51,7 @@ internal sealed class AppContext : IDisposable
         ModelProfiles = modelProfiles;
         CommandParser = commandParser;
         Session = session;
-        SessionExporter = sessionExporter;
+        SessionStore = sessionStore;
     }
 
     private readonly HttpClient _llmHttp;
@@ -78,11 +78,11 @@ internal sealed class AppContext : IDisposable
     /// <summary>Deterministic slash-command / prompt parser (Step 8).</summary>
     public ICommandParser CommandParser { get; }
 
-    /// <summary>The single in-memory edit session (Step 8); not persisted until export.</summary>
+    /// <summary>The single in-memory edit session (Step 8); persisted as a project on save.</summary>
     public EditSession Session { get; }
 
-    /// <summary>Exports the session on close (Step 8); the UI asks the user in Step 9.</summary>
-    public ISessionExporter SessionExporter { get; }
+    /// <summary>Persists sessions as projects (Step 9C.6-E); the UI drives save / open.</summary>
+    public SessionStore SessionStore { get; }
 
     /// <summary>
     /// Raised for every backend preview frame (<c>0x02</c>, JPEG bytes) so the App
@@ -100,6 +100,9 @@ internal sealed class AppContext : IDisposable
             PythonExe = settings.PythonExe,
             Script = settings.Script,
             AutoRestartEnabled = true,
+            // Step 9C.6-D diagnostic: persist the backend log under the program directory
+            // (Z14) so the submit resolution / errors survive the in-memory capture.
+            LogFilePath = Path.Combine(System.AppContext.BaseDirectory, "_cache", "backend.log"),
         };
 
         var backend = new PythonProcessManager(options);
@@ -145,11 +148,11 @@ internal sealed class AppContext : IDisposable
         // user whether to export on exit.
         var commandParser = new CommandParser(ResolveCommandsPath());
         var session = new EditSession();
-        var sessionExporter = new SessionExporter();
+        var sessionStore = new SessionStore();
 
         return new AppContext(
             backend, client, llmHttp, plannerLlm, planner, tools, executor, executionQueue,
-            modelProfiles, commandParser, session, sessionExporter);
+            modelProfiles, commandParser, session, sessionStore);
     }
 
     /// <summary>

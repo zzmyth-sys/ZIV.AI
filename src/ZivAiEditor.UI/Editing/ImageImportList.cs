@@ -39,6 +39,9 @@ public sealed class ImageImportList
     /// <summary>Number of imported images.</summary>
     public int Count => _paths.Count;
 
+    /// <summary>True when at least one path is present.</summary>
+    public bool HasImages => _paths.Count > 0;
+
     /// <summary>True when <paramref name="path"/> is already present (case-insensitive).</summary>
     public bool Contains(string path)
         => !string.IsNullOrWhiteSpace(path) && _paths.Any(p => Same(p, path));

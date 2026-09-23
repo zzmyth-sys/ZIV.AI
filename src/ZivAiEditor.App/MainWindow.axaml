@@ -22,12 +22,20 @@
 
   <c:ChromeTitleBar x:Name="PART_Chrome">
     <c:ChromeTitleBar.LeftContent>
-      <TextBlock Text="ZIV.AI Editor"
-                 Margin="12,0"
-                 VerticalAlignment="Center"
-                 Foreground="{StaticResource ZivTextBrush}"
-                 FontWeight="SemiBold"
-                 TextTrimming="CharacterEllipsis" />
+      <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+        <Button x:Name="PART_BtnNewProject" Classes="tool" ToolTip.Tip="新建项目">
+          <Path Classes="toolIcon" Data="{StaticResource IconPlus}" />
+        </Button>
+        <Button x:Name="PART_BtnSave" Classes="tool" ToolTip.Tip="保存项目 (Ctrl+S)">
+          <Path Classes="toolIcon" Data="{StaticResource IconSave}" />
+        </Button>
+        <TextBlock Text="ZIV.AI Editor"
+                   Margin="8,0,0,0"
+                   VerticalAlignment="Center"
+                   Foreground="{StaticResource ZivTextBrush}"
+                   FontWeight="SemiBold"
+                   TextTrimming="CharacterEllipsis" />
+      </StackPanel>
     </c:ChromeTitleBar.LeftContent>
     <c:ChromeTitleBar.RightContent>
       <Button x:Name="PART_BtnToggleSidebar" Classes="tool" ToolTip.Tip="历史节点">
@@ -46,13 +54,22 @@
                 Background="#202020"
                 BorderBrush="#2E2E2E"
                 BorderThickness="0,0,1,0">
-          <Grid RowDefinitions="Auto,*">
+          <Grid RowDefinitions="Auto,*,Auto,*">
             <TextBlock Grid.Row="0"
+                       Margin="12,10"
+                       Foreground="{StaticResource ZivTextSecondaryBrush}"
+                       Text="项目" />
+            <ScrollViewer Grid.Row="1"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+              <StackPanel x:Name="PART_ProjectList" Spacing="2" Margin="6,0" />
+            </ScrollViewer>
+            <TextBlock Grid.Row="2"
                        Margin="12,10"
                        Foreground="{StaticResource ZivTextSecondaryBrush}"
                        Text="历史节点" />
             <ListBox x:Name="PART_HistoryList"
-                     Grid.Row="1"
+                     Grid.Row="3"
                      Background="Transparent"
                      BorderThickness="0"
                      SelectionMode="Single" />
@@ -85,7 +102,7 @@
                            VerticalContentAlignment="Top"
                            PlaceholderText="输入编辑指令，/ 命令，@ 添加上下文…"
                            Foreground="{StaticResource ZivTextBrush}" />
-                  <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,*,Auto" Margin="0,6,0,0">
+                  <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto" Margin="0,6,0,0">
                     <Button x:Name="PART_BtnAddImage"
                             Grid.Column="0"
                             Classes="oc"
@@ -96,8 +113,23 @@
                                         Grid.Column="1"
                                         Margin="6,0,0,0"
                                         VerticalAlignment="Center" />
+                    <Button x:Name="PART_BtnMode"
+                            Grid.Column="2"
+                            Classes="oc"
+                            Width="NaN"
+                            MinWidth="34"
+                            Padding="8,0"
+                            Margin="6,0,0,0"
+                            ToolTip.Tip="编辑模式">
+                      <TextBlock x:Name="PART_ModeLabel"
+                                 Text="单图"
+                                 FontSize="11"
+                                 VerticalAlignment="Center"
+                                 Foreground="{StaticResource ZivTextSecondaryBrush}" />
+                    </Button>
+                    <TextBlock x:Name="PART_ModeHint" Grid.Column="3" Margin="8,0" VerticalAlignment="Center" FontSize="11" Foreground="#E06C4A" IsVisible="False" TextWrapping="NoWrap" />
                     <Button x:Name="PART_BtnSend"
-                            Grid.Column="3"
+                            Grid.Column="4"
                             Classes="ocSend"
                             ToolTip.Tip="发送">
                       <Path Classes="sendIcon" Data="{StaticResource IconArrowUp}" />

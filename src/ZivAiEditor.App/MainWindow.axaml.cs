@@ -39,7 +39,7 @@ public partial class MainWindow : Window
     private readonly List<Bitmap> _bitmaps = new();
 
     private SessionViewModel _vm = null!;
-    private ISessionExporter _exporter = null!;
+    private SessionStore _store = null!;
     private IModelProfileRegistry _modelProfiles = null!;
     private EditSession _session = null!;
     private ImagePreview? _imagePreview;
@@ -63,11 +63,11 @@ public partial class MainWindow : Window
         EditSession session,
         ICommandParser commandParser,
         IExecutor executor,
-        ISessionExporter sessionExporter,
+        SessionStore sessionStore,
         IModelProfileRegistry modelProfiles,
         LaunchOptions? launchOptions = null)
     {
-        _exporter = sessionExporter ?? throw new ArgumentNullException(nameof(sessionExporter));
+        _store = sessionStore ?? throw new ArgumentNullException(nameof(sessionStore));
         _modelProfiles = modelProfiles ?? throw new ArgumentNullException(nameof(modelProfiles));
         _session = session ?? throw new ArgumentNullException(nameof(session));
 
@@ -84,10 +84,12 @@ public partial class MainWindow : Window
 
         InitChat();
         InitImport();
+        InitSend();
 
         _vm.Messages.CollectionChanged += (_, _) => RenderChat();
         _vm.History.CollectionChanged += (_, _) => RenderHistory();
         _vm.Start(launchOptions);
+        InitProjects(launchOptions);
 
         if (launchOptions?.Prompt is { Length: > 0 } prompt && FindInput() is { } input)
         {
@@ -181,46 +183,6 @@ public partial class MainWindow : Window
     }
 
     private TextBox? FindInput() => this.FindControl<TextBox>("PART_Input");
-
-    private async Task SubmitAsync()
-    {
-        if (_vm is null || FindInput() is not { } input)
-        {
-            return;
-        }
-
-        var text = input.Text ?? "";
-        if (string.IsNullOrWhiteSpace(text) || _vm.IsBusy)
-        {
-            return;
-        }
-
-        input.Text = "";
-        SetBusy(true);
-        _cts?.Dispose();
-        _cts = new CancellationTokenSource();
-
-        var progress = new Progress<TaskProgress>(OnProgress);
-        try
-        {
-            await _vm.SubmitAsync(text, progress, _cts.Token);
-        }
-        catch (Exception ex)
-        {
-            SetStatus(ex.Message);
-        }
-        finally
-        {
-            SetBusy(false);
-            ScrollToEnd();
-        }
-    }
-
-    private void OnProgress(TaskProgress progress)
-    {
-        var fraction = progress.Fraction > 0 ? $" {progress.Fraction:P0}" : "";
-        SetStatus($"{progress.Message}{fraction}");
-    }
 
     private void OnHistorySelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
@@ -416,15 +378,13 @@ public partial class MainWindow : Window
 
     private void SetBusy(bool busy)
     {
+        _busy = busy;
         if (FindInput() is { } input)
         {
             input.IsEnabled = !busy;
         }
 
-        if (this.FindControl<Button>("PART_BtnSend") is { } send)
-        {
-            send.IsEnabled = !busy;
-        }
+        UpdateSendEnabled();
 
         // No "就绪" write: SetStatus only updates the pending bubble, and when not busy
         // there is none, so it would be a no-op (Step 9C.3-R #6).
@@ -488,14 +448,14 @@ public partial class MainWindow : Window
 
     private async void OnClosing(object? sender, WindowClosingEventArgs e)
     {
-        if (_closing || _vm is null || _exporter is null)
+        if (_closing || _vm is null || _store is null)
         {
             return;
         }
 
-        // An empty session has nothing to save; close without prompting.
+        // Nothing to save when the session is empty or unchanged (Step 9C.6-E).
         var hasContent = _vm.History.Count > 0 || !string.IsNullOrEmpty(_session.RootImagePath);
-        if (!hasContent)
+        if (!hasContent || !IsDirty)
         {
             return;
         }
@@ -505,11 +465,10 @@ public partial class MainWindow : Window
 
         try
         {
-            var save = await ConfirmDialog.ShowAsync(this, "保存本次会话？");
-            if (save == true && await PickFolderAsync() is { Length: > 0 } directory)
+            var save = await ConfirmDialog.ShowAsync(this, "保存本次项目？");
+            if (save == true)
             {
-                // A failed export returns null and must not block the close (INTERACTION.md §4).
-                await _exporter.ExportAsync(_session, directory);
+                await SaveCurrentAsync();
             }
         }
         catch (Exception ex)
@@ -527,23 +486,6 @@ public partial class MainWindow : Window
                 System.Diagnostics.Debug.WriteLine($"[close] {ex.Message}");
             }
         }
-    }
-
-    private async Task<string?> PickFolderAsync()
-    {
-        var storage = StorageProvider;
-        if (storage is null)
-        {
-            return null;
-        }
-
-        var folders = await storage.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "选择会话保存目录",
-            AllowMultiple = false,
-        });
-
-        return folders.FirstOrDefault()?.TryGetLocalPath();
     }
 
     private void DisposeBitmaps()

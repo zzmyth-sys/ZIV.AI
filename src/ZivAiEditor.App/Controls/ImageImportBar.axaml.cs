@@ -46,7 +46,7 @@ public partial class ImageImportBar : UserControl
     public int Count => _list.Count;
 
     /// <summary>True when at least one image is attached.</summary>
-    public bool HasImages => _list.Count > 0;
+    public bool HasImages => _list.HasImages;
 
     /// <summary>Adds imported paths (blanks and duplicates are skipped; one batch = one change).</summary>
     public void AddFiles(IEnumerable<string>? paths) => _list.AddRange(paths);

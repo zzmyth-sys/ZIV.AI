@@ -1,5 +1,9 @@
 using System;
+using System.IO;
+using System.Text;
+using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Platform.Storage;
 using ZivAiEditor.App.Controls;
 using ZivAiEditor.Contracts.Planning;
 
@@ -43,6 +47,9 @@ public partial class MainWindow
             // Step 9C.6-B: a confirmed crop updates the node's intrinsic crop.
             preview.CropCompleted += OnPreviewCropCompleted;
 
+            // Step 9C.6-E: "save as" is handled here (the App owns the picker / session).
+            preview.SaveRequested += (_, _) => _ = SavePreviewImageAsync(preview);
+
             _imagePreview = preview;
             preview.Show(this);
         }
@@ -82,5 +89,109 @@ public partial class MainWindow
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// "Save as" for the preview window (Step 9C.6-E): the default directory is the source
+    /// image's directory and the default name is
+    /// <c>{first8 of source}_{command name or first8 of prompt}.png</c>. The copy runs off
+    /// the UI thread (Z11).
+    /// </summary>
+    private async Task SavePreviewImageAsync(ImagePreview preview)
+    {
+        // Save what is actually shown (the crop result when one exists), not the raw node image.
+        var path = preview.DisplayPath;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            SetStatus("没有可保存的图像");
+            return;
+        }
+
+        var storage = StorageProvider;
+        if (storage is null)
+        {
+            SetStatus("无法打开文件对话框");
+            return;
+        }
+
+        var node = FindNodeByImagePath(path);
+        var rootPath = _session.RootImagePath;
+        IStorageFolder? start = null;
+        if (!string.IsNullOrWhiteSpace(rootPath))
+        {
+            var directory = Path.GetDirectoryName(rootPath);
+            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            {
+                start = await storage.TryGetFolderFromPathAsync(new Uri(directory));
+            }
+        }
+
+        var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "另存为",
+            SuggestedFileName = BuildSaveName(rootPath, node?.Command),
+            SuggestedStartLocation = start,
+            DefaultExtension = "png",
+            ShowOverwritePrompt = true,
+            FileTypeChoices = new[] { new FilePickerFileType("PNG 图像") { Patterns = new[] { "*.png" } } },
+        });
+
+        var target = file?.TryGetLocalPath();
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            return;
+        }
+
+        try
+        {
+            await Task.Run(() => File.Copy(path, target, overwrite: true));
+            SetStatus($"已另存为：{Path.GetFileName(target)}");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"另存失败：{ex.Message}");
+        }
+    }
+
+    private static string BuildSaveName(string? rootPath, string? command)
+    {
+        var source = string.IsNullOrWhiteSpace(rootPath) ? "" : Path.GetFileNameWithoutExtension(rootPath);
+        var first = Take8(source);
+        var second = Take8(CommandLabel(command));
+        var name = string.IsNullOrEmpty(second) ? first : $"{first}_{second}";
+        name = SanitizeFileName(name);
+        return string.IsNullOrEmpty(name) ? "image.png" : name + ".png";
+    }
+
+    private static string CommandLabel(string? command)
+    {
+        var text = (command ?? "").Trim();
+        if (text.Length == 0)
+        {
+            return "";
+        }
+
+        if (text[0] == '/')
+        {
+            var space = text.IndexOf(' ');
+            var token = space < 0 ? text : text[..space];
+            return token.TrimStart('/');
+        }
+
+        return text;
+    }
+
+    private static string Take8(string value) => value.Length <= 8 ? value : value[..8];
+
+    private static string SanitizeFileName(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var builder = new StringBuilder(value.Length);
+        foreach (var ch in value)
+        {
+            builder.Append(Array.IndexOf(invalid, ch) >= 0 ? '_' : ch);
+        }
+
+        return builder.ToString().Trim();
     }
 }

@@ -3,6 +3,7 @@ using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Planning;
 using ZivAiEditor.UI;
 using ZivAiEditor.UI.Chat;
+using ZivAiEditor.UI.Editing;
 using Xunit;
 using TaskStatus = ZivAiEditor.Contracts.Enums.TaskStatus;
 
@@ -73,6 +74,66 @@ public class SessionViewModelTests
 
         public Task<bool> CancelAsync(string taskId, CancellationToken ct = default)
             => Task.FromResult(false);
+    }
+
+    /// <summary>Fails the first submit with a CUDA-OOM message, then succeeds (Step 9C.6-D).</summary>
+    private sealed class OomOnceExecutor : IExecutor
+    {
+        private readonly string _output;
+        private int _calls;
+
+        public OomOnceExecutor(string output) => _output = output;
+
+        public int Calls => _calls;
+
+        public Task<TaskState> ExecuteAsync(
+            EditPlan plan,
+            IProgress<TaskProgress>? progress = null,
+            CancellationToken ct = default)
+        {
+            _calls++;
+            return Task.FromResult(_calls == 1
+                ? new TaskState
+                {
+                    TaskId = Guid.NewGuid().ToString("N"),
+                    Status = TaskStatus.Failed,
+                    Plan = plan,
+                    ErrorMessage = "AcceleratorError: CUDA error: out of memory",
+                }
+                : new TaskState
+                {
+                    TaskId = Guid.NewGuid().ToString("N"),
+                    Status = TaskStatus.Succeeded,
+                    Plan = plan,
+                    OutputImagePath = _output,
+                });
+        }
+
+        public Task<TaskState> RerunAsync(
+            string taskId,
+            IProgress<TaskProgress>? progress = null,
+            CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<bool> CancelAsync(string taskId, CancellationToken ct = default)
+            => Task.FromResult(false);
+    }
+
+    [Fact]
+    public async Task Submit_Retries_Once_After_Cuda_Oom()
+    {
+        var session = new EditSession();
+        var executor = new OomOnceExecutor(Output);
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        var ok = await vm.SubmitAsync("/去水印");
+
+        Assert.True(ok);
+        Assert.Equal(2, executor.Calls);
+        Assert.Equal(2, vm.History.Count);
+        Assert.Contains(vm.Messages, m => m.ImagePath == Output);
+        Assert.DoesNotContain(vm.Messages, m => m.IsError);
     }
 
     [Fact]
@@ -327,5 +388,107 @@ public class SessionViewModelTests
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         Assert.Null(vm.GetParentPipelineImagePath(Root));
+    }
+
+    [Fact]
+    public void PrepareAttachments_NoAttachments_NoRoot_NaturalLanguage_Allows_T2I()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions());
+
+        Assert.Equal(AttachmentPreparation.Ready, vm.PrepareAttachments("一只猫", Array.Empty<string>()));
+    }
+
+    [Fact]
+    public void PrepareAttachments_NoAttachments_NoRoot_SlashCommand_Needs_Image()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions());
+
+        Assert.Equal(AttachmentPreparation.NoImage, vm.PrepareAttachments("/去水印", Array.Empty<string>()));
+    }
+
+    [Fact]
+    public void PrepareAttachments_Attachments_NoRoot_Promotes_First_To_Root()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions());
+
+        var result = vm.PrepareAttachments("编辑", new[] { @"C:\img\a.png", @"C:\img\b.png" });
+
+        Assert.Equal(AttachmentPreparation.Ready, result);
+        Assert.Equal(@"C:\img\a.png", session.RootImagePath);
+        Assert.Single(vm.History);
+        Assert.Equal("原图", vm.History[0].Node.Command);
+    }
+
+    [Fact]
+    public void PrepareAttachments_Attachments_WithRoot_NeedsDecision_And_Keeps_Root()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        var result = vm.PrepareAttachments("编辑", new[] { @"C:\img\new.png" });
+
+        Assert.Equal(AttachmentPreparation.NeedsDecision, result);
+        Assert.Equal(Root, session.RootImagePath);
+    }
+
+    [Fact]
+    public void PrepareAttachments_NoAttachments_WithRoot_Is_Ready()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        Assert.Equal(AttachmentPreparation.Ready, vm.PrepareAttachments("编辑", Array.Empty<string>()));
+    }
+
+    [Fact]
+    public void StartNewSessionFrom_Resets_Root_To_First_Attachment()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        vm.StartNewSessionFrom(new[] { @"C:\img\new.png", @"C:\img\other.png" });
+
+        Assert.Equal(@"C:\img\new.png", session.RootImagePath);
+        Assert.Single(vm.History);
+    }
+
+    [Fact]
+    public void CanSend_Validation_Matrix()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+
+        Assert.False(vm.CanSend("", 0));
+        Assert.False(vm.CanSend("   ", 1));
+        Assert.True(vm.CanSend("x", 0));
+
+        vm.Mode = ImageEditMode.Single;
+        Assert.True(vm.CanSend("x", 1));
+        Assert.False(vm.CanSend("x", 2));
+
+        vm.Mode = ImageEditMode.Multi;
+        Assert.False(vm.CanSend("x", 1));
+        Assert.True(vm.CanSend("x", 2));
+        Assert.True(vm.CanSend("x", 0));
+    }
+
+    [Fact]
+    public void AddHint_Appends_System_Error_Message()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+
+        vm.AddHint("请先导入图片");
+
+        Assert.Contains(vm.Messages, m => m.Role == ChatRole.System && m.IsError && m.Text == "请先导入图片");
     }
 }

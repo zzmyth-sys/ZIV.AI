@@ -43,6 +43,11 @@ public partial class MainWindow
             addImage.Click += async (_, _) => await AddImagesAsync();
         }
 
+        if (this.FindControl<Button>("PART_BtnMode") is { } modeButton)
+        {
+            modeButton.Click += (_, _) => ToggleMode();
+        }
+
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
         AddHandler(DragDrop.DropEvent, OnDrop);
@@ -59,14 +64,17 @@ public partial class MainWindow
 
     private void OnImagesChanged(object? sender, ImageImportChangedEventArgs e)
     {
-        // Promote to main image only on an add that takes the list from empty to exactly
-        // one; a removal (e.g. 2 -> 1) must NOT re-promote, or it would silently reset
-        // the session (nodes are dropped when the root changes).
-        if (e.CountBefore == 0 && e.CountAfter == 1 && _importBar is { Count: 1 })
+        // Step 9C.6-C: the strip is a one-shot input. A drag/paste only fills the strip;
+        // it must NOT become the session root here. Reaching two attachments auto-selects
+        // multi-image mode; the user may override it manually.
+        if (_importBar is { Count: >= 2 } && _vm.Mode == ImageEditMode.Single)
         {
-            _vm.SetRootImage(_importBar.Paths[0]);
-            SetStatus("已设为起始图像");
+            _vm.Mode = ImageEditMode.Multi;
+            UpdateModeButton();
         }
+
+        MaybeShowModeMismatchHint();
+        UpdateSendEnabled();
     }
 
     private async Task<IReadOnlyList<string>> PickImagesAsync()

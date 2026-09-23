@@ -3200,3 +3200,199 @@ root 节点进入 `GetHistory()` 后被 `SessionExporter` 自动拷为 `{rootNod
 - **未改** Contracts 既有成员 / `python/server/*` / `ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；
   **未新增 NuGet**；**未改** chrome / `ToolStateMachine` / 分辨率选择器 / 图片导入 UI / 裁切交互。
 - `CropSpec.ResultImagePath` 仍为绝对路径（**位置语义**变化，非签名），`FROZEN.md` 尾部追加记录。
+
+---
+
+## [Step 9C.6-C] - 2026-09-23：图片流入模型重构（附件条一次性输入）
+
+### 目标
+
+修复「图片流入」三处缺陷（9C.6 只读调查确认）：① 拖图**立即成 root**（`OnImagesChanged`
+的 `CountBefore==0 && CountAfter==1` 即时提升），图却仍留在附件条；② 发送后附件条**不清空**
+（`ImageImportBar.Clear()` 定义了但 0 调用者）；③ 第三次编辑**图静默丢弃**（附件条从不参与
+`SubmitAsync`）。用户裁决：**附件条 = 一次性输入，即用即消、不持久化**；拖图只进附件条；
+点发送才消费并清空；单图 / 多图两种编辑模式；模式 ↔ 附件数量 + 提示词非空校验。多图管线
+（`AdditionalImages` + `<imageN>`）另立 **9C.5-D**，本步只做 UI + 校验。
+
+### 只读核查结论（6 项）
+
+1. **现状链路**：`OnDragOver` / `OnDrop` / `PickImagesAsync` 均只调 `_importBar.AddFiles`；
+   `OnImagesChanged` 仅在 0→1 时 `_vm.SetRootImage`。`Clear()` 0 调用者；`RemoveAt` 仅缩略图 `×`。
+2. **输入图来源**：`CommandParser` 解析时取 `session.GetCurrentPipelineImagePath()`
+   （`CommandParser.cs:195,226`）写入 `EditPlan.MainImagePath`；附件条**从不参与** Submit。
+   ⇒ 消费附件 = 在 `SubmitAsync` **之前** `SetRoot`。
+3. **UI 定位**：工具行 `Grid ColumnDefinitions="Auto,Auto,*,Auto"`（+ / 分辨率 / 空格 / 发送）；
+   发送按钮**无 `IsEnabled` 绑定**，仅 `SetBusy` 切换；`PART_Input` 无 `TextChanged` 接线。
+4. **`ImageImportBar` / `ImageImportList` API**：`Count` / `Paths` / `HasImages` / `AddFiles` /
+   `Clear` / `RemoveAt` / `ImagesChanged` 均已存在。
+5. **对话内提示**：`ChatMessage` 有 `ChatRole.System` + `IsError`（无专用 hint 类型）。
+6. **弹框**：`ConfirmDialog` 仅两按钮，不适合三选一 ⇒ **新增** `MultiImagePromptDialog`。
+
+### 用户裁决：T2I 冲突（折中）
+
+任务原文「附件空 + 无当前节点 → 阻止发送」。但
+`NaturalLanguage_WithoutImage_Still_Builds_T2I_Plan`（`CommandParserTests.cs:112`）与
+`QwenImage21EditTool`（`MainImagePath` 空 → `op=T2I`）证明**无图 + 非空提示词走 T2I 文生图**。
+**用户裁决折中**：无附件 + 无 root 时，`/` 命令 → **阻止** + 提示「请先导入图片」；自然语言 →
+**放行** T2I。已实现于 `PrepareAttachments`。
+
+### 实施
+
+- **A. 拖图只进附件条**：删除 `OnImagesChanged` 的 0→1 即时提升；拖图 / 粘贴只 `AddFiles`；
+  ZIV / CLI `--image` 仍走 `ApplyRequest` → `SetRoot`（明确意图，不进附件条）。
+- **B. 发送时消费**：`MainWindow.Send.cs` 的 `SubmitAsync` 先 `_vm.PrepareAttachments(text, paths)`：
+  - `NoImage`（空附件 + 无 root + `/` 命令）→ `AddHint("请先导入图片")`，不发送、不清输入；
+  - `NeedsDecision`（有附件 + 有 root）→ `MultiImagePromptDialog` 三选一；`新会话` →
+    `StartNewSessionFrom(attachments)`（首图成新 root，重置 DAG）；`取消` / `参考图` → 不发送、保留附件；
+  - `Ready` → 直接提交；附件首图在 `PrepareAttachments` 内已成 root（无 root 时）。
+  发送**成功后** `_importBar.Clear()`（仅 `succeeded` 时清）。
+- **C. 单 / 多图模式**：`ImageEditMode`（UI 层）；工具行 `PART_BtnMode` 放分辨率选择器右侧；
+  默认单图；附件达 ≥2 **自动切多图**（`OnImagesChanged`）；可手动 `ToggleMode`；**不反向自动切回**。
+- **D. 校验 + 提示**：`SessionViewModel.CanSend(text, count)` 矩阵（用户裁决）：
+  **附件 0 → 不设限**（走 T2I 或当前节点图）；**附件 1 → 仅单图**；**附件 ≥2 → 仅多图**；
+  文本空一律 false。发送按钮由 `UpdateSendEnabled()` 统一驱动（`SetBusy(false)` 亦调用之，
+  不再无条件启用）。模式不匹配时工具行显示**内联瞬态提示气泡**（`PART_ModeHint`，2.5s 自动隐藏），
+  触发点为**模式按钮点击**与**附件数量变化**：`单图 + ≥2` →「请选择多图编辑」；`多图 + 1` →
+  「请再添加一张图」；`多图 + 0` **不提示**（不设限）。对话内提示用
+  `ChatMessage{Role=System, IsError=true}`（`AddHint`），不阻断输入。
+- **E. 弹框**：新增 `MultiImagePromptDialog`（取消 / 参考图-禁用+tooltip / 新会话）；
+  `MultiImageChoice.Cancel=0` 为默认（关窗即取消）。
+
+### 涉及文件
+
+- 新增：`ZivAiEditor.UI/Editing/ImageEditMode.cs`、`ZivAiEditor.UI/Chat/AttachmentPreparation.cs`、
+  `ZivAiEditor.App/MainWindow.Send.cs`、`ZivAiEditor.App/MultiImagePromptDialog.axaml(.cs)`。
+- 修改：`MainWindow.Import.cs`（删即时提升 + 自动多图 + 模式按钮接线）、`MainWindow.axaml`
+  （工具行 5 列 + 模式按钮 + 提示）、`MainWindow.axaml.cs`（`InitSend` + `SetBusy` + 移出 Send）、
+  `ImageImportList.cs`（`HasImages`）、`ImageImportBar.axaml.cs`（委托）、`SessionViewModel.cs`
+  （`Mode` / `HasRootImage` / `CanSend` / `PrepareAttachments` / `StartNewSessionFrom` / `AddHint`）。
+
+### 测试结果
+
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：`SessionViewModelTests` / `ImageImportListTests`
+  **36 通过 / 0 失败**。
+- 独立验证（只读子代理）复跑一致；独立复审（只读子代理）**Approved**，无 P0 / P1。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 遗留项
+
+- **多图管线**（`AdditionalImages` 契约 + `<imageN>` 解析 + Python `_encode` 多图）→ **9C.5-D**。
+- **参考图功能本身** → 9C.5-D（弹框「参考图」灰化）。
+- **`commands.json` 的 `mode` 字段**（单 / 多图模板区分）→ 后置（留接口，不实现）。
+- **App 层编排无自动化测试**（`SubmitAsync` 顺序 / `ToggleMode` / 弹框默认取消）：属 UI 层，
+  沿用既有测试策略；纯逻辑（`CanSend` / `PrepareAttachments`）已覆盖。
+- **发送校验矩阵已由用户裁决确认**：附件 0 → 不设限（T2I / 当前节点图）；1 → 仅单图；≥2 → 仅多图。
+  `CanSend` 与之一致，不再是待决项。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未改** Contracts 既有成员 / `python/server/*` / `ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；
+  **未新增 NuGet**；**未改** chrome / `ToolStateMachine` / `CompareState` / 裁切 / 分辨率选择器。
+- **未改** `IEditSession` / `IEditSessionWriter` 签名（G3 / G4 合规）；新增类型均非契约。
+- Z8：改动 / 新增文件均 < 600 行（`MainWindow.axaml.cs` 513、`SessionViewModel.cs` 437、
+  `MainWindow.Send.cs` 163、`ImageImportBar.axaml.cs` 210）。
+
+---
+
+## [Step 9C.6-D] - 2026-09-23：小修（附件清空时机 / 模式按钮）
+
+### 小修
+- **附件清空时机**：`MainWindow.Send.cs` 把 `_importBar?.Clear()` 从 `succeeded` 回调**移到
+  `_vm.SubmitAsync` 之前**（发送那一刻清空）；弹框取消 / 校验拦截的早返回在 Clear 之前，**保留附件**。
+  结果气泡仍从节点 `ImagePath` 取图。
+- **模式按钮文字**：根因是 `Button.oc` 样式 `Width=24` 把两字截断为「单」；改
+  `Width="NaN" MinWidth="34" Padding="8,0"` → 显示完整「单图 / 多图」。
+
+### 显存 OOM 调查 + 兜底（现场实测）
+- **现场采样（44 次 / ~90s，监视 `python` 进程 + `nvidia-smi`）**：全程**只有 1 个 app + 1 个
+  python** →「新会话起新管线」**确定不成立**；`StartNewSessionFrom` 仅内存 DAG 重置，`AppContext`
+  管线是单例（`AppContext.cs:105-106`，全仓生产代码仅一处）。
+- **异常态**：单个 Python 进程 **私有内存 68 GB / 工作集 51 GB**（正常态仅 ~13 GB）+ GPU 15.8/16.4 GB；
+  指向 **Python/ComfyUI/DynamicVRAM 侧跨多次推理的显存 / 主机内存累积**，跑多了才顶到 16 GB OOM。
+- **错误**：`AcceleratorError: CUDA error: out of memory`。`pipeline.py:452 _oom_types()` 只含
+  `mm.OOM_EXCEPTION` + `torch.cuda.OutOfMemoryError`，**不含 `AcceleratorError`** → 后端自带降级
+  （1536→…→640）**未触发**，异常直接冒泡。
+- **复现性**：**间歇**（1024/1536/2048 连续三次 + 换图流程均未复现）→ 与累计次数 / 机器当时状态相关，
+  非固定「第二次」。
+- **兜底修复（C#，本步）**：`SessionViewModel.SubmitAsync` 检测 OOM 失败后**自动重试一次**（延迟 2s，
+  同分辨率；`IsOutOfMemory` 匹配 `out of memory` / `OutOfMemory`），重试期间 pending 气泡显示
+  「显存不足，正在重试…」。任何 OOM 变成透明重试。
+- **诊断保留**：`PythonBackendOptions.LogFilePath` + `PythonProcessManager` 以 `--log-file` 启动后端，
+  日志写到 `_cache/backend.log`（含每次 `submit resolution payload`），便于下次定位。
+- 验证：`dotnet build` 0/0；新增 `Submit_Retries_Once_After_Cuda_Oom`；非 GPU 全量 252 通过。
+- **遗留（治本，另立步，需授权改 `python/server/*`）**：`_oom_types()` 加入 `AcceleratorError` +
+  排查跨推理显存 / 主机内存累积。
+
+---
+
+## [Step 9C.6-E] - 2026-09-23：项目列表（新建 / 删除 / 切换 / 保存 / 加载）
+
+### 目标
+单次运行一个内存 `EditSession` → 改为**项目模型**：`sessions/{sessionId}/` 自包含项目，左栏上半
+项目列表，新建 / 删除 / 切换 / 重命名 / 保存，启动自动打开上次项目。用户裁决「就地恢复」+
+「JSON 相对名」+「源图 = root 副本」+ `last_project.txt` + 项目名存 JSON `name`。
+
+### 目录结构
+```
+sessions/{sessionId}/
+  session.json          # version:1 + name + session_id + current_node_id + created_at + nodes[]（相对名）
+  {NodeId}.png          # 节点图（root 节点副本 = 源图，自包含）
+  {NodeId}_crop.png     # 裁切结果
+sessions/last_project.txt  # 上次打开的 sessionId
+```
+
+### 实施
+- **Block A（Agent）**：`EditSession.SessionId` / `CreatedAt` 改 `{ get; set; }` + 新增
+  `Restore(nodes, currentId, sessionId, createdAt)`（清 `Nodes` → 重建 → 同步 `_rootNode`）；
+  新增 `SessionStore`（`SaveAsync` / `LoadAsync` / `ListAsync` / `DeleteAsync` / `RenameAsync` /
+  `ExportToAsync`（另存为，UI 后置）/ `GetLastProjectId` / `SetLastProjectIdAsync`）与
+  `SessionLoader`（`version` 检查、相对名解析、缺图跳过 + 警告、多 / 零 root 归一化）；
+  **删除** `SessionExporter` / `ISessionExporter`（并入 `SessionStore`）。
+- **Block B（App/UI）**：`MainWindow.axaml` 左栏 `RowDefinitions="Auto,*,Auto,*"`（项目 / 历史）+
+  标题栏 `LeftContent` 加 `+` / 保存按钮（`SetElementRole(User)`）；新增 `ProjectListItem` +
+  `MainWindow.Projects.cs`（列表 / 切换 / 新建 / 删除 / 改名 / 保存 / `Ctrl+S` / 启动加载）+
+  `TextPromptDialog`（改名）。
+- **Block C（预览保存）**：`ImagePreview` 加保存按钮 + `Ctrl+Shift+S` → `SaveRequested` →
+  `MainWindow` `SaveFilePickerAsync`（默认目录 = 起始图目录，文件名 =
+  `{首图名前8}_{命令名或提示词前8}.png`，非法字符清洗）；保存**显示图**（裁切结果优先）。
+- **顺序（关键）**：询问保存（若改动）→ 保存到 `sessions/{old}/` →
+  `CleanupSession(oldSessionId)`（**先于** `Restore` 改写 SessionId）→ `Restore(新)`。
+- **脏判定**：签名 = `sessionId | currentNodeId | 每节点(id,imagePath,crop几何,resultPath)`；
+  含裁切**几何**（`ResolveCropPath` 与几何无关，否则重裁不触发保存提示）。
+
+### 涉及文件
+- 新增：`Agent/SessionStore.cs`、`Agent/SessionLoader.cs`、`UI/Projects/ProjectListItem.cs`、
+  `App/MainWindow.Projects.cs`、`App/TextPromptDialog.axaml(.cs)`、`App/Controls/ImagePreview.Keys.cs`。
+- 修改：`Agent/EditSession.cs`、`App/AppContext.cs`、`App/App.axaml.cs`、`App/MainWindow.axaml(.cs)`、
+  `App/MainWindow.Preview.cs`、`App/Controls/ImagePreview.axaml(.cs)`、
+  `UI/Chat/SessionViewModel.cs`（`Reload`）、`Assets/Icons/TablerIcons.axaml`（`IconSave`）。
+- 删除：`Agent/SessionExporter.cs`、`Tests/SessionExporterTests.cs`。
+
+### 测试结果
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：新增 `SessionStoreTests` / `SessionLoaderTests`；非 GPU 全量
+  （排除 `Ipc*` / `PlannerIntegration`）→ **251 通过 / 0 失败**（9C.6-B2 基线 231）。
+- 独立复审（只读子代理）：**2 个 P1 已修**（默认项目名 = 首图名；脏签名补裁切几何）+ P2
+  （列表跳过无 `version` 项目 / 打开重入保护 / 预览保存显示图 / `Ctrl+S` 精确修饰键）。
+- `src/ZivAiEditor.Contracts` diff 为空（G3 / G4 合规）；Z8 均 < 600 行（`ImagePreview.axaml.cs` 574）。
+- 启动冒烟：窗口正常、无错误输出、无残留。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 遗留项
+- **「另存为」入口**（导出到外部目录）：`SessionStore.ExportToAsync` 保留，UI 后置。
+- **项目缩略图**（列表先显示名字）→ 后置。
+- **项目导入**（从外部 `session.json`）→ 后置。
+- **`_cache` 总量上限** → 后置。
+- **App 层编排无自动化测试**（打开顺序 / 脏提示 / 删除回退 / 预览保存）：属 UI 层，沿用既有测试策略。
+- **`_test_step2/session.json`**：仓库根未跟踪的旧格式残留（无 `version`），非本步产物。
+
+### 备注
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未改** Contracts 既有成员 / `python/server/*` / `ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；
+  **未新增 NuGet**；**未改** chrome 三控件 / `ToolStateMachine` / `CompareState` / 裁切 / 分辨率选择器。
+- **未改** `IEditSession` / `IEditSessionWriter` / `ICommandParser` 签名（G3 / G4 合规）；
+  `EditSession.SessionId` 改可写属**实现类内部变化**，`FROZEN.md` 尾部记录。
+- `session.json` **格式变化**：新增 `version:1` + `name`，`image_path` 由绝对路径改为**相对名**
+  （`FROZEN.md` 尾部记录）。

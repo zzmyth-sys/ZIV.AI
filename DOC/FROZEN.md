@@ -2166,3 +2166,156 @@ Agent 编排，应下沉至 Agent；涉及 `IExecutor` 设计变更，单独立�
 
 - **`_cache` 总量上限 / 淘汰策略**：属 Z12 缓存有界，单独立步。
 - **旧版（9C.4）`_crop_` 文件不自动清理**：用户手动清。
+
+---
+
+## Step 9C.6-C（日期：2026-09-23）
+
+> **修订说明（Step 9C.6-C · 图片流入模型重构：附件条一次性输入）**
+>
+> 本段为 Step 9C.6-C **只增**记录。目标：附件条改为**一次性输入**——拖图 / 粘贴只进附件条
+> （不再即时成 root），点发送才消费、成功后清空；单图 / 多图模式 + 发送校验 + 三选一弹框。
+> **不改动 Step 0–9C.6-B2 已冻结行**；本段为**纯追加**（文件尾部）。
+> **无冻结契约变更**——`IEditSession` / `IEditSessionWriter` / `ICommandParser` 签名零修改；
+> 本步新增类型均**非契约**（UI / App 层）。
+
+### 9C.6-C.1 新增类型（冻结 · 非契约）
+
+| 类型 | 文件 | 说明 |
+|---|---|---|
+| `ImageEditMode`（枚举） | `ZivAiEditor.UI/Editing/ImageEditMode.cs` | `Single` / `Multi`（UI 编辑模式） |
+| `AttachmentPreparation`（枚举） | `ZivAiEditor.UI/Chat/AttachmentPreparation.cs` | `Ready` / `NeedsDecision` / `NoImage`（发送前附件裁决） |
+| `MultiImageChoice`（枚举） | `ZivAiEditor.App/MultiImagePromptDialog.axaml.cs` | `Cancel = 0` / `NewSession = 1` / `Reference = 2`（默认取消） |
+| `MultiImagePromptDialog`（窗口） | `ZivAiEditor.App/MultiImagePromptDialog.axaml(.cs)` | 三选一弹框（取消 / 参考图-禁用 / 新会话） |
+
+### 9C.6-C.2 `SessionViewModel` 新增成员（冻结 · 非契约）
+
+- `ImageEditMode Mode { get; set; } = Single`。
+- `bool HasRootImage { get; }`（`_session.RootImagePath` 非空）。
+- `bool CanSend(string? input, int attachmentCount)`：文本空 → false；有附件时
+  `Single ? count<=1 : count>=2`；**无附件不设限**（保留自然语言 T2I）。
+- `AttachmentPreparation PrepareAttachments(string input, IReadOnlyList<string>? attachments)`：
+  附件 >0 且无 root → `SetRootImage(首张)` + `Ready`；附件 >0 且有 root → `NeedsDecision`；
+  附件空且有 root → `Ready`；附件空且无 root → `/` 开头 → `NoImage`，否则 `Ready`（T2I）。
+- `void StartNewSessionFrom(IReadOnlyList<string> attachments)`：首张成新 root（重置 DAG）。
+- `void AddHint(string text)`：插入 `ChatMessage{Role=System, IsError=true}`。
+
+### 9C.6-C.3 `ImageImportList` / `ImageImportBar` 新增成员（冻结 · 非契约）
+
+- `ImageImportList.HasImages`（`_paths.Count > 0`）；`ImageImportBar.HasImages` 改为委托之。
+- `Clear()` / `RemoveAt` / `AddFiles` 既有签名不变。
+
+### 9C.6-C.4 UI 行为语义（冻结 · 非契约）
+
+- `MainWindow.Import.OnImagesChanged`：**删除** 0→1 即时 `SetRootImage`；改为附件 ≥2 且 Single
+  时自动切 `Multi`，并刷新发送按钮启用态。
+- `MainWindow.Send.SubmitAsync`：`PrepareAttachments` **先于** `_vm.SubmitAsync`；仅发送**成功**后
+  `_importBar.Clear()`；`NoImage` → 提示且不发送；`NeedsDecision` + 非「新会话」→ 不发送、保留附件。
+- `MainWindow.SetBusy`：由 `UpdateSendEnabled()` 统一驱动发送按钮启用态（不再无条件启用）。
+- 工具行改为 `Auto,Auto,Auto,*,Auto`，新增 `PART_BtnMode` / `PART_ModeHint`，发送按钮列号 3 → 4。
+- 模式 ↔ 附件数量不匹配（用户裁决矩阵）：附件 0 → 不设限；1 → 仅单图；≥2 → 仅多图。工具行内联
+  瞬态气泡（约 2.5s），触发点为模式按钮点击 / 附件数量变化；`单图+≥2`→「请选择多图编辑」，
+  `多图+1`→「请再添加一张图」，`多图+0` 不提示。
+
+### 9C.6-C.5 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：`SessionViewModelTests` / `ImageImportListTests`
+  **36 通过 / 0 失败**。
+- 独立验证 / 复审（只读子代理）：复跑一致；复审 **Approved**，无 P0 / P1。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 9C.6-C.6 遗留项（冻结）
+
+- **多图管线**（`AdditionalImages` 契约 + `<imageN>` 解析 + Python `_encode` 多图）→ **9C.5-D**。
+- **参考图功能本身** → 9C.5-D（弹框「参考图」灰化 + tooltip）。
+- **`commands.json` 的 `mode` 字段** → 后置（留接口，不实现）。
+- **发送校验矩阵已由用户裁决确认**：附件 0 → 不设限（T2I / 当前节点图）；1 → 仅单图；≥2 → 仅多图。
+  `CanSend` 与之一致。
+
+---
+
+## Step 9C.6-D（日期：2026-09-24）
+
+> **修订说明（Step 9C.6-D · 小修 + 显存 OOM 兜底）**
+>
+> 本段为 Step 9C.6-D **只增**记录。**不改动 Step 0–9C.6-C 已冻结行**；本段为**纯追加**。
+
+### 9C.6-D.1 新增（冻结 · 非契约）
+
+- `PythonBackendOptions.LogFilePath`（`string?`，init）：设置后 `PythonProcessManager` 以
+  `--log-file <path>` 启动后端，日志写入程序目录 `_cache/backend.log`（Z14）；`AppContext` 默认开启。
+- `SessionViewModel.SubmitAsync` OOM 自动重试（UI 非契约）：失败且 `ErrorMessage` 含
+  `out of memory` / `OutOfMemory` 时，延迟 2s **重试一次**（同分辨率），重试期间 pending 气泡提示。
+
+### 9C.6-D.2 调查结论（冻结 · 记录）
+
+- 「新会话起新管线」**不成立**：现场采样全程 1 app + 1 python；`AppContext` 管线单例。
+- OOM **间歇**（1024/1536/2048 连续 + 换图均未稳定复现）；异常态单进程私有内存 68 GB
+  （正常 ~13 GB），疑似 Python/ComfyUI/DynamicVRAM 侧跨推理累积。
+- `pipeline.py:_oom_types()` 不含 `AcceleratorError` → 后端自带降级未触发（**治本另立步**，
+  需授权改 `python/server/*`）。
+
+### 9C.6-D.3 测试结果（冻结）
+
+- `dotnet build` → **0 错误 0 警告**；非 GPU 全量 **252 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+---
+
+## Step 9C.6-E（日期：2026-09-23）
+
+> **修订说明（Step 9C.6-E · 项目模型：保存 / 加载 / 列表 / 切换）**
+>
+> 本段为 Step 9C.6-E **只增**记录。目标：会话升级为**项目列表**（`sessions/{sessionId}/`
+> 自包含），新建 / 删除 / 切换 / 重命名 / 保存 / 启动加载。**不改动 Step 0–9C.6-C 已冻结行**；
+> 本段为**纯追加**。**`IEditSession` / `IEditSessionWriter` / `ICommandParser` 签名零变化**
+> （G3 / G4 合规）。
+
+### 9C.6-E.1 既有类型行为变化（冻结 · 非契约）
+
+| 成员 | 变更前 | 变更后 |
+|---|---|---|
+| `EditSession.SessionId` | `{ get; init; }` | `{ get; set; }`（实现类内部；`IEditSession.SessionId` 仍 `{ get; }`） |
+| `EditSession.CreatedAt` | `{ get; init; }` | `{ get; set; }` |
+| `EditSession.Restore(...)` | 无 | **新增**：`void Restore(IReadOnlyList<IEditNode> nodes, string? currentId, string sessionId, DateTimeOffset createdAt)`（原地重建 DAG + 同步 `_rootNode`） |
+| `SessionViewModel.Reload()` | 无 | **新增**（UI，非契约）：`RefreshHistory` + `RebuildContext` |
+
+### 9C.6-E.2 `SessionExporter` 移除（冻结 · 既有记录变更）
+
+- **删除** `ZivAiEditor.Agent/SessionExporter.cs`（`ISessionExporter` / `SessionExporter`），
+  导出逻辑并入 **`SessionStore.ExportToAsync`**。原 FROZEN 8.1 / 8R.1 记录的
+  `ISessionExporter.ExportAsync(EditSession, string, CancellationToken)` **不再存在**；以本小节为准。
+- `AppContext` / `App.axaml.cs` / `MainWindow` 的 `ISessionExporter` 注入改为 **`SessionStore`**。
+
+### 9C.6-E.3 新增类型（冻结 · 非契约）
+
+| 类型 | 文件 | 说明 |
+|---|---|---|
+| `SessionStore`（类） | `ZivAiEditor.Agent/SessionStore.cs` | 项目保存 / 加载 / 列表 / 删除 / 改名 / 另存为 / `last_project.txt` |
+| `SessionLoader`（静态类） | `ZivAiEditor.Agent/SessionLoader.cs` | JSON → `EditSession` 重建（版本 / 缺图 / root 归一化） |
+| `SessionLoadResult`（类） | 同上 | `Session` / `Name` / `Warnings` |
+| `ProjectInfo`（record） | `SessionStore.cs` | `SessionId` / `Name` / `CreatedAt` |
+| `ProjectFormatException` / `ProjectCorruptException` | `SessionStore.cs` | 版本不匹配 / 文件损坏 |
+| `ProjectListItem`（类） | `ZivAiEditor.UI/Projects/ProjectListItem.cs` | 列表项 VM |
+| `TextPromptDialog`（窗口） | `ZivAiEditor.App/TextPromptDialog.axaml(.cs)` | 单行文本输入（改名） |
+
+### 9C.6-E.4 `session.json` 格式变化（冻结 · 格式 v1）
+
+- 新增 `version: 1` 与 `name`（项目名）。
+- `nodes[].image_path` 由**绝对路径**改为**相对名** `{NodeId}.png`；`crop.result_image_path` 仍为
+  相对名 `{NodeId}_crop.png`。加载时按项目目录解析。
+- 旧格式（无 `version`）不再被列表 / 加载接受（列表跳过；加载抛 `ProjectFormatException`）。
+
+### 9C.6-E.5 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→
+  **251 通过 / 0 失败**；新增 `SessionStoreTests` / `SessionLoaderTests`；`Contracts` diff 为空。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 9C.6-E.6 遗留项（冻结）
+
+- **「另存为」入口**：`SessionStore.ExportToAsync` 保留，UI 后置。
+- **项目缩略图 / 项目导入** → 后置。
+- **App 层编排无自动化测试**：属 UI 层。

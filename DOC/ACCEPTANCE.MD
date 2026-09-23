@@ -1683,3 +1683,182 @@ V4（App 装配统一）、#6（删死状态写入）、#7（导入事件命名�
 1. 追加 `DEVLOG.md` 的 Step 9C.6-B2 记录（本步已完成）
 2. 在「验收记录」追加"Step 9C.6-B2 通过，日期：____"（待签）
 3. 进入后续 Step（`_cache` 有界 / 9C.4-B 外扩 / 9C.5-C / 9C.5-D 等，由用户决定）
+
+---
+
+## Step 9C.6-C 验收：图片流入模型重构（附件条一次性输入）
+
+**目标**：附件条改为**一次性输入**——拖图 / 粘贴只进附件条（不再即时成 root），点发送才消费、
+成功后清空；单图 / 多图模式 + 发送校验 + 对话内提示 + 三选一弹框。多图管线另立 9C.5-D。
+范围外：GPU 端到端（Z29 / Z30），真机由用户执行。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 仅改 UI / App；无新增项目引用 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `IEditSession` / `IEditSessionWriter` / `ICommandParser` **零变化**；新增类型均非契约 | ✅ |
+| G4 | 未授权修改检查 | 无既有冻结签名被改；无契约成员变更 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `INTERACTION` / `FROZEN` 追加 Step 9C.6-C | ✅ |
+| G6 | 便携性未破 | 无新增持久化；附件条仅内存态 | ✅ |
+| G7 | AI 推理进程隔离未破 | 未新增推理入口；输入图仍经 `GetCurrentPipelineImagePath` | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.6C.1 | 删即时提升 | 查 `MainWindow.Import.OnImagesChanged` | 无 `SetRootImage` 调用 | ✅ |
+| 9C.6C.2 | 拖图只进附件条 | 查 `OnDrop` / `PickImagesAsync` | 仅 `_importBar.AddFiles` | ✅ |
+| 9C.6C.3 | 发送消费附件 | 查 `MainWindow.Send.SubmitAsync` | `PrepareAttachments` 先于 `_vm.SubmitAsync` | ✅ |
+| 9C.6C.4 | 发送后清空 | 查 `SubmitAsync` | 仅 `succeeded` 时 `_importBar.Clear()` | ✅ |
+| 9C.6C.5 | 无 root + 附件 | `SessionViewModelTests` | 首图成 root（`原图` 节点） | ✅ |
+| 9C.6C.6 | 有 root + 附件 | `SessionViewModelTests` | 返回 `NeedsDecision`，root 不变 | ✅ |
+| 9C.6C.7 | T2I 折中 | `SessionViewModelTests` | 空附件 + 无 root：`/`→`NoImage`；自然语言→`Ready` | ✅ |
+| 9C.6C.8 | 发送校验矩阵 | `SessionViewModelTests.CanSend_Validation_Matrix` | 文本空 false；附件 0 不设限；附件 1 仅单图；附件 ≥2 仅多图 | ✅ |
+| 9C.6C.8b | 模式不匹配提示 | 查 `MaybeShowModeMismatchHint` | `单图+≥2`→「请选择多图编辑」；`多图+1`→「请再添加一张图」；`多图+0` 不提示；模式点击 / 附件变化触发 | ✅ |
+| 9C.6C.9 | 模式自动切多图 | 查 `OnImagesChanged` | 附件 ≥2 且 Single → 切 Multi | ✅ |
+| 9C.6C.10 | 模式手动覆盖 | 查 `ToggleMode` | 点击切换；不反向自动切回 | ✅ |
+| 9C.6C.11 | 三选一弹框 | 查 `MultiImagePromptDialog` | 取消 / 参考图-禁用 / 新会话；默认取消 | ✅ |
+| 9C.6C.12 | `HasImages` 语义 | `ImageImportListTests` | 随 `Count` 变化 | ✅ |
+| 9C.6C.13 | Z8 行数 | 查改动文件 | 均 < 600 行（`MainWindow.axaml.cs` 513） | ✅ |
+| 9C.6C.14 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；受影响类 36 通过 | ✅ |
+| 9C.6C.15 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29/Z30） | ✅ |
+| 9C.6C.16 | 真机交互 | 用户执行一次真机验收 | 见下「手动验收清单」 | ⏳ 待用户确认 |
+| 9C.6C.17 | 启动 / 无残留 | 启动 exe + 进程表 | 窗口正常、无新 Python 进程；结束无残留、未占 GPU | ⏳ 待用户确认 |
+
+### 手动验收清单（真机，由用户执行）
+
+- 拖 1 张图 → 附件条有图，历史**不变**（不立即成 root）。
+- 发送文本 → 附件第一张成为 root + 执行编辑 + 附件条**清空**。
+- 拖 2 张图 → 模式**自动切多图**。
+- 单图模式 + 拖 2 张 → 发送按钮**禁用** + 点单图按钮 tips。
+- 文本为空 → 发送按钮**禁用**。
+- 有 root + 拖新图 + 发送 → **弹三选一框**（参考图禁用）。
+- 选「新会话」→ 新图成 root + 附件清空；选「取消」→ 不发送 + 附件保留。
+- 第三次编辑的图不再被丢弃。
+
+### Step 9C.6-C 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.6C.1–9C.6C.15 全过；9C.6C.16 / 9C.6C.17 由用户真机确认。
+
+### Step 9C.6-C 遗留说明（非阻断）
+
+- **多图管线**（`AdditionalImages` 契约 + `<imageN>` 解析 + Python `_encode` 多图）→ **9C.5-D**。
+- **参考图功能本身** → 9C.5-D（弹框「参考图」灰化 + tooltip「多图编辑暂未实现」）。
+- **`commands.json` 的 `mode` 字段**（单 / 多图模板区分）→ 后置（留接口，不实现）。
+- **发送校验矩阵已由用户裁决确认**：附件 0 → 不设限（T2I / 当前节点图）；1 → 仅单图；≥2 → 仅多图。
+  `CanSend` 与之一致，不再是待决项。
+- **App 层编排无自动化测试**：属 UI 层，沿用既有测试策略。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### Step 9C.6-C 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 9C.6-C 记录（本步已完成）
+2. 在「验收记录」追加"Step 9C.6-C 通过，日期：____"（待签）
+3. 进入后续 Step（9C.5-D 多图管线 / 9C.4-B 外扩 等，由用户决定）
+
+---
+
+## Step 9C.6-D 验收：小修 + 显存 OOM 调查与兜底
+
+**目标**：附件清空时机 / 模式按钮小修；调查「新会话压爆显存」并加兜底。范围外：GPU 端到端（Z29/Z30）。
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.6D.1 | 附件发送即清 | 查 `MainWindow.Send.cs` | `Clear()` 在 `SubmitAsync` 前；取消/拦截保留 | ✅ |
+| 9C.6D.2 | 模式按钮文字 | 查 `MainWindow.axaml` | 显示完整「单图 / 多图」（`Width=NaN`） | ✅ |
+| 9C.6D.3 | 单管线确认 | 现场采样 | 44 次全程 1 app + 1 python | ✅ |
+| 9C.6D.4 | 降级缺口 | 查 `pipeline.py:_oom_types` | 不含 `AcceleratorError` | ✅ |
+| 9C.6D.5 | C# OOM 自动重试 | `SessionViewModelTests` | OOM 失败后重试一次并成功 | ✅ |
+| 9C.6D.6 | 后端诊断日志 | 查 `PythonProcessManager` / `AppContext` | `--log-file` → `_cache/backend.log` | ✅ |
+| 9C.6D.7 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；非 GPU 252 通过 | ✅ |
+| 9C.6D.8 | 无 GPU 负载 | 测试过程 | 未启动 Python / 未加载模型 | ✅ |
+| 9C.6D.9 | 真机 OOM 兜底 | 用户执行 | 出现 OOM 时自动重试一次并成功 | ⏳ 待用户确认 |
+
+### Step 9C.6-D 遗留说明（非阻断）
+
+- **治本（另立步，需授权改 `python/server/*`）**：`_oom_types()` 加入 `AcceleratorError` + 排查
+  跨推理显存 / 主机内存累积（现场见单进程私有内存 68 GB）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+---
+
+## Step 9C.6-E 验收：项目列表（新建 / 删除 / 切换 / 保存 / 加载）
+
+**目标**：会话改为**项目模型**（`sessions/{sessionId}/` 自包含），左栏上半项目列表，新建 / 删除 /
+切换 / 重命名 / 保存，启动自动打开上次项目；大图预览「另存为」。范围外：GPU 端到端（Z29 / Z30），
+真机由用户执行。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 仅改 Agent / UI / App；无新增项目引用 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `IEditSession` / `IEditSessionWriter` / `ICommandParser` **零变化**；`Contracts` diff 为空 | ✅ |
+| G4 | 未授权修改检查 | 无既有冻结签名被改；`EditSession.SessionId` 可写属实现类内部；`ISessionExporter` 移除已在 FROZEN 尾部记录 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `INTERACTION` / `FROZEN` 追加 9C.6-D / 9C.6-E | ✅ |
+| G6 | 便携性未破 | 项目随程序目录 `AppContext.BaseDirectory/sessions`（Z14） | ✅ |
+| G7 | AI 推理进程隔离未破 | 纯本地文件操作；未新增推理入口 | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.6E.1 | 保存 / 加载往返 | `SessionStoreTests` | 图 / 当前节点 / Crop 完整还原 | ✅ |
+| 9C.6E.2 | JSON 相对名 | `SessionStoreTests` | `image_path` = `{NodeId}.png`，无绝对路径 | ✅ |
+| 9C.6E.3 | 列表 / 删除 | `SessionStoreTests` | 列表按时间倒序；删除移除目录 | ✅ |
+| 9C.6E.4 | last_project | `SessionStoreTests` | 写 / 读 / 清 | ✅ |
+| 9C.6E.5 | 版本检查 | `SessionLoaderTests` | `version != 1` → `ProjectFormatException` | ✅ |
+| 9C.6E.6 | 损坏 JSON | `SessionLoaderTests` | → `ProjectCorruptException`（不删文件） | ✅ |
+| 9C.6E.7 | 缺图跳过 | `SessionLoaderTests` | 跳过节点 + 警告；缺裁切图丢弃 Crop + 警告 | ✅ |
+| 9C.6E.8 | root 归一化 | `SessionLoaderTests` | 多 / 零 root 归一 | ✅ |
+| 9C.6E.9 | 就地恢复 | `EditSessionTests` / `SessionStoreTests` | 实例不变、契约不变 | ✅ |
+| 9C.6E.10 | 清理顺序 | 查 `MainWindow.Projects.cs` | `CleanupSession(old)` 先于 `Restore` | ✅ |
+| 9C.6E.11 | 默认项目名 | 查 `EffectiveProjectName` | 未命名时取首图文件名 | ✅ |
+| 9C.6E.12 | 脏签名含裁切几何 | 查 `ComputeSignature` | 重裁触发保存提示 | ✅ |
+| 9C.6E.13 | Z8 行数 | 查改动文件 | 均 < 600 行（`ImagePreview.axaml.cs` 574） | ✅ |
+| 9C.6E.14 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；非 GPU 251 通过 | ✅ |
+| 9C.6E.15 | 启动冒烟 | 启动 exe | 窗口正常、无错误输出、无残留 | ✅ |
+| 9C.6E.16 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29/Z30） | ✅ |
+| 9C.6E.17 | 真机交互 | 用户执行一次真机验收 | 见下「手动验收清单」 | ⏳ 待用户确认 |
+
+### 手动验收清单（真机，由用户执行）
+
+- 编辑 → `Ctrl+S` → 保存到 `sessions/{id}/`（项目名 = 首图文件名）。
+- 关闭程序 → 询问保存 → 是 → 保存。
+- 重启 → **自动打开最后保存的项目** + 历史节点完整。
+- 左栏上半显示项目列表；当前项目高亮。
+- 点 `+` → 新建空项目（询问保存当前）。
+- 点项目 → 切换（询问保存当前；旧会话 `_cache` 按顺序清理）。
+- 点 `×` → 删除项目（确认 + 删目录）；删除当前项目 → 切到第一个 / 空项目。
+- 双击项目名 → 改名。
+- 大图预览 → 保存按钮 → 另存为（默认起始图目录 + 文件名正确；裁切时保存裁切结果）。
+- 损坏 `session.json` → 提示 + 打开空项目 + **不删文件**。
+- 关闭无残留进程。
+
+### Step 9C.6-E 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.6E.1–9C.6E.16 全过；9C.6E.17 由用户真机确认。
+
+### Step 9C.6-E 遗留说明（非阻断）
+
+- **「另存为」入口**（导出到外部目录）：`SessionStore.ExportToAsync` 保留，UI 后置。
+- **项目缩略图**（列表先显示名字）→ 后置。
+- **项目导入**（从外部 `session.json`）→ 后置。
+- **`_cache` 总量上限** → 后置。
+- **App 层编排无自动化测试**：属 UI 层，沿用既有测试策略。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### Step 9C.6-E 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 9C.6-E 记录（本步已完成）
+2. 在「验收记录」追加"Step 9C.6-E 通过，日期：____"（待签）
+3. 进入后续 Step（9C.5-D 多图管线 / 另存为入口 / 9C.4-B 外扩 等，由用户决定）

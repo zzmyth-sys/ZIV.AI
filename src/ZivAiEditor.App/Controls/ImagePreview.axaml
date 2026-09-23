@@ -38,6 +38,9 @@
                       ToolTip.Tip="划像对比（父图 / 当前图）" IsEnabled="False">
           <Path Classes="toolIcon" Data="{StaticResource IconCompare}" />
         </ToggleButton>
+        <Button x:Name="PART_BtnSave" Classes="tool" ToolTip.Tip="另存为 (Ctrl+Shift+S)">
+          <Path Classes="toolIcon" Data="{StaticResource IconSave}" />
+        </Button>
       </StackPanel>
     </c:ChromeTitleBar.RightContent>
     <c:ChromeTitleBar.Body>

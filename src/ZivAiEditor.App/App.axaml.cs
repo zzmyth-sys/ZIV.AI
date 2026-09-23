@@ -27,7 +27,7 @@ public partial class App : Application
                 _context.Session,
                 _context.CommandParser,
                 _context.Executor,
-                _context.SessionExporter,
+                _context.SessionStore,
                 _context.ModelProfiles,
                 options);
             desktop.MainWindow = window;

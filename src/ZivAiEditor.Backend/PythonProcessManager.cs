@@ -73,6 +73,13 @@ public sealed class PythonBackendOptions
     public IReadOnlyDictionary<string, string> Environment { get; init; }
         = new Dictionary<string, string>();
 
+    /// <summary>
+    /// Optional path for the backend's own log file (Step 9C.6-D diagnostic). When set,
+    /// the Python process is launched with <c>--log-file</c> so its submit-resolution /
+    /// error log survives the in-memory capture. <c>null</c> disables file logging.
+    /// </summary>
+    public string? LogFilePath { get; init; }
+
     public string PipePath => @"\\.\pipe\" + PipeName;
 }
 
@@ -508,6 +515,25 @@ public sealed class PythonProcessManager : IDisposable, IAsyncDisposable
         startInfo.ArgumentList.Add(PipePath);
         startInfo.ArgumentList.Add("--log-level");
         startInfo.ArgumentList.Add("INFO");
+        if (!string.IsNullOrWhiteSpace(Options.LogFilePath))
+        {
+            try
+            {
+                var directory = Path.GetDirectoryName(Options.LogFilePath);
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                startInfo.ArgumentList.Add("--log-file");
+                startInfo.ArgumentList.Add(Options.LogFilePath);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[backend] log-file setup failed: {ex.Message}");
+            }
+        }
+
         foreach (var pair in Options.Environment)
         {
             startInfo.Environment[pair.Key] = pair.Value;
