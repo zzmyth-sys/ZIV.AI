@@ -31,15 +31,18 @@ public class SessionExporterTests
 
             var session = new EditSession();
             session.SetRoot(root);
+            var rootNode = session.GetHistory()[0];
             var node = session.AppendNode(null, nodeImage, "/去水印");
 
             var result = await exporter.ExportAsync(session, outputDir);
 
             Assert.Equal(outputDir, result);
             Assert.True(File.Exists(Path.Combine(outputDir, "session.json")));
+            Assert.True(File.Exists(Path.Combine(outputDir, rootNode.NodeId + ".png")));
             Assert.True(File.Exists(Path.Combine(outputDir, node.NodeId + ".png")));
 
             var json = await File.ReadAllTextAsync(Path.Combine(outputDir, "session.json"));
+            Assert.Contains(rootNode.NodeId, json);
             Assert.Contains(node.NodeId, json);
             Assert.Contains("/去水印", json);
         }

@@ -2580,3 +2580,173 @@ GPU 端到端（Z29 / Z30）。
 
 - 本登记**未改任何代码**；无契约变更；无 GPU 参与。
 - 即使修复 9C.5-C，输出仍不会「合照」——多图参考在契约层与后端就无承载字段（9C.5-D）。
+
+---
+
+## [Step 9C.6] - 2026-09-23
+
+### 目标
+
+**根节点实体化**：让「导入的原图」成为会话 DAG 的第一个 `EditNode`（`ParentNodeId = null`），
+使历史列表从原图开始、用户可回到原图。底座级数据结构改动，**编辑流程行为需保持兼容**。
+流程：前置只读调查 → 补充核查 → 用户裁决 → 实施 → 独立复审 → 验证。
+
+### 前置只读调查结论（摘要）
+
+- `SetRoot`（`EditSession.cs:42`）原仅赋值 `RootImagePath`；`ResetToRoot`（`:50-55`）清空
+  `Nodes` + `CurrentNodeId`，**二者均不建节点**。
+- `AppendNode`（`:62-74`）直接以传入 `parentId` 建节点；首个编辑节点 `ParentNodeId = null`，
+  与 root 无链接（root 不在 DAG）。
+- DAG 遍历点：`GetCurrentImagePath` / `GetParentImagePath` / `GetPathToCurrent` / `GetDepth` /
+  `GetHistory` 均假设「root 不在 Nodes」——`GetParentImagePath` 对 `ParentNodeId == null` 的
+  节点回退返回 `RootImagePath`。
+- 导入链：`ImageImportList`（仅「空→1」触发）→ `MainWindow.OnImagesChanged`
+  （`MainWindow.Import.cs:65-69`）→ `SessionViewModel.SetRootImage:244` → `ResetToRoot`。
+- 导出：`SessionExporter` 遍历 `GetHistory()` 拷图，root 原图**不拷**（仅 JSON 记路径）。
+- 受影响测试：`EditSessionTests`（含「Nodes 不含根」假设）、`SessionViewModelTests`
+  （`History.Single` / `Empty` / `[0]` 索引）、`SessionExporterTests`。
+
+### 补充只读核查（用户要求，实施前）
+
+1. **`RootImagePath` 外部 set**：`grep` 全仓 `.RootImagePath =` → **0 命中**；仅
+   `EditSession.cs:42/52` 两处自身赋值。→ **无外部 set，删 public set 改派生只读属性**。
+2. **`GetParentImagePath` 三态**：现状「匹配编辑节点 → 父节点 ImagePath；匹配旧直系子
+   （`ParentNodeId == null`）→ `RootImagePath`；匹配 root（不在 Nodes）/不匹配 → null」。
+   → 实施改为「匹配编辑节点 → 父节点 ImagePath；匹配 root 节点 → **null**；不匹配 → null」。
+3. **`AppendNode(parentId = null)` 调用点**：生产 1 处（`SessionViewModel.cs:179`，`parentId`
+   来自 `_session.CurrentNodeId`）；测试约 18 处。空会话（未 `SetRoot`，T2I-first）仍可达
+   null。→ 用户裁决 **选项 A**：null 且存在 root → 挂 `root.NodeId`；无 root → 保持 null。
+
+### 做了什么
+
+- **`EditSession.cs`**（Agent）：
+  - 新增私有 `_rootNode`（`EditNode?`）与 `RootCommand = "原图"` 常量。
+  - `RootImagePath`：`{ get; set; }` → **派生只读** `=> _rootNode?.ImagePath`。
+  - `SetRoot` / `ResetToRoot` **统一行为**：清空 `Nodes` → 建 root 节点
+    （`ParentNodeId = null`、`Command = "原图"`）→ `CurrentNodeId = root.NodeId`
+    （`SetRoot` 现委托 `ResetToRoot`）。
+  - `AppendNode`：新增「null 且存在 root → 挂 root」的防御分支（选项 A，附注释）。
+  - `GetHistory`：**含 root 且 root 恒排第一**（`OrderBy(ParentNodeId is null ? 0 : 1)`，
+    再按 `CreatedAt` / `NodeId`）——保证「历史从原图开始」不受时钟精度影响。
+  - `GetCurrentImagePath`：不再回退 `RootImagePath`（root 已是节点，`CurrentNodeId` 指向它）；
+    无 current → null。
+  - `GetParentImagePath`：三态实现（root 自身 / 不匹配 → null）。
+  - `GetPathToCurrent` / `GetDepth`：实现不变，语义随 root 进 DAG 自然适配
+    （root = `[root]`、深度 0；直接子节点深度 1）。
+  - 类 / 方法 XML 注释同步 9C.6 语义（**签名零变化**）。
+- **`SessionViewModel.cs`**（UI）：`RebuildContext` 重放路径时**跳过 root 节点**
+  （`ParentNodeId is null`），因 root 已由「起始图像」系统气泡呈现——**避免原图重复渲染**
+  （复审发现的回归，已修）。`RefreshHistory` 无需改（root 自动出现）。
+- **`SessionExporter.cs`**：**无需改**——root 进 `GetHistory()` 后自动被拷为 `{NodeId}.png`。
+- **`MainWindow.BuildHistoryItem` / `ImagePreview.Compare`**：**无需改**——对 `Command = "原图"`
+  正常显示；`SetCompareSource(GetParentImagePath(path))` 逻辑不变（root→null 自动禁用对比）。
+- **测试**：`EditSessionTests` 更新 6 例 + 新增 4 例；`SessionViewModelTests` 更新 3 例 +
+  新增 1 例；`SessionExporterTests` 新增「root 图存在」断言。
+- **文档**：本段 + `ACCEPTANCE.MD` Step 9C.6 + `FROZEN.md` 尾部 9C.6 修订说明。
+
+### DAG 结构变更
+
+```
+变更前                             变更后
+  RootImagePath（独立字段）           RootImagePath（派生自 _rootNode.ImagePath）
+  Nodes = { 编辑节点… }               Nodes = { root 节点, 编辑节点… }
+  首编辑节点 ParentNodeId = null      首编辑节点 ParentNodeId = root.NodeId
+  GetHistory 不含原图                 GetHistory[0] = root（"原图"）
+```
+
+- root 节点：`ParentNodeId = null`、`ImagePath = imagePath`、`Command = "原图"`。
+- 选中 root → `CurrentNodeId = root.NodeId` → 后续编辑 `AppendNode(root.NodeId, …)` 成为 root
+  的另一个子节点（**回到原图后从原图分支**天然成立）。
+
+### `AppendNode` null 处理方式（选项 A）
+
+`parentId` 为 null 且存在 root → 挂 `root.NodeId`；无 root（空会话）→ 保持 `ParentNodeId = null`。
+理由：① 生产路径 `CurrentNodeId` 在 `SetRoot` 后恒非 null，此分支为**防御**；② 空会话
+（T2I-first 无 `SetRoot`）仍可建节点，**零回归**；③ 旧测试大量传 null 的语义可平滑迁移。
+禁止 null（选项 B）会破坏空会话并需大改测试，与「行为兼容」冲突，故未采纳。
+
+### 遍历逻辑适配
+
+| 方法 | 适配 |
+|---|---|
+| `GetHistory` | 含 root；root 恒排第一 |
+| `GetCurrentImagePath` | 不回退 `RootImagePath`；无 current → null |
+| `GetParentImagePath` | 匹配节点 → 父 output；root 自身 / 不匹配 → null |
+| `GetPathToCurrent` | root 当前 → `[root]`；否则 `[root,…,current]`；无 current → 空 |
+| `GetDepth` | root = 0；直接子节点 = 1；实现不变（沿 `ParentNodeId` 数祖先） |
+
+### 导出行为
+
+root 节点进入 `GetHistory()` 后被 `SessionExporter` 自动拷为 `{rootNodeId}.png`，
+并序列化进 `session.json` 的 `nodes` 数组——**导出目录含原图文件**，导出后可回到原图。
+`RootImagePath` 仍写 JSON `root_image_path`（派生值，兼容既有 schema）。
+
+### UI 历史列表变化
+
+- 导入一张图后，历史列表**立即出现「原图」节点**（`Command = "原图"`，无缩进，`Depth = 0`）。
+- 编辑一次后，新节点缩进 1 级挂在原图下（`Depth = 1`）。
+- `BuildHistoryItem` 对非空 `Command` 直接显示，无需特殊分支。
+- 点击原图节点 → `NavigateTo(root)` → 切回原图；划像对比按钮禁用（无父图）。
+- `RebuildContext` 跳过 root，原图只以「起始图像」气泡呈现一次。
+
+### 关键决策
+
+1. **`RootImagePath` 派生只读**：核查 1 确认无外部 set；派生表达式零存储、恒与 root 同步。
+2. **`SetRoot` 与 `ResetToRoot` 统一**：`SetRoot` 现也清 DAG（原不清）。对二实例转发路径
+   （`ApplyLaunchRequest` → `ApplyRequest`）而言，转发的请求本就替换主图，清空合理且与导入
+   对称。
+3. **`GetHistory` root 恒第一**：不依赖 `CreatedAt` 精度，保证「从原图开始」。
+4. **`RebuildContext` 跳过 root**：复审发现的重复渲染回归，最小修复；保持既有聊天流形态。
+5. **`SessionExporter` 不改**：root 进 `GetHistory` 即自动拷图，最小改动。
+
+### 复审（独立子代理，只读）
+
+- 结论：**无 Blocker**；2 项 Should-fix——
+  1. `RebuildContext` 原图重复渲染（起始图像气泡 + root 节点 User/Assistant 对）→ **已修**。
+  2. `GetHistory` 排序依赖时钟 + GUID，可能与「root 第一」冲突 → **已修**（root 恒第一）。
+- Nit：`AppendNode` 未知 `parentId` 静默建悬空节点（既有行为，非回归，未改）；
+  `IEditSession` / `IEditSessionWriter` XML 注释仍述旧语义（签名未变，登记为后续文档整理）。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：受影响类 `EditSessionTests` / `SessionViewModelTests` /
+  `SessionExporterTests` / `CommandParserTests` / `ImageImportListTests` **57 通过 / 0 失败**；
+  非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **175 通过 / 0 失败**
+  （9C.5 基线 170，本步 +5：`EditSessionTests` +4、`SessionViewModelTests` +1）。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步不加载模型、不启动 Python、不占 GPU。
+- **Z8**：改动文件均 < 600 行（`EditSession.cs` 251、`SessionViewModel.cs` 297、
+  `MainWindow.axaml.cs` 594 未改）。
+- **Z9 / Z11**：本步无新增 `Bitmap`、无耗时操作。
+
+### 遇到的问题与解决
+
+1. **复审发现原图重复渲染**：`RebuildContext` 先加「起始图像」系统气泡，再遍历
+   `GetPathToCurrent()`（现含 root）又加一对 User「原图」/ Assistant 气泡 → 原图显示两次。
+   → 解决：遍历时 `if (node.ParentNodeId is null) continue;` 跳过 root；并在测试中断言
+   「无 `User "原图"` 气泡且只有一个起始图像气泡」。
+2. **`GetHistory` 排序**：原 `OrderBy(CreatedAt).ThenBy(NodeId)` 在时钟精度不足时可能让子节点
+   排在 root 前，违反「从原图开始」。→ 解决：先按 `ParentNodeId is null` 排序使 root 恒第一。
+
+### 遗留项
+
+- **`AppendNode` 未知 `parentId`**：静默建悬空节点（遍历有 `MaxTreeDepth` 保护，终止安全）；
+  既有行为，本步未改。
+- **Contracts XML 注释**：`IEditSession` / `IEditSessionWriter` 文档仍描述「null = root 当前」
+  「不建节点」等旧语义；**签名未变**（G3/G4 合规），登记为后续文档整理。
+- **9C.5-C / 9C.5-D** 未动（多图清空 / 多图引用，另立步）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 对后续步的接口
+
+- **9C.4 裁切**：本步完成后，裁切结果可直接 `AppendNode(当前节点 id, 裁切输出, "裁切")` 进会话，
+  **无需再改底座**；选中 root 后裁切即从原图分支。裁切 UI / 遮罩数据仍属 9C.4。
+
+### 备注
+
+- 环境：Windows 10、PowerShell 7、.NET SDK 10.0.401；本步**无 GPU 参与**。
+- **未修改** `Contracts` 既有成员（`IEditSession` / `IEditSessionWriter` 签名零变化）/
+  `python/server/*` / `contracts/ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；**未新增 NuGet**；
+  **未改** chrome 三控件 / `EditorToolbar` / `CompareState` / `ToolStateMachine` / 图片导入 UI /
+  分辨率选择器。
+- `FROZEN.md` 尾部追加 9C.6 修订说明（**不改已冻结行**）；`ACCEPTANCE.MD` 追加 Step 9C.6 验收段。

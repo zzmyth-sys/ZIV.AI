@@ -85,7 +85,8 @@ public class SessionViewModelTests
         var ok = await vm.SubmitAsync("/去水印");
 
         Assert.True(ok);
-        Assert.Single(vm.History);
+        Assert.Equal(2, vm.History.Count);
+        Assert.Equal("原图", vm.History[0].Node.Command);
         Assert.Equal(Output, session.GetCurrentImagePath());
         Assert.Contains(vm.Messages, m => m.Role == ChatRole.User && m.Text == "/去水印");
         Assert.Contains(vm.Messages, m => m.ImagePath == Output);
@@ -101,7 +102,8 @@ public class SessionViewModelTests
         var ok = await vm.SubmitAsync("把天空换成日落");
 
         Assert.False(ok);
-        Assert.Empty(vm.History);
+        Assert.Single(vm.History);
+        Assert.Equal("原图", vm.History[0].Node.Command);
         Assert.Contains(vm.Messages, m => m.IsError);
     }
 
@@ -113,7 +115,7 @@ public class SessionViewModelTests
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
 
-        var nodeId = vm.History[0].Node.NodeId;
+        var nodeId = vm.History[1].Node.NodeId;
 
         Assert.True(vm.NavigateTo(nodeId));
         Assert.Equal(nodeId, session.CurrentNodeId);
@@ -207,14 +209,37 @@ public class SessionViewModelTests
         var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
-        Assert.Single(vm.History);
+        Assert.Equal(2, vm.History.Count);
 
         vm.SetRootImage(@"C:\img\new.png");
 
         Assert.Equal(@"C:\img\new.png", session.RootImagePath);
-        Assert.Empty(vm.History);
-        Assert.Null(session.CurrentNodeId);
+        Assert.Single(vm.History);
+        Assert.Equal("原图", vm.History[0].Node.Command);
+        Assert.Equal(session.CurrentNodeId, vm.History[0].Node.NodeId);
         Assert.Contains(vm.Messages, m => m.ImagePath == @"C:\img\new.png");
+    }
+
+    [Fact]
+    public async Task Navigate_To_Root_Node_Switches_Current_To_Root()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        await vm.SubmitAsync("/去水印");
+
+        var rootId = vm.History[0].Node.NodeId;
+
+        Assert.True(vm.NavigateTo(rootId));
+        Assert.Equal(rootId, session.CurrentNodeId);
+        Assert.Equal(Root, session.GetCurrentImagePath());
+        Assert.True(vm.History[0].IsCurrent);
+        Assert.Contains(vm.Messages, m => m.Role == ChatRole.System && m.ImagePath == Root);
+
+        // The source image must not be rendered twice: the root node is covered by the
+        // "起始图像" system bubble, so no separate User "原图" pair is emitted.
+        Assert.DoesNotContain(vm.Messages, m => m.Role == ChatRole.User && m.Text == "原图");
+        Assert.Single(vm.Messages, m => m.Role == ChatRole.System && m.ImagePath == Root);
     }
 
     [Fact]

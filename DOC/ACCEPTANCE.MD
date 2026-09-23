@@ -1409,3 +1409,71 @@ V4（App 装配统一）、#6（删死状态写入）、#7（导入事件命名�
 - 说明：9C.5-D 是 9C.3 已登记遗留（「`@` 引用未实现」）的延续；端到端涉及契约与后端，
   单独立步。
 - 9C.5-C 为独立小修，与 9C.5-D 无依赖。
+
+---
+
+## Step 9C.6 验收：根节点实体化（导入原图成为 DAG 首个节点）
+
+**目标**：让「导入的原图」成为会话 DAG 的第一个 `EditNode`（`ParentNodeId = null`），使历史列表
+从原图开始、用户可回到原图。底座级数据结构改动，**编辑流程行为保持兼容**。
+范围外：GPU 端到端（Z29 / Z30），真机交互由用户执行。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 仅改 Agent / UI / App 内部；无新增项目引用、无反向 / 循环依赖 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `IEditSession` / `IEditSessionWriter` 签名**零变化**（仅行为语义变化，`FROZEN` 9C.6 尾部说明）；未改已冻结行 | ✅ |
+| G4 | 未授权修改检查 | 无既有冻结签名被改；`RootImagePath` 由公开 set 变派生只读属**实现类内部**变化（非契约成员，接口本为 get-only） | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `FROZEN` 追加 Step 9C.6 | ✅ |
+| G6 | 便携性未破 | 无注册表 / 外部路径配置 | ✅ |
+| G7 | AI 推理进程隔离未破 | 纯本地数据结构改动，不加载 Python（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.6.1 | root 实体化 | 查 `EditSession.cs` | `SetRoot` / `ResetToRoot` 建 root 节点（`ParentNodeId = null`、`Command = "原图"`），`CurrentNodeId = root.NodeId` | ✅ |
+| 9C.6.2 | `RootImagePath` 派生 | 查 `EditSession.cs` | `public string? RootImagePath => _rootNode?.ImagePath`（无 public set） | ✅ |
+| 9C.6.3 | `GetHistory` 含根 | `EditSessionTests` | `GetHistory()[0]` 为 root；root 恒排第一 | ✅ |
+| 9C.6.4 | 首编辑节点挂 root | `EditSessionTests.AppendNode_Builds_DAG` | 首编辑节点 `ParentNodeId == root.NodeId` | ✅ |
+| 9C.6.5 | `GetPathToCurrent` | `EditSessionTests` | root 当前 → `[root]`；编辑后 → `[root,…,current]`；无 current → 空 | ✅ |
+| 9C.6.6 | `GetDepth` | `EditSessionTests.GetDepth_Counts_Ancestors` | root = 0；直接子 = 1；孙 = 2 | ✅ |
+| 9C.6.7 | `GetParentImagePath` 三态 | `EditSessionTests` | 编辑节点 → 父 output；root 自身 → null；不匹配 → null | ✅ |
+| 9C.6.8 | `AppendNode(null)` 选 A | `EditSessionTests` | 有 root → 挂 root；无 root → 保持 null | ✅ |
+| 9C.6.9 | 导出含根图 | `SessionExporterTests` | 输出目录存在 `{rootNodeId}.png`；JSON `nodes` 含 root | ✅ |
+| 9C.6.10 | 聊天流无重复原图 | `SessionViewModelTests.Navigate_To_Root_Node…` | `RebuildContext` 跳过 root；无 `User "原图"` 气泡；仅一个「起始图像」气泡 | ✅ |
+| 9C.6.11 | 划像对比 | 查 `ImagePreview.Compare` / `GetParentImagePath` | root → 对比禁用；编辑结果 → 父图 = 原图 | ✅ |
+| 9C.6.12 | 签名零变化 | 查 `Contracts/Planning/` | `IEditSession` / `IEditSessionWriter` 未改 | ✅ |
+| 9C.6.13 | Z8 行数 | 查改动文件 | 均 < 600 行（`EditSession.cs` 251） | ✅ |
+| 9C.6.14 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；受影响 57 通过；非 GPU 175 通过 | ✅ |
+| 9C.6.15 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.6.16 | 真机交互 | 用户执行一次真机验收 | 导入即现「原图」/ 编辑挂原图下 / 点原图切换与分支 / 点原图禁用对比 / 导含原图 / 无回归 | ⏳ 待用户确认 |
+| 9C.6.17 | 启动 / 无残留 | 启动 exe + 进程表 | 窗口正常、无新 Python 进程；结束无残留、未占 GPU | ⏳ 待用户确认 |
+
+### Step 9C.6 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.6.1–9C.6.15 全过；9C.6.16 / 9C.6.17 由用户真机确认。
+
+### Step 9C.6 遗留说明（非阻断）
+
+- **Contracts XML 注释**：`IEditSession` / `IEditSessionWriter` 文档仍述旧语义（「null = root 当前」
+  「不建节点」等）；**签名未变**，登记为后续文档整理。
+- **`AppendNode` 未知 `parentId`**：静默建悬空节点（遍历有 `MaxTreeDepth` 保护，终止安全）；
+  既有行为，本步未改。
+- **9C.5-C / 9C.5-D** 未动（多图清空 / 多图引用，另立步）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 对后续步的接口
+
+- **9C.4 裁切**：本步完成后，裁切结果可直接 `AppendNode(当前节点 id, 裁切输出, "裁切")` 进会话，
+  **无需再改底座**；选中 root 后裁切即从原图分支。裁切 UI / 遮罩数据仍属 9C.4。
+
+### Step 9C.6 验收后动作
+
+1. 追加 `DEVLOG.md` 的 Step 9C.6 记录（本步已完成）
+2. 在「验收记录」追加"Step 9C.6 通过，日期：____"（待签）
+3. 进入后续 Step（9C.4 裁切 / 9C.5-C / 9C.5-D 等，由用户决定）

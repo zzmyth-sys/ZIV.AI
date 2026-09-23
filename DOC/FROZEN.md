@@ -1939,3 +1939,70 @@ public interface ILlmClient : IDisposable
 
 **遗留（9C.5-B，不阻塞）**：`SessionViewModel.AppendNode`（执行成功回写节点）属 UI 代
 Agent 编排，应下沉至 Agent；涉及 `IExecutor` 设计变更，单独立步。
+
+---
+
+## Step 9C.6（日期：2026-09-23）
+
+> **修订说明（Step 9C.6 · 根节点实体化：导入原图成为 DAG 首个节点）**
+>
+> 本段为 Step 9C.6 **只增**记录。目标：让「导入的原图」成为会话 DAG 的第一个 `EditNode`
+> （`ParentNodeId = null`），使历史列表从原图开始、用户可回到原图。**底座级数据结构改动，
+> 编辑流程行为保持兼容**。**不改动 Step 0–9C.5 已冻结行**；本段为**纯追加**（文件尾部）。
+
+### 9C.6.1 `EditSession` 行为语义变更（冻结 · 非契约）
+
+> **接口签名不变**（`IEditSession` / `IEditSessionWriter` 零修改，见 9C.6.2）；以下为**实现类
+> `EditSession`** 的**行为语义**变化，属既有成员的新语义，记录备案。
+
+| 成员 | 变更前语义 | 变更后语义（9C.6） |
+|---|---|---|
+| `SetRoot(string)` | 仅赋值 `RootImagePath`，不建节点、不清 DAG | **等价 `ResetToRoot`**：清空 `Nodes` + `CurrentNodeId`，建 root 节点并设为当前 |
+| `ResetToRoot(string)` | 清空 `Nodes` + `CurrentNodeId`，**不建节点** | 清空后**建 root 节点**（`ParentNodeId = null`、`Command = "原图"`），`CurrentNodeId = root.NodeId` |
+| `RootImagePath` | `{ get; set; }` 独立字段 | **派生只读** `=> _rootNode?.ImagePath`（无 public set） |
+| `GetHistory()` | 只含编辑节点（不含原图） | **含 root 节点，且 root 恒排第一** |
+| `GetCurrentImagePath()` | 无 current 时回退 `RootImagePath` | current 节点的 `ImagePath`；无 current → `null`（root 已是节点） |
+| `GetParentImagePath(string?)` | 匹配 `ParentNodeId == null` 节点 → 返回 `RootImagePath` | 匹配编辑节点 → 父节点 `ImagePath`；匹配 **root 节点** / 不匹配 → `null` |
+| `GetPathToCurrent()` | root 不在路径中 | current=root → `[root]`；否则 `[root,…,current]`；无 current → 空 |
+| `GetDepth(IEditNode?)` | 直接子节点深度 0 | root = 0；直接子节点 = 1（实现沿 `ParentNodeId` 数祖先，未改） |
+| `AppendNode(string?, …)` | `parentId` 原样写入 | `null` 且存在 root → 挂 `root.NodeId`；无 root → 保持 `null`（选项 A） |
+
+- **`RootCommand`**：root 节点 `Command` 固定字面量 **`"原图"`**（`EditSession` 私有常量）。
+- **新增私有状态**：`EditNode? _rootNode`。
+- **`SetRoot` 现也清空 DAG**（此前不清）：对二实例转发路径（`ApplyLaunchRequest` →
+  `ApplyRequest`）而言，转发的请求本就替换主图，清空合理且与导入对称（用户裁决确认）。
+
+### 9C.6.2 接口签名（冻结 · **零变化**）
+
+- `IEditSession` / `IEditSessionWriter` **未改任何成员或签名**（G3 / G4 合规）。
+- `RootImagePath` 在 `IEditSession` 本为 `{ get; }`；`EditSession` 由公开 set 改为派生只读仍满足
+  接口约束，故**非契约级变化**。
+- `IEditNode` 未改。
+
+### 9C.6.3 `SessionExporter` / UI（冻结 · 非契约）
+
+- **`SessionExporter` 未改**：root 节点进入 `GetHistory()` 后自动被拷为 `{NodeId}.png`；
+  `session.json` 的 `nodes` 数组含 root，`root_image_path` 仍写派生值（兼容既有 schema）。
+- **`MainWindow.BuildHistoryItem` 未改**：`Command = "原图"` 正常显示，无特殊分支。
+- **`ImagePreview`（划像对比）未改**：`SetCompareSource(GetParentImagePath(path))` 逻辑不变；
+  root → `null` 自动禁用对比，编辑结果 → 父图 = 原图。
+- **`SessionViewModel.RebuildContext` 改**：重放路径时**跳过 root 节点**（`ParentNodeId is null`），
+  因 root 已由「起始图像」系统气泡呈现——避免原图重复渲染（复审修复）。
+
+### 9C.6.4 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：受影响类 `EditSessionTests` / `SessionViewModelTests` /
+  `SessionExporterTests` / `CommandParserTests` / `ImageImportListTests` **57 通过 / 0 失败**；
+  非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **175 通过 / 0 失败**
+  （9C.5 基线 170，本步 +5）。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步不加载模型、不启动 Python、不占 GPU。
+
+### 9C.6.5 遗留项（冻结）
+
+- **Contracts XML 注释**：`IEditSession` / `IEditSessionWriter` 文档仍述旧语义（「null = root 当前」
+  「不建节点」等）；**签名未变**，登记为后续文档整理。
+- **`AppendNode` 未知 `parentId`**：静默建悬空节点（遍历有 `MaxTreeDepth` 保护，终止安全）；
+  既有行为，本步未改。
+- **9C.4 裁切接口**：本步完成后，裁切结果可直接 `AppendNode(当前节点 id, 裁切输出, "裁切")` 进会话，
+  **无需再改底座**。

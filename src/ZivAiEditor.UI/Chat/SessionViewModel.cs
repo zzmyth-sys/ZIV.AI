@@ -278,8 +278,15 @@ public sealed class SessionViewModel
             Messages.Add(new ChatMessage { Role = ChatRole.System, Text = "起始图像", ImagePath = root });
         }
 
+        // Step 9C.6: the path now starts at the root node, which is already rendered as
+        // the "起始图像" bubble above — skip it so the source image is not shown twice.
         foreach (var node in _session.GetPathToCurrent())
         {
+            if (node.ParentNodeId is null)
+            {
+                continue;
+            }
+
             Messages.Add(new ChatMessage { Role = ChatRole.User, Text = node.Command });
             Messages.Add(new ChatMessage { Role = ChatRole.Assistant, Text = "完成", ImagePath = node.ImagePath });
         }
