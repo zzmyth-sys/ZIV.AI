@@ -205,6 +205,26 @@ public class ExecutorTests
     }
 
     [Fact]
+    public async Task Plan_AdditionalImages_Transfers_To_ToolInput()
+    {
+        var tool = new FakeTool("QW21edit", (input, _) => Task.FromResult(Ok(input.StepId, @"C:\out\one.png")));
+        var executor = CreateExecutor(tool);
+        var plan = new EditPlan
+        {
+            MainImagePath = Main,
+            AdditionalImages = new[] { @"C:\img\ref1.png", @"C:\img\ref2.png" },
+            Steps = new[] { Step("s1", 1, "QW21edit") },
+        };
+
+        var state = await executor.ExecuteAsync(plan);
+
+        Assert.Equal(TaskStatus.Succeeded, state.Status);
+        Assert.Equal(
+            new[] { @"C:\img\ref1.png", @"C:\img\ref2.png" },
+            Assert.Single(tool.Received).AdditionalImages);
+    }
+
+    [Fact]
     public async Task Plan_Without_Resolution_Leaves_Null()
     {
         var tool = new FakeTool("QW21edit", (input, _) => Task.FromResult(Ok(input.StepId, @"C:\out\one.png")));

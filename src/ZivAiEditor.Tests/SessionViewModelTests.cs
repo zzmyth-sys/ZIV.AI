@@ -52,6 +52,40 @@ public class SessionViewModelTests
             => Task.FromResult(false);
     }
 
+    /// <summary>Captures the plan passed to the executor so a test can inspect it.</summary>
+    private sealed class CapturingExecutor : IExecutor
+    {
+        private readonly string? _output;
+
+        public CapturingExecutor(string? output) => _output = output;
+
+        public EditPlan? LastPlan { get; private set; }
+
+        public Task<TaskState> ExecuteAsync(
+            EditPlan plan,
+            IProgress<TaskProgress>? progress = null,
+            CancellationToken ct = default)
+        {
+            LastPlan = plan;
+            return Task.FromResult(new TaskState
+            {
+                TaskId = Guid.NewGuid().ToString("N"),
+                Status = TaskStatus.Succeeded,
+                Plan = plan,
+                OutputImagePath = _output,
+            });
+        }
+
+        public Task<TaskState> RerunAsync(
+            string taskId,
+            IProgress<TaskProgress>? progress = null,
+            CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<bool> CancelAsync(string taskId, CancellationToken ct = default)
+            => Task.FromResult(false);
+    }
+
     /// <summary>An executor that stays in flight until <see cref="Complete"/> is called.</summary>
     private sealed class DeferredExecutor : IExecutor
     {
@@ -151,6 +185,60 @@ public class SessionViewModelTests
         Assert.Equal(Output, session.GetCurrentImagePath());
         Assert.Contains(vm.Messages, m => m.Role == ChatRole.User && m.Text == "/去水印");
         Assert.Contains(vm.Messages, m => m.ImagePath == Output);
+    }
+
+    [Fact]
+    public async Task Submit_References_Land_On_Plan_AdditionalImages()
+    {
+        var session = new EditSession();
+        var executor = new CapturingExecutor(Output);
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        var ok = await vm.SubmitAsync(
+            "用 <image2> 的风格",
+            additionalImages: new[] { @"C:\img\r1.png", @"C:\img\r2.png" });
+
+        Assert.True(ok);
+        Assert.NotNull(executor.LastPlan);
+        Assert.Equal(
+            new[] { @"C:\img\r1.png", @"C:\img\r2.png" },
+            executor.LastPlan!.AdditionalImages);
+    }
+
+    [Fact]
+    public async Task Submit_Truncates_To_Three_References_And_Hints_After_User_Message()
+    {
+        var session = new EditSession();
+        var executor = new CapturingExecutor(Output);
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        var ok = await vm.SubmitAsync(
+            "用参考图",
+            additionalImages: new[] { "r1", "r2", "r3", "r4", "r5" });
+
+        Assert.True(ok);
+        Assert.Equal(new[] { "r1", "r2", "r3" }, executor.LastPlan!.AdditionalImages);
+        var messages = vm.Messages.ToList();
+        var userIndex = messages.FindIndex(m => m.Role == ChatRole.User && m.Text == "用参考图");
+        var hintIndex = messages.FindIndex(m => m.Role == ChatRole.System && m.IsError);
+        Assert.True(userIndex >= 0);
+        Assert.True(hintIndex > userIndex);
+    }
+
+    [Fact]
+    public async Task Submit_Without_References_Leaves_Plan_AdditionalImages_Empty()
+    {
+        var session = new EditSession();
+        var executor = new CapturingExecutor(Output);
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        await vm.SubmitAsync("/去水印");
+
+        Assert.NotNull(executor.LastPlan);
+        Assert.Empty(executor.LastPlan!.AdditionalImages);
     }
 
     [Fact]

@@ -120,20 +120,40 @@ public partial class MainWindow
             return;
         }
 
+        // Step 9C.5-D: the first pipeline image is the main; the remaining attachments are
+        // references. The DAG is reset only on "新会话"; "参考图" keeps the current node
+        // (the main is the current node's pipeline image) and makes every attachment a
+        // reference.
+        IReadOnlyList<string> references = Array.Empty<string>();
         if (preparation == AttachmentPreparation.NeedsDecision)
         {
             var choice = await MultiImagePromptDialog.ShowAsync(this);
-            if (choice != MultiImageChoice.NewSession)
+            if (choice == MultiImageChoice.Cancel)
             {
                 return;
             }
 
-            _vm.StartNewSessionFrom(attachments!);
+            if (choice == MultiImageChoice.Reference)
+            {
+                // Copy: `attachments` is the live strip backing list, cleared below.
+                references = attachments!.ToArray();
+            }
+            else
+            {
+                _vm.StartNewSessionFrom(attachments!);
+                references = attachments!.Skip(1).ToArray();
+                if (references.Count > 0)
+                {
+                    // Must follow StartNewSessionFrom, which rebuilds / clears Messages.
+                    _vm.AddHint("图 2/3 作为参考图");
+                }
+            }
         }
-
-        if (attachments is { Count: > 1 })
+        else if (attachments is { Count: > 1 })
         {
-            _vm.AddHint("多图参考暂未实现，本次仅使用第一张");
+            // No root: PrepareAttachments already promoted the first attachment to the
+            // root, so the remaining attachments are references.
+            references = attachments.Skip(1).ToArray();
         }
 
         // Step 9C.6-D: the strip is consumed at send time — clear it now, before the
@@ -150,7 +170,7 @@ public partial class MainWindow
         var progress = new Progress<TaskProgress>(OnProgress);
         try
         {
-            await _vm.SubmitAsync(text, progress, _cts.Token);
+            await _vm.SubmitAsync(text, progress, _cts.Token, references);
         }
         catch (Exception ex)
         {

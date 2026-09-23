@@ -27,6 +27,7 @@ sys.path.insert(0, SERVER)
 import config  # noqa: E402
 import engine as engine_module  # noqa: E402
 import pipeline  # noqa: E402
+import resolution  # noqa: E402
 
 INPUT = os.path.join(HERE, "user_input_1024.png")
 OUTPUT = os.path.join(HERE, "user_output_oom_fallback.png")
@@ -51,7 +52,7 @@ def main():
     print("=== OOM fallback test (mode=%s) ===" % MODE)
     print("MAX_RESOLUTION=%d FORCE_OOM=%s FALLBACK=%s"
           % (config.MAX_RESOLUTION, config.FORCE_OOM, config.RESOLUTION_FALLBACK))
-    print("candidates =", pipeline._resolution_candidates())
+    print("candidates =", resolution._resolution_candidates())
 
     engine = engine_module.ModelEngine()
     t = time.time()

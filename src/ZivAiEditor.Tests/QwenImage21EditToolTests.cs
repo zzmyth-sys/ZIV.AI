@@ -121,6 +121,81 @@ public class QwenImage21EditToolTests
     }
 
     [Fact]
+    public async Task Execute_ReferenceImagePath_Becomes_First_AdditionalImage()
+    {
+        var client = new FakeInferenceClient();
+        var tool = new QwenImage21EditTool(client);
+        var input = new ToolInput
+        {
+            StepId = "s1",
+            MainImagePath = @"C:\img\main.png",
+            ReferenceImagePath = @"C:\img\ref.png",
+            Parameters = new Dictionary<string, string> { ["prompt"] = "x" },
+        };
+
+        await tool.ExecuteAsync(input);
+
+        Assert.Equal(new[] { @"C:\img\ref.png" }, client.LastRequest!.AdditionalImages);
+    }
+
+    [Fact]
+    public async Task Execute_AdditionalImages_Keep_Legacy_Then_Order()
+    {
+        var client = new FakeInferenceClient();
+        var tool = new QwenImage21EditTool(client);
+        var input = new ToolInput
+        {
+            StepId = "s1",
+            MainImagePath = @"C:\img\main.png",
+            ReferenceImagePath = @"C:\img\legacy.png",
+            AdditionalImages = new[] { @"C:\img\r1.png", @"C:\img\r2.png" },
+            Parameters = new Dictionary<string, string> { ["prompt"] = "x" },
+        };
+
+        await tool.ExecuteAsync(input);
+
+        Assert.Equal(
+            new[] { @"C:\img\legacy.png", @"C:\img\r1.png", @"C:\img\r2.png" },
+            client.LastRequest!.AdditionalImages);
+    }
+
+    [Fact]
+    public async Task Execute_AdditionalImages_Drop_Blanks()
+    {
+        var client = new FakeInferenceClient();
+        var tool = new QwenImage21EditTool(client);
+        var input = new ToolInput
+        {
+            StepId = "s1",
+            MainImagePath = @"C:\img\main.png",
+            ReferenceImagePath = "   ",
+            AdditionalImages = new[] { "", @"C:\img\r1.png", "  ", @"C:\img\r2.png" },
+            Parameters = new Dictionary<string, string> { ["prompt"] = "x" },
+        };
+
+        await tool.ExecuteAsync(input);
+
+        Assert.Equal(new[] { @"C:\img\r1.png", @"C:\img\r2.png" }, client.LastRequest!.AdditionalImages);
+    }
+
+    [Fact]
+    public async Task Execute_No_References_Produces_Empty_AdditionalImages()
+    {
+        var client = new FakeInferenceClient();
+        var tool = new QwenImage21EditTool(client);
+        var input = new ToolInput
+        {
+            StepId = "s1",
+            MainImagePath = @"C:\img\main.png",
+            Parameters = new Dictionary<string, string> { ["prompt"] = "x" },
+        };
+
+        await tool.ExecuteAsync(input);
+
+        Assert.Empty(client.LastRequest!.AdditionalImages);
+    }
+
+    [Fact]
     public async Task Execute_Reports_Progress()
     {
         var client = new FakeInferenceClient { ProgressFractions = new[] { 0.25, 0.75, 1.0 } };

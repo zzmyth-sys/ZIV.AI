@@ -136,6 +136,7 @@ public sealed class LlmPlanner : IPlanner
             SourcePrompt = request.Prompt ?? "",
             MainImagePath = request.MainImagePath,
             ReferenceImagePath = request.ReferenceImagePath,
+            AdditionalImages = request.AdditionalImages,
             Mask = request.Mask,
             Steps = steps,
         };

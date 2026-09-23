@@ -31,4 +31,13 @@ public class EditRequestTests
         Assert.Equal(EditOps.T2I, request.Op);
         Assert.Null(request.ImagePath);
     }
+
+    [Fact]
+    public void AdditionalImages_Defaults_To_Empty()
+    {
+        var request = new EditRequest();
+
+        Assert.NotNull(request.AdditionalImages);
+        Assert.Empty(request.AdditionalImages);
+    }
 }

@@ -52,6 +52,28 @@ public class SessionLoaderTests
     }
 
     [Fact]
+    public void Loads_Without_AdditionalImages_Field()
+    {
+        // R1 (Step 9C.5-D): reference images are never recorded, so an existing
+        // session.json (no additional_images field) must keep loading unchanged.
+        var dir = NewDir();
+        try
+        {
+            WriteImage(dir, "a.png");
+            var json = MakeFile("p", "a", Node("a", null, "a.png"));
+
+            var result = SessionLoader.LoadFromJson(json, dir);
+
+            Assert.Empty(result.Warnings);
+            Assert.Equal("a", Assert.Single(result.Session.GetHistory()).NodeId);
+        }
+        finally
+        {
+            Cleanup(dir);
+        }
+    }
+
+    [Fact]
     public void Version_Mismatch_Throws_Format()
     {
         var dir = NewDir();

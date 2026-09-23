@@ -3548,3 +3548,86 @@ N3（clamp-then-round）、N5（默认框面积缩放后居中）、N6（pending
 - 无契约变化（`CropSpec` 签名 / `session.json` 格式零变化）；未改 Contracts / python /
   chrome / ToolStateMachine 等；无新 NuGet。
 - `FROZEN.md` 尾部追加 9C.4-B-P2 修订说明（**不改已冻结行**）。
+
+---
+
+## [Step 9C.5-D] - 2026-09-24
+
+### 目标
+
+**多图编辑端到端**：附件第一张为主图、其余为参考图；用户 prompt 以 `<imageN>` 逐字引用
+（分词器自动插入标记，C# / Python 不解析）；三选一弹框启用「参考图」；管线最多 4 张（3 张参考）。
+流程：只读调查 → 用户裁决（D1–D7）→ light-rip（Large）。
+
+### 用户裁决（D1–D7）
+
+- **D1** = A+C：多附件首张为主图，其余为参考图；有 root 时三选一：`新会话` = 首张成新 root +
+  其余为参考图（提示「图 2/3 作为参考图」）；`参考图` = 当前节点管线图为主图、全部附件为参考图、
+  DAG 不重置；`取消` = 不发送。
+- **D2** = A：用户写 `<imageN>`，prompt 逐字透传；GPU 3 场景验证由用户执行（本步不跑 GPU）。
+- **D4** = 参考图最多 3 张（管线最多 4 张）；超限截断 + 提示，**不拒绝发送**。
+- **D5** = A：`EditRequest` / `PlanRequest` / `EditPlan` / `ToolInput` 追加 `AdditionalImages`；
+  `ReferenceImagePath` 保留。
+- **D6** = 参考图按各自纵横比 + 同一 `spec` 口径（`_target_size_from_spec`，同官方节点）。
+- **D7** = B：参考图不写入 `session.json`；缺字段 → 空（loader 不受影响）。
+
+### 前置复审（只读子代理）
+
+Approved，无 P0 / P1；R1–R5 澄清全部落实。
+
+### 做了什么
+
+- **Contracts（追加式）**：`EditRequest` / `PlanRequest` / `EditPlan` / `ToolInput` 新增
+  `IReadOnlyList<string> AdditionalImages { get; init; } = Array.Empty<string>()`；`EditRequest`
+  XML 文档补充多图 / `<imageN>` 说明。既有成员 / 签名零变化。
+- **Python**：新增 `multi_image.py`（纯 CPU：`normalize_additional_images` / `reference_paths`）；
+  `pipeline.py` 的 `run` → `_run_once` → `encode_prompt` → `_encode` 下传 `additional_images`，
+  参考图按各自纵横比 lanczos 缩放并同时追加到 `images_vl` / `references`（主图恒 `[0]`）；
+  `config.PROTOCOL_VERSION` 升 `0.8`；`handlers.py` 无变化（payload 透传）。
+- **Agent/Tools**：`Executor` 写 `ToolInput.AdditionalImages`；`FallbackPlanner` / `LlmPlanner`
+  写 `EditPlan.AdditionalImages`；`QwenImage21EditTool` 单点负责 R3 顺序（`ReferenceImagePath`
+  前置 + `AdditionalImages`，去空白）。
+- **Backend**：`SubmitPayload` 追加 `AdditionalImages`；`IpcSubmitMapper` 透传（snake_case
+  `additional_images`）。
+- **UI**：`SessionViewModel.SubmitAsync` 追加可选参数（截断到 3 + 超限提示 + 重建计划）；
+  `MainWindow.Send.cs` 按分支计算参考图并删除旧「暂未实现」提示；`MultiImagePromptDialog`
+  启用「参考图」按钮 + 点击返回 `Reference` + 移除禁用 tooltip。
+- **测试**：`EditRequestTests` / `IpcSubmitMapperTests` / `QwenImage21EditToolTests` /
+  `ExecutorTests` / `PlannerTests` / `SessionViewModelTests` / `SessionLoaderTests` /
+  `SessionStoreTests` 共 +15；新增 `python/server/test_multi_image.py`（9 例）。
+- **文档**：本段 + `FROZEN.md` 尾部 9C.5-D + `ACCEPTANCE.MD` Step 9C.5-D +
+  `INTERACTION.md` §10 + `contracts/ipc-protocol.md`（0.8）。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**，排除 `Ipc*` / `PlannerIntegration`）→ **285 通过 / 0 失败**；
+  另 `IpcSubmitMapperTests`（FQN 含 `Ipc`，被全量过滤器排除）单独跑 → **5 通过 / 0 失败**。
+- `python -m py_compile python/server/{multi_image,pipeline,config,resolution,handlers}.py` → 成功。
+- `python -m unittest test_multi_image`（`python/server`）→ **9 通过 / 0 失败**；`discover` → **20 通过**。
+- **未跑 GPU**（Z29 / Z30）。
+- **Z8**：改动 / 新增文件均 < 600 行；`pipeline.py` 由 685 行拆出纯分辨率助手 `resolution.py`
+  （`pipeline.py` 499 / `resolution.py` 206），符合 Z8。
+
+### 复审修订（2026-09-24）
+
+- **P1（Z8）**：后置复审发现 `pipeline.py` 685 行超 Z8；抽出纯分辨率助手（`_target_size` /
+  `_normalize_payload_resolution` / `_target_size_from_spec` / `_size_for_no_source` 等）到
+  `python/server/resolution.py`（无 torch/comfy 依赖），`pipeline.py` 降至 499 行；行为不变
+  （同名函数经 `from resolution import ...` 引入）。
+- **P2（证据）**：补跑 `IpcSubmitMapperTests`（5 通过），修正验收行计数。
+- **P2（稳健性）**：`CommandParser.ApplyResolution` 重建 `EditPlan` 时补拷 `AdditionalImages`；
+  `_encode` 在无主图（t2i）时忽略 `additional_images`（明确 op 语义）。
+
+### 遗留项
+
+- **GPU 3 场景验证**（`<image2>` / `<image3>` 引用）由用户执行（D2）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+- **`commands.json` 的 `mode` 字段**仍后置。
+
+### 备注
+
+- 未改 chrome / `ToolStateMachine` / `CompareState` / 裁切 / 分辨率选择器 / 项目列表 /
+  `C:\AI\ComfyUI_PIC`；无新 NuGet / Python 依赖。
+- `contracts/ipc-protocol.md` 头部 `ipc_version` 升 `0.8`，§3.4 追加 `additional_images`，
+  §7 追加 0.7 → 0.8 变更点。

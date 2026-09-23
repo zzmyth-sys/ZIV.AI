@@ -14,13 +14,13 @@ public enum MultiImageChoice
     /// <summary>Use the first attachment as a brand-new root, resetting the session DAG.</summary>
     NewSession = 1,
 
-    /// <summary>Use the attachment as a reference image (deferred to Step 9C.5-D; disabled).</summary>
+    /// <summary>Use the attachments as reference images, keeping the current node (Step 9C.5-D).</summary>
     Reference = 2,
 }
 
 /// <summary>
 /// Three-way prompt shown when a new image is attached to a session that already has a
-/// root (Step 9C.6-C): new session / reference image (disabled) / cancel.
+/// root (Step 9C.6-C): new session / reference image (Step 9C.5-D) / cancel.
 /// </summary>
 public partial class MultiImagePromptDialog : Window
 {
@@ -44,8 +44,7 @@ public partial class MultiImagePromptDialog : Window
 
         if (this.FindControl<Button>("PART_Reference") is { } reference)
         {
-            ToolTip.SetTip(reference, "多图编辑暂未实现");
-            ToolTip.SetShowOnDisabled(reference, true);
+            reference.Click += (_, _) => Close(MultiImageChoice.Reference);
         }
     }
 

@@ -15,7 +15,6 @@ never touches the heavy stack.
 
 import gc
 import logging
-import math
 import os
 import random
 import time
@@ -23,9 +22,17 @@ from datetime import datetime
 
 import config
 import model_loader
+import multi_image
 import outpaint
 import pipeline_hooks
 import preview as preview_module
+from resolution import (
+    _normalize_payload_resolution,
+    _resolution_specs,
+    _size_for_no_source,
+    _spec_label,
+    _target_size_from_spec,
+)
 
 _LOG = logging.getLogger("zivai.server")
 
@@ -54,6 +61,8 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
     prompt = request.get("prompt") or ""
     image_path = request.get("image_path")
     mask_path = request.get("mask_path")
+    # Step 9C.5-D: optional ordered reference images after the main image.
+    additional_images = request.get("additional_images")
     denoise = _resolve_denoise(request.get("denoise"))
     output_path = _resolve_output_path(request.get("output_path"), image_path)
 
@@ -75,6 +84,7 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
                 model, clip, vae, prompt, image_path, mask_path, output_path,
                 spec, steps, seed, denoise, started,
                 on_progress, on_preview, poll_cancel, mask_binary,
+                additional_images=additional_images,
             )
         except oom_types as exc:
             last_error = exc
@@ -144,7 +154,8 @@ def _remove_tree(path):
 
 def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
               spec, steps, seed, denoise, started,
-              on_progress, on_preview, poll_cancel, mask_binary=True):
+              on_progress, on_preview, poll_cancel, mask_binary=True,
+              additional_images=None):
     import comfy.model_management as mm
     import comfy.sample
     from comfy_extras.nodes_model_advanced import ModelSamplingAuraFlow
@@ -155,7 +166,8 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
 
     # Stage 2: encode the prompt + optional reference image (clip is patched).
     positive, negative, latent_image, mask = encode_prompt(
-        clip, vae, prompt, image_path, mask_path, spec=spec, mask_binary=mask_binary
+        clip, vae, prompt, image_path, mask_path, spec=spec, mask_binary=mask_binary,
+        additional_images=additional_images,
     )
 
     previewer = preview_module.get_previewer(model)
@@ -208,14 +220,18 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
 
 
 def encode_prompt(clip, vae, prompt, image_path, mask_path, resolution=None, mode=None, spec=None,
-                  mask_binary=True):
+                  mask_binary=True, additional_images=None):
     """Pipeline stage: conditioning + latents from the prompt / reference.
 
     ``spec`` (Step 6.5) is a normalized resolution dict; when omitted the legacy
     ``resolution`` / ``mode`` arguments are used (backward compatible).
     ``mask_binary`` is passed through to ``_encode`` (outpaint uses a soft mask).
+    ``additional_images`` (Step 9C.5-D) are the ordered reference images after the main.
     """
-    return _encode(clip, vae, prompt, image_path, mask_path, resolution, mode, spec, mask_binary)
+    return _encode(
+        clip, vae, prompt, image_path, mask_path, resolution, mode, spec, mask_binary,
+        additional_images=additional_images,
+    )
 
 
 def sample(model, positive, negative, latent, noise, steps, denoise, mask, seed, callback):
@@ -254,199 +270,6 @@ def save_png(image, output_path):
     """Pipeline stage: write the output as a new PNG file (Z24)."""
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     image.save(output_path)
-
-
-def _target_size(width, height, value, mode):
-    """Map an input size to (target_width, target_height) for a resolution mode.
-
-    ``side`` keeps the aspect ratio and makes the long edge equal ``value``;
-    ``area`` keeps the aspect ratio and makes the pixel area equal ``value**2``
-    (the Step 4 formula). Both snap to a multiple of 32 (min 32).
-    """
-    ratio = width / height
-    if mode == "side":
-        if ratio >= 1:
-            target_w, target_h = value, value / ratio
-        else:
-            target_w, target_h = value * ratio, value
-    else:
-        target_w = (value * value * ratio) ** 0.5
-        target_h = (value * value / ratio) ** 0.5
-    width = max(32, round(target_w / 32) * 32)
-    height = max(32, round(target_h / 32) * 32)
-    return width, height
-
-
-def _resolution_candidates(mode=None):
-    if mode is None:
-        mode = config.RESOLUTION_MODE
-    if mode == "side":
-        upper = int(config.RESOLUTION_SIDE)
-        values = [upper] + [int(v) for v in config.RESOLUTION_SIDE_FALLBACK]
-    else:
-        upper = int(config.MAX_RESOLUTION)
-        values = [upper] + [int(v) for v in config.RESOLUTION_FALLBACK]
-    seen = set()
-    ordered = []
-    for value in values:
-        if value > 0 and value <= upper and value not in seen:
-            seen.add(value)
-            ordered.append(value)
-    return ordered or [upper]
-
-
-def _resolution_specs(request, image_path):
-    """Normalized resolution candidates for one run (Step 6.5).
-
-    A payload ``resolution`` wins and yields a single spec; otherwise the config
-    default path yields its OOM fallback ladder (backward compatible).
-    """
-    spec = _normalize_payload_resolution(request.get("resolution"), image_path)
-    if spec is not None:
-        return [spec]
-    mode = config.RESOLUTION_MODE
-    return [{"mode": mode, "value": int(v)} for v in _resolution_candidates(mode)]
-
-
-def _normalize_payload_resolution(payload, image_path):
-    """Turn ``submit.payload.resolution`` into a spec, or None to use the default.
-
-    Supported modes: ``side`` / ``area`` / ``scale`` (input long edge × scale) /
-    ``explicit`` (width × height). Values above ``max_pixels`` are clamped.
-    """
-    if not isinstance(payload, dict):
-        return None
-
-    mode = str(payload.get("mode") or "").strip().lower()
-    max_pixels = _positive_int(payload.get("max_pixels"))
-
-    if mode == "side":
-        side = _positive_int(payload.get("side"))
-        if side is None:
-            return None
-        return {"mode": "side", "value": _clamp_side(side, max_pixels)}
-
-    if mode == "area":
-        area = _positive_int(payload.get("area"))
-        if area is None:
-            return None
-        return {"mode": "area", "value": _clamp_area(area, max_pixels)}
-
-    if mode == "scale":
-        try:
-            scale = float(payload.get("scale"))
-        except (TypeError, ValueError):
-            return None
-        if scale <= 0:
-            return None
-        source_side = _source_long_edge(image_path)
-        if source_side is None:
-            _LOG.warning("resolution scale requested but input size is unknown; using default")
-            return None
-        side = _clamp_side(int(round(source_side * scale)), max_pixels)
-        _LOG.info("resolution scale=%.3f on source long edge %d -> side=%d", scale, source_side, side)
-        return {"mode": "side", "value": side}
-
-    if mode == "explicit":
-        width = _positive_int(payload.get("width"))
-        height = _positive_int(payload.get("height"))
-        if width is None or height is None:
-            return None
-        width, height = _clamp_explicit(width, height, max_pixels)
-        return {"mode": "explicit", "width": width, "height": height}
-
-    if mode:
-        _LOG.warning("unknown resolution mode %r; using config default", mode)
-    return None
-
-
-def _positive_int(value):
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        return None
-    return number if number > 0 else None
-
-
-def _clamp_side(side, max_pixels):
-    side = max(32, int(side))
-    if max_pixels:
-        limit = max(32, int(math.isqrt(int(max_pixels))))
-        if side > limit:
-            _LOG.warning(
-                "resolution side %d exceeds max_pixels %d; clamped to %d",
-                side, max_pixels, limit,
-            )
-            side = limit
-    return side
-
-
-def _clamp_area(area, max_pixels):
-    area = max(32 * 32, int(area))
-    if max_pixels and area > max_pixels:
-        _LOG.warning("resolution area %d exceeds max_pixels %d; clamped", area, max_pixels)
-        area = int(max_pixels)
-    return area
-
-
-def _clamp_explicit(width, height, max_pixels):
-    width = max(32, int(width))
-    height = max(32, int(height))
-    if max_pixels and width * height > max_pixels:
-        factor = (float(max_pixels) / float(width * height)) ** 0.5
-        clamped_w = max(32, int(width * factor))
-        clamped_h = max(32, int(height * factor))
-        _LOG.warning(
-            "resolution %dx%d exceeds max_pixels %d; clamped to %dx%d",
-            width, height, max_pixels, clamped_w, clamped_h,
-        )
-        width, height = clamped_w, clamped_h
-    return width, height
-
-
-def _source_long_edge(path):
-    if not path:
-        return None
-    try:
-        from PIL import Image
-
-        with Image.open(path) as image:
-            return max(image.size)
-    except Exception:
-        return None
-
-
-def _snap16(value):
-    return max(32, int(value) // 16 * 16)
-
-
-def _target_size_from_spec(width, height, spec):
-    """Map a source size to a target size for a normalized resolution spec."""
-    mode = spec.get("mode")
-    if mode == "explicit":
-        return _snap16(spec.get("width")), _snap16(spec.get("height"))
-    value = int(spec.get("value"))
-    return _target_size(width, height, value, "area" if mode == "area" else "side")
-
-
-def _size_for_no_source(spec):
-    """Target (width, height) when there is no source image (t2i)."""
-    mode = spec.get("mode")
-    if mode == "explicit":
-        return _snap16(spec.get("width")), _snap16(spec.get("height"))
-    value = int(spec.get("value"))
-    if mode == "area":
-        side = max(32, round((value ** 0.5) / 32) * 32)
-    else:
-        side = max(32, round(value / 32) * 32)
-    return side, side
-
-
-def _spec_label(spec):
-    mode = spec.get("mode")
-    if mode == "explicit":
-        return "%dx%d" % (int(spec.get("width")), int(spec.get("height")))
-    return "%s:%s" % (mode, spec.get("value"))
 
 
 def _oom_types():
@@ -488,7 +311,7 @@ def _free_vram():
 
 
 def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None, spec=None,
-            mask_binary=True):
+            mask_binary=True, additional_images=None):
     """Encode prompt + optional source image into conditioning / latents.
 
     Returns ``(positive, negative, latent_samples, denoise_mask)``. With a mask
@@ -498,6 +321,9 @@ def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None, spe
     ``spec`` (Step 6.5) is a normalized dict ``{"mode": "side"|"area"|"explicit",
     "value": int}`` (or ``{"mode": "explicit", "width", "height"}``); when it is
     omitted, the legacy ``resolution`` / ``mode`` arguments are used.
+
+    ``additional_images`` (Step 9C.5-D) are the ordered reference images after the
+    main image; the first pipeline image stays the main (``<image1>``).
     """
     import comfy.model_management as mm
     import comfy.utils
@@ -510,7 +336,12 @@ def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None, spe
         default_resolution = config.RESOLUTION_SIDE if mode == "side" else config.MAX_RESOLUTION
         spec = {"mode": mode, "value": int(resolution or default_resolution)}
 
-    source = _load_image_tensor(image_path) if image_path else None
+    # Step 9C.5-D: main first, then references. `reference_paths` owns the ordering
+    # rule ([main] + extras) so the payload order is defined in exactly one place.
+    extras = multi_image.normalize_additional_images(additional_images)
+    # t2i has no source image, so references only apply when a main image exists.
+    ordered_paths = multi_image.reference_paths(image_path, extras) if image_path else []
+    source = _load_image_tensor(ordered_paths[0]) if ordered_paths else None
     mask = _load_mask_tensor(mask_path, binary=mask_binary) if mask_path else None
 
     references = []
@@ -526,6 +357,24 @@ def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None, spe
             ).movedim(1, -1)
         images_vl.append(resized[:, :, :, :3])
         references.append(vae.encode(resized))
+
+    # Additional references (Step 9C.5-D): each is resized with the same per-image
+    # aspect / spec policy as the main image (official-node interpretation, D6) and
+    # appended to both the vision list and the reference latents. Main stays [0].
+    for extra_path in ordered_paths[1:]:
+        extra = _load_image_tensor(extra_path)
+        extra_samples = extra[:1].movedim(-1, 1)  # [1,3,H,W]
+        width, height = _target_size_from_spec(
+            extra_samples.shape[3], extra_samples.shape[2], spec
+        )
+        if (width, height) == (extra_samples.shape[3], extra_samples.shape[2]):
+            extra_resized = extra[:1]
+        else:
+            extra_resized = comfy.utils.common_upscale(
+                extra_samples, width, height, "lanczos", "disabled"
+            ).movedim(1, -1)
+        images_vl.append(extra_resized[:, :, :, :3])
+        references.append(vae.encode(extra_resized))
 
     keep_vision = len(references) == 0
     positive = clip.encode_from_tokens_scheduled(

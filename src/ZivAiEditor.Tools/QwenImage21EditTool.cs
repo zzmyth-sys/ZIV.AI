@@ -91,6 +91,9 @@ public sealed class QwenImage21EditTool : IEditTool
             Denoise = GetDouble(parameters, "denoise", double.Parse(DefaultDenoise, CultureInfo.InvariantCulture)),
             OutputPath = outputPath,
             Resolution = input.Resolution,
+            // R3 (Step 9C.5-D): the legacy reference slot is image2, followed by the
+            // ordered additional references. Single owner of that ordering.
+            AdditionalImages = BuildAdditionalImages(input.ReferenceImagePath, input.AdditionalImages),
         };
 
         var stepProgress = progress is null
@@ -126,6 +129,32 @@ public sealed class QwenImage21EditTool : IEditTool
         {
             return Failure(input.StepId, ex.Message, started.Elapsed);
         }
+    }
+
+    /// <summary>
+    /// Ordered reference images for the request (Step 9C.5-D): the legacy
+    /// <see cref="ToolInput.ReferenceImagePath"/> (image2) first, then
+    /// <see cref="ToolInput.AdditionalImages"/>; blank entries are dropped.
+    /// </summary>
+    private static IReadOnlyList<string> BuildAdditionalImages(
+        string? referenceImagePath,
+        IReadOnlyList<string> additionalImages)
+    {
+        var images = new List<string>();
+        if (!string.IsNullOrWhiteSpace(referenceImagePath))
+        {
+            images.Add(referenceImagePath);
+        }
+
+        foreach (var path in additionalImages ?? Array.Empty<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                images.Add(path);
+            }
+        }
+
+        return images;
     }
 
     private static ToolResult Failure(string stepId, string message, TimeSpan duration)

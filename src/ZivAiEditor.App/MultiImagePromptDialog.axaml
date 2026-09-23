@@ -25,7 +25,7 @@
                  Text="当前会话已有起始图像。新图片如何使用？" />
       <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
         <Button x:Name="PART_Cancel" Content="取消" MinWidth="80" Height="32" />
-        <Button x:Name="PART_Reference" Content="参考图" MinWidth="80" Height="32" IsEnabled="False" />
+        <Button x:Name="PART_Reference" Content="参考图" MinWidth="80" Height="32" />
         <Button x:Name="PART_NewSession" Content="新会话" MinWidth="80" Height="32"
                 Background="#3A6DF0" Foreground="White" />
       </StackPanel>

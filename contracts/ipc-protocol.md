@@ -1,7 +1,7 @@
 # ZIV.AI IPC 传输契约（IPC Protocol）
 
-- 文档状态：**Step 2 冻结**（2026-09-21）；**修订至 ipc_version 0.7**（Step 7 修订后）
-- **ipc_version：`0.7`**
+- 文档状态：**Step 2 冻结**（2026-09-21）；**修订至 ipc_version 0.8**（Step 9C.5-D 修订后）
+- **ipc_version：`0.8`**
 - 用途：定义 C# 前端（`ZivAiEditor.App` / `ZivAiEditor.Backend`）与 Python 推理进程之间的
   **跨进程传输契约**。取代 Step 1 的「OpenAPI 作为跨进程唯一契约」定位（见 `FROZEN.md` Step 2）。
 - 依据：`_test_step2/REPORT.md`（11 项实测）。
@@ -69,6 +69,18 @@
 >   `InpaintRequest` / `SubmitInpaintAsync` 保持不变，作为 inpaint-only 兼容入口。
 > - 属**向后兼容的协议扩展**：`op` 缺省仍视为 `inpaint`，`image_path` / `anchor` 可选，
 >   旧端忽略即可；`config.PROTOCOL_VERSION` 同步升 `0.7`。
+
+> **修订记录（ipc_version 0.7 → 0.8，2026-09-24 · Step 9C.5-D 修订后）**
+>
+> - **`submit.payload` 新增可选字段 `additional_images`**（§3.4）：主图（`image_path`）
+>   之后的**有序参考图路径列表**；缺省 / `null` / `[]` 表示无参考图。
+> - 位置即编号：主图 = `<image1>`，`additional_images[0]` = `<image2>`，依此类推；
+>   用户 prompt 以 `<imageN>` 逐字引用（分词器自动插入标记，C# / Python 不做解析）。
+> - **C# 侧契约**：`EditRequest` / `PlanRequest` / `EditPlan` / `ToolInput` 新增
+>   `IReadOnlyList<string> AdditionalImages`（**追加式**，既有成员 / 签名不变）；
+>   `ReferenceImagePath` 保持（`QW21edit` 将其作为 image2 前置，见 R3）。
+> - 属**向后兼容的协议扩展**：新字段可选，旧端忽略即可，缺省行为与 0.7 完全一致；
+>   `config.PROTOCOL_VERSION` 同步升 `0.8`。
 
 ---
 
@@ -164,7 +176,8 @@
   "lora": null,
   "optimizations": null,
   "resolution": null,
-  "anchor": null
+  "anchor": null,
+  "additional_images": []
 }
 ```
 
@@ -226,6 +239,26 @@
 - `outpaint` 的目标尺寸由 `resolution`（`mode="explicit"`）给出；后端据此创建画布，
   把原图按 `anchor` 贴入，并生成覆盖新区域的二值 mask，复用 inpaint 采样路径。
 - **向后兼容**：字段缺失或 `null` 时行为与 **0.6 完全一致**（无 outpaint 调用）。
+
+**可选字段（Step 9C.5-D / ipc_version 0.8）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `additional_images` | string[] \| null | 主图（`image_path`）之后的**有序参考图路径列表**；缺省 / `null` / `[]` = 无参考图。 |
+
+```json
+{
+  "image_path": "C:\\path\\main.png",
+  "additional_images": ["C:\\path\\ref1.png", "C:\\path\\ref2.png"]
+}
+```
+
+- **位置即编号**：主图 = `<image1>`，`additional_images[0]` = `<image2>`，
+  `additional_images[1]` = `<image3>`，依此类推（上限 3 张参考图 → 管线最多 4 张）。
+- 用户 prompt 以 `<imageN>` **逐字引用**；分词器自动插入标记，C# / Python **不解析**。
+- 每张参考图按**各自纵横比**与主图**同一 `resolution` 口径**缩放到 16 的倍数后编码，
+  与官方节点的多图行为一致（见 `FROZEN.md` Step 9C.5-D / D6）。
+- **向后兼容**：字段缺失或 `null` / `[]` 时行为与 **0.7 完全一致**（仅主图）。
 
 ### 3.5 `preview` 二进制帧（`0x02`）
 
@@ -289,7 +322,7 @@ C#(server)                                              Python(client)
 
 ## 7. 版本与兼容
 
-- **`ipc_version`：`0.7`**（管道名 `\\.\pipe\zivai.infer.v1` 为**通道版本**，与协议版本独立）。
+- **`ipc_version`：`0.8`**（管道名 `\\.\pipe\zivai.infer.v1` 为**通道版本**，与协议版本独立）。
   `ipc_version 0.1` 为**追溯设定**（原文档无版本字段）。
 - **0.1 → 0.2 变更点**：
   1. **管道方向**：`Python=server / C#=client` → `C#=Server / Python=Client`（C# 掌控 Python 生命周期，启动无竞态）。
@@ -320,6 +353,11 @@ C#(server)                                              Python(client)
   2. **`image_path` 改为可选**：`op="t2i"` 时 `null`，后端走无源图路径。
   3. **`submit.payload` 新增可选字段 `anchor`**（§3.4）：`outpaint` 的原图 9 宫格位置。
      **向后兼容**：字段可选，缺省行为与 0.6 一致；`config.PROTOCOL_VERSION` 同步升 `0.7`。
+- **0.7 → 0.8 变更点**（Step 9C.5-D）：
+  1. **`submit.payload` 新增可选字段 `additional_images`**（§3.4）：主图之后的有序参考图
+     路径列表（位置即 `<imageN>` 编号）。C# 契约 `EditRequest` / `PlanRequest` / `EditPlan` /
+     `ToolInput` 追加 `AdditionalImages`（既有成员 / 签名不变）。**向后兼容**：字段可选，
+     缺省行为与 0.7 一致；`config.PROTOCOL_VERSION` 同步升 `0.8`。
 - 协议变更时升 `ipc_version`（必要时同时升管道名 `v2`），旧前端可并存。
 - `openapi.yaml` 保留为 **Schema 参考**（`ImageEditRequest` / `TaskAccepted` /
   `TaskStatusResponse` 等结构即本协议 payload 的形状来源）。

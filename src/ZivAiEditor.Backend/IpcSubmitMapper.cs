@@ -27,7 +27,8 @@ internal static class IpcSubmitMapper
                 Lora: request.Lora,
                 Optimizations: request.Optimizations,
                 Resolution: MapResolution(request.Resolution),
-                Anchor: request.Anchor));
+                Anchor: request.Anchor,
+                AdditionalImages: request.AdditionalImages));
 
     /// <summary>Maps the contract <see cref="ResolutionPolicy"/> onto the IPC payload (snake_case).</summary>
     private static ResolutionPayload? MapResolution(ResolutionPolicy? policy)

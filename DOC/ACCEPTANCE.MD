@@ -1927,3 +1927,54 @@ V4（App 装配统一）、#6（删死状态写入）、#7（导入事件命名�
 1. 追加 `DEVLOG.md` 的 Step 9C.4-B 记录（本步已完成）
 2. 在「验收记录」追加"Step 9C.4-B 通过，日期：____"（待签）
 3. 进入后续 Step（outpaint 精确对齐 / 9C.5-D 多图管线 / 另存为入口 等，由用户决定）
+
+---
+
+## Step 9C.5-D 验收：多图编辑端到端（主图 + 参考图 + `<imageN>`）
+
+**目标**：附件第一张为主图、其余为参考图；用户 prompt 以 `<imageN>` 逐字引用；三选一弹框启用
+「参考图」；管线最多 4 张（3 张参考）。范围外：GPU 3 场景验证（Z29 / Z30，由用户执行）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release --no-incremental` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 仅追加契约字段；无新增项目引用、无反向 / 循环依赖 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `AdditionalImages` 为**追加式**；`ReferenceImagePath` / 既有签名零变化 | ✅ |
+| G4 | 未授权修改检查 | 无既有冻结签名被改；追加已在 `FROZEN` 9C.5-D 记录 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `FROZEN` / `INTERACTION` / `ipc-protocol` 追加 9C.5-D | ✅ |
+| G6 | 便携性未破 | 未改输出落盘路径；`session.json` 格式零变化（参考图不落盘） | ✅ |
+| G7 | AI 推理进程隔离未破 | 多图编码仍在 Python 管线内（Z17）；未新增 C# → GPU 直连 | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.5D.1 | 契约追加 | `EditRequestTests` | `AdditionalImages` 默认空 | ✅ |
+| 9C.5D.2 | 契约透传（Planner） | `PlannerTests` | `PlanRequest` → `EditPlan`（Fallback + LLM） | ✅ |
+| 9C.5D.3 | 契约透传（Executor） | `ExecutorTests` | `plan.AdditionalImages` → `ToolInput` | ✅ |
+| 9C.5D.4 | R3 顺序（legacy → extras） | `QwenImage21EditToolTests` | `ReferenceImagePath` 前置；去空白；保序 | ✅ |
+| 9C.5D.5 | R4 IPC 映射 | `IpcSubmitMapperTests` | `additional_images` 按序写入 | ✅ |
+| 9C.5D.6 | R2 Python 纯 CPU | `python/server/test_multi_image.py` | `normalize_*` / `reference_paths` 9 通过 | ✅ |
+| 9C.5D.7 | D4 截断 + 提示 | `SessionViewModelTests` | 超 3 张截断到 3 + 用户消息后提示 | ✅ |
+| 9C.5D.8 | R5 参考图选项 | 查 `MultiImagePromptDialog` | 按钮启用 + 返回 `Reference`；无「暂未实现」tooltip | ✅ |
+| 9C.5D.9 | R1 会话兼容 | `SessionLoaderTests` / `SessionStoreTests` | 无字段仍加载；保存不写参考图（D7） | ✅ |
+| 9C.5D.10 | 主图优先 | 查 `pipeline._encode` | 主图 = `references[0]`；参考图按各自纵横比 | ✅ |
+| 9C.5D.11 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；非 GPU 285 通过 + `IpcSubmitMapperTests` 5 通过（FQN 含 `Ipc`，被全量过滤器排除，单独跑）；Python 9 通过 | ✅ |
+| 9C.5D.12 | Z8 行数 | 查改动文件 | 均 < 600 行（`pipeline.py` 拆出 `resolution.py`：499 / 206） | ✅ |
+| 9C.5D.13 | 无 GPU 负载 | 测试 / 构建过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.5D.14 | GPU 3 场景 | 用户执行 | `<image2>` / `<image3>` 引用生效 | ⏳ 待用户确认 |
+| 9C.5D.15 | 真机三选一 | 用户执行 | 「参考图」保留 DAG、全部附件为参考图 | ⏳ 待用户确认 |
+
+### Step 9C.5-D 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.5D.1–9C.5D.13 全过；9C.5D.14 / 9C.5D.15 由用户真机确认。
+
+### Step 9C.5-D 遗留说明（非阻断）
+
+- **GPU 3 场景验证**（`<image2>` / `<image3>` 引用）由用户执行（D2）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+- **`commands.json` 的 `mode` 字段**仍后置。

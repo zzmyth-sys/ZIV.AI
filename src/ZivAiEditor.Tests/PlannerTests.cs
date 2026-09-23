@@ -153,6 +153,38 @@ public class PlannerTests
     }
 
     [Fact]
+    public async Task FallbackPlanner_Carries_AdditionalImages()
+    {
+        var request = new PlanRequest
+        {
+            MainImagePath = @"C:\img\main.png",
+            Prompt = "use <image2> and <image3>",
+            AdditionalImages = new[] { @"C:\img\r1.png", @"C:\img\r2.png" },
+        };
+
+        var plan = await new FallbackPlanner().PlanAsync(request);
+
+        Assert.Equal(new[] { @"C:\img\r1.png", @"C:\img\r2.png" }, plan.AdditionalImages);
+    }
+
+    [Fact]
+    public async Task LlmPlanner_Carries_AdditionalImages()
+    {
+        const string json = "{\"steps\":[{\"tool\":\"QW21edit\",\"params\":{\"prompt\":\"use <image2>\"}}]}";
+        var planner = new LlmPlanner(new FakeLlmClient(json), new EmptyToolRegistry());
+        var request = new PlanRequest
+        {
+            MainImagePath = @"C:\img\main.png",
+            Prompt = "use <image2>",
+            AdditionalImages = new[] { @"C:\img\r1.png" },
+        };
+
+        var plan = await planner.PlanAsync(request);
+
+        Assert.Equal(new[] { @"C:\img\r1.png" }, plan.AdditionalImages);
+    }
+
+    [Fact]
     public async Task ResilientPlanner_Degrades_To_Fallback_On_Llm_Failure()
     {
         var degraded = new List<Exception>();

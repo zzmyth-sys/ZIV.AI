@@ -163,6 +163,7 @@ public sealed class CommandParser : ICommandParser
                 SourcePrompt = plan.SourcePrompt,
                 MainImagePath = plan.MainImagePath,
                 ReferenceImagePath = plan.ReferenceImagePath,
+                AdditionalImages = plan.AdditionalImages,
                 Mask = plan.Mask,
                 Steps = plan.Steps,
                 CreatedAt = plan.CreatedAt,

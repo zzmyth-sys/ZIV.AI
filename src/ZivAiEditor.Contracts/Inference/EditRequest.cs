@@ -24,6 +24,12 @@ using ZivAiEditor.Contracts.Imaging;
 /// source placement (9-grid, see <see cref="Anchor"/>); <see cref="Resolution"/> should
 /// be <see cref="ResolutionMode.Explicit"/> to give the target canvas size.</description></item>
 /// </list>
+///
+/// <para><b>Multi-image editing</b> (Step 9C.5-D): the first image (<see cref="ImagePath"/>)
+/// is the main image; <see cref="AdditionalImages"/> carries optional reference images.
+/// The user prompt references them positionally with the <c>&lt;imageN&gt;</c> token
+/// (<c>&lt;image1&gt;</c> = main, <c>&lt;image2&gt;</c> = first additional, ...). The tokenizer
+/// inserts those markers automatically; the prompt itself passes through verbatim.</para>
 /// </summary>
 public sealed class EditRequest
 {
@@ -64,4 +70,10 @@ public sealed class EditRequest
     /// unrecognized value also degrades to <c>center</c> on the backend.
     /// </summary>
     public string? Anchor { get; init; }
+
+    /// <summary>
+    /// Ordered reference images (Step 9C.5-D) after the main image; the backend encodes
+    /// them as additional <c>&lt;imageN&gt;</c> inputs. Empty = no references.
+    /// </summary>
+    public IReadOnlyList<string> AdditionalImages { get; init; } = Array.Empty<string>();
 }

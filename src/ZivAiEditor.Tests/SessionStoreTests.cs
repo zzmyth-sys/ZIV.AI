@@ -129,6 +129,33 @@ public class SessionStoreTests
     }
 
     [Fact]
+    public async Task Save_Does_Not_Record_Additional_Images()
+    {
+        // D7 (Step 9C.5-D): reference images are a per-request concern and must not
+        // leak into session.json.
+        var root = NewRoot();
+        var source = NewRoot();
+
+        try
+        {
+            var store = new SessionStore(root);
+            var session = new EditSession();
+            session.SetRoot(WriteFile(source, "root.png"));
+
+            await store.SaveAsync(session, "p");
+
+            var json = await File.ReadAllTextAsync(
+                Path.Combine(store.GetProjectDirectory(session.SessionId), "session.json"));
+            Assert.DoesNotContain("additional_images", json);
+        }
+        finally
+        {
+            Cleanup(root);
+            Cleanup(source);
+        }
+    }
+
+    [Fact]
     public async Task List_Returns_Saved_Projects_Newest_First()
     {
         var root = NewRoot();

@@ -64,4 +64,33 @@ public class IpcSubmitMapperTests
         Assert.Equal(1536, request.Payload.Resolution.Height);
         Assert.Equal(4_700_000, request.Payload.Resolution.MaxPixels);
     }
+
+    [Fact]
+    public void AdditionalImages_Map_In_Order()
+    {
+        var request = IpcSubmitMapper.BuildSubmitRequest(
+            "r",
+            "t",
+            new EditRequest
+            {
+                Op = EditOps.Inpaint,
+                ImagePath = "main.png",
+                Prompt = "use <image2> and <image3>",
+                AdditionalImages = new[] { "ref1.png", "ref2.png" },
+            });
+
+        Assert.Equal(new[] { "ref1.png", "ref2.png" }, request.Payload.AdditionalImages);
+    }
+
+    [Fact]
+    public void AdditionalImages_Default_To_Empty()
+    {
+        var request = IpcSubmitMapper.BuildSubmitRequest(
+            "r",
+            "t",
+            new EditRequest { Op = EditOps.Inpaint, ImagePath = "main.png", Prompt = "x" });
+
+        Assert.NotNull(request.Payload.AdditionalImages);
+        Assert.Empty(request.Payload.AdditionalImages);
+    }
 }

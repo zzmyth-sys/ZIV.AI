@@ -2394,3 +2394,75 @@ Agent 编排，应下沉至 Agent；涉及 `IExecutor` 设计变更，单独立�
   **外扩**画布；`CropSpec` 签名 / `session.json` 格式零变化。
 - **测试**：`CropStateTests` 新增 `SetRect_Inner_Crop_Not_Capped_By_Pixels` /
   `SetDefaultRect_Not_Capped_For_Large_Source`；`dotnet build` 0/0；非 GPU 全量 **272 通过 / 0 失败**。
+
+---
+
+## Step 9C.5-D（日期：2026-09-24）
+
+> **修订说明（Step 9C.5-D · 多图编辑端到端：主图 + 参考图 + `<imageN>`）**
+>
+> 本段为 Step 9C.5-D **只增**记录。目标：附件第一张为主图、其余为参考图；用户 prompt 以
+> `<imageN>` 逐字引用（分词器自动插入标记，C# / Python **不解析**）。**不改动 Step 0–9C.6-E /
+> 9C.4-B 已冻结行**；本段为**纯追加**。契约改动均为**追加式**（既有成员 / 签名零变化）。
+
+### 9C.5-D.1 `AdditionalImages` 契约（冻结 · 追加 → 非破坏）
+
+| 类型 | 文件 | 追加成员 |
+|---|---|---|
+| `EditRequest` | `ZivAiEditor.Contracts/Inference/EditRequest.cs` | `IReadOnlyList<string> AdditionalImages { get; init; } = Array.Empty<string>()` |
+| `PlanRequest` | `ZivAiEditor.Contracts/Planning/PlanRequest.cs` | 同上 |
+| `EditPlan` | `ZivAiEditor.Contracts/Planning/EditPlan.cs` | 同上 |
+| `ToolInput` | `ZivAiEditor.Contracts/Tools/ToolInput.cs` | 同上 |
+
+- **位置即编号**：`ImagePath` / `MainImagePath` = `<image1>`，`AdditionalImages[0]` = `<image2>`，
+  依此类推。`ReferenceImagePath` **保留**（`QW21edit` 视为 image2 前置，见 R3）。
+- 既有成员 / 签名**零变化**；`AdditionalImages` 默认空列表（**永不 null**；`[]` 序列化无害）。
+
+### 9C.5-D.2 IPC payload（冻结 · ipc_version 0.8）
+
+- `submit.payload` 新增可选字段 `additional_images`（`string[] | null`）：主图之后的**有序
+  参考图路径**；缺省 / `null` / `[]` = 无参考图。`config.PROTOCOL_VERSION` 升 **`0.8`**。
+- `IpcSubmitMapper` 按 `EditRequest.AdditionalImages` 顺序写入 `SubmitPayload.AdditionalImages`。
+- **向后兼容**：旧端忽略该字段；缺省行为与 0.7 一致。详见 `contracts/ipc-protocol.md` §3.4 / §7。
+
+### 9C.5-D.3 管线（冻结 · Python）
+
+- 新增 `python/server/multi_image.py`（纯 CPU，无 torch / comfy 导入）：
+  `normalize_additional_images(value)`（None / 非列表 → `[]`；去空白；保序）与
+  `reference_paths(main_path, additional_images)`（`[main] + extras`，main 优先）。
+- `pipeline.run` 读取 `request["additional_images"]`，经 `_run_once` → `encode_prompt` → `_encode`
+  下传；`_encode` 主图处理**不变**，随后对每张参考图按**各自纵横比 + 同一 `spec` 口径**
+  （`_target_size_from_spec(extra_w, extra_h, spec)`，D6 解释）lanczos 缩放，同一张量同时追加到
+  `images_vl`（`[:, :, :, :3]`）与 `references`（`vae.encode`）。主图恒为 `references[0]`。
+
+### 9C.5-D.4 UI 行为（冻结 · 非契约）
+
+- `SessionViewModel.SubmitAsync` 追加可选参数 `IReadOnlyList<string>? additionalImages = null`
+  （具体类，非破坏）：解析成功后、执行前**截断到 3 张**参考图（D4：管线最多 4 张），超限
+  追加 `AddHint`（在用户消息之后），再以 `AdditionalImages` 重建计划（镜像
+  `CommandParser.ApplyResolution`；`ICommandParser` 签名零变化）。
+- `MainWindow.Send.SubmitAsync` 分支：无 root + 附件 → 首张成 root，其余为参考图；
+  有 root + `新会话` → 首张成新 root，其余为参考图 + 提示「图 2/3 作为参考图」（在
+  `StartNewSessionFrom` 之后）；有 root + `参考图` → **不重置 DAG**，主图 = 当前节点管线图，
+  **全部**附件为参考图；`取消` → 不发送。**删除**旧提示「多图参考暂未实现，本次仅使用第一张」。
+- `MultiImagePromptDialog` 启用 `参考图` 按钮（移除 `IsEnabled="False"` 与「多图编辑暂未实现」
+  tooltip），点击关闭为 `MultiImageChoice.Reference`。
+
+### 9C.5-D.5 会话持久化（冻结 · D7 = B）
+
+- **参考图不写入 `session.json`**；既有 `session.json`（无该字段）加载**不受影响**（R1）。
+
+### 9C.5-D.6 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**，排除 `Ipc*` / `PlannerIntegration`）→ **285 通过 / 0 失败**；
+  `IpcSubmitMapperTests`（FQN 含 `Ipc`，被过滤器排除）单独跑 → **5 通过 / 0 失败**。
+- `python -m unittest test_multi_image`（纯 CPU）→ **9 通过 / 0 失败**；`discover` → **20 通过**。
+- **Z8**：`pipeline.py` 685 → 拆出纯助手模块 `resolution.py`（无 torch/comfy），`pipeline.py` 499 /
+  `resolution.py` 206，均 < 600；行为不变（同名函数经 import 引入）。
+- **未跑 GPU 端到端**（Z29 / Z30）；3 场景 GPU 验证由用户执行（D2）。
+
+### 9C.5-D.7 遗留项（冻结）
+
+- **GPU 3 场景验证**（`<image2>` / `<image3>` 引用）由用户执行（D2，本步不跑 GPU）。
+- **`commands.json` 的 `mode` 字段**仍后置。

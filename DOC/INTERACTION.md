@@ -167,3 +167,31 @@
 > **实现状态（Step 9C.6-E）**：`SessionStore` / `SessionLoader`（Agent，取代 `SessionExporter`）、
 > `MainWindow.Projects.cs` / `TextPromptDialog`（App）、`ProjectListItem`（UI）已落地。
 > 契约与冻结记录见 `FROZEN.md` Step 9C.6-E。多会话互通、项目缩略图、项目导入、另存为入口仍后置。
+
+## 10. 多图管线（Step 9C.5-D）
+
+> 本节为 **Step 9C.5-D 追加**（只增不改）。落实 §8 裁决的多图管线：主图 + 参考图 + `<imageN>`。
+
+- **输入模型**：附件第一张 = **主图**（`<image1>`），其余 = **参考图**（`<image2>`、`<image3>`…）；
+  管线最多 **4 张**（主图 + 3 张参考，D4）。超限**截断 + 对话内提示**，**不拒绝发送**。
+- **prompt 引用**：用户以 `<imageN>` **逐字**书写；分词器自动插入 `<image1>` / `<image2>` 标记，
+  C# / Python **不做 `<imageN>` 解析**（D2）。
+- **发送消费决策树**（§8 的升级版）：
+  - 附件空 + 有 root → 当前节点管线图为主图，无参考图。
+  - 附件非空 + 无 root → 首张成 root（主图），其余为参考图。
+  - 附件非空 + 有 root → 三选一：
+    - `新会话`：首张成新 root（重置 DAG），其余为参考图 + 提示「图 2/3 作为参考图」。
+    - `参考图`：**不重置 DAG**，当前节点管线图为主图，**全部**附件为参考图。
+    - `取消`：不发送，保留附件。
+- **契约**：`EditRequest` / `PlanRequest` / `EditPlan` / `ToolInput` 追加
+  `IReadOnlyList<string> AdditionalImages`（追加式，既有签名不变）；`ReferenceImagePath` 保留，
+  由 `QW21edit` 作为 image2 前置（R3）。IPC `submit.payload.additional_images`（ipc_version 0.8）。
+- **持久化**：参考图**不写入 `session.json`**（D7）；会话加载不受影响。
+- **参考图缩放**：每张按**各自纵横比** + 主图**同一分辨率口径**缩放到 16 的倍数后编码
+  （D6，与官方节点一致）。
+
+> **实现状态（Step 9C.5-D）**：`multi_image.py` / `pipeline._encode` 多图编码（Python）、
+> `AdditionalImages` 契约透传（Planner / Executor / Tool）、`IpcSubmitMapper`、
+> `SessionViewModel.SubmitAsync(additionalImages)`、`MainWindow.Send.cs` 分支、
+> `MultiImagePromptDialog`「参考图」按钮（App）已落地。契约与冻结记录见 `FROZEN.md` Step 9C.5-D。
+> GPU 3 场景验证由用户执行；`commands.json` 的 `mode` 字段仍后置。

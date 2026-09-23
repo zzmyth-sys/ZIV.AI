@@ -164,6 +164,7 @@ public sealed class Executor : IExecutor
                 StepId = step.StepId,
                 MainImagePath = currentImage,
                 ReferenceImagePath = plan.ReferenceImagePath,
+                AdditionalImages = plan.AdditionalImages,
                 Mask = plan.Mask,
                 Parameters = step.Parameters,
                 WorkingDirectory = workingDirectory,

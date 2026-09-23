@@ -63,6 +63,9 @@ public sealed class SessionViewModel
     /// <summary>Delay before retrying a transient CUDA-OOM failure (Step 9C.6-D).</summary>
     private const int OomRetryDelayMs = 2000;
 
+    /// <summary>At most 3 reference images (excluding the main) into the pipeline (Step 9C.5-D, D4).</summary>
+    private const int MaxAdditionalImages = 3;
+
     private readonly IEditSession _session;
     private readonly IEditSessionWriter _writer;
     private readonly ICommandParser _parser;
@@ -142,7 +145,8 @@ public sealed class SessionViewModel
     public async Task<bool> SubmitAsync(
         string input,
         IProgress<TaskProgress>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        IReadOnlyList<string>? additionalImages = null)
     {
         var text = (input ?? "").Trim();
         if (text.Length == 0 || IsBusy)
@@ -164,6 +168,23 @@ public sealed class SessionViewModel
             return false;
         }
 
+        // Step 9C.5-D: the UI passes the reference images (main excluded). Cap at 3 extras
+        // (max 4 pipeline images, D4) and surface an over-limit hint right after the user
+        // message; the send is never refused. The parser interface stays untouched, so the
+        // plan is rebuilt (init-only) mirroring CommandParser.ApplyResolution.
+        var plan = parsed.Plan;
+        var extras = NormalizeAdditionalImages(additionalImages);
+        if (extras.Count > MaxAdditionalImages)
+        {
+            AddHint("最多支持 3 张参考图，多余的已忽略");
+            extras = extras.Take(MaxAdditionalImages).ToArray();
+        }
+
+        if (extras.Count > 0)
+        {
+            plan = WithAdditionalImages(plan, extras);
+        }
+
         // The pending bubble is replaced in place once the executor returns. It is tracked
         // by identity (not index) so a context rebuild while generating cannot desync it.
         var pending = new ChatMessage { Role = ChatRole.Assistant, Text = "生成中…", IsPending = true };
@@ -177,8 +198,6 @@ public sealed class SessionViewModel
         // (sampling + VAE decode only) and ToolResult.Duration (one IPC submit, incl.
         // lazy load / queue) — the three are not interchangeable (Step 9C.3-R #2).
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-
-        var plan = parsed.Plan;
 
         try
         {
@@ -346,6 +365,48 @@ public sealed class SessionViewModel
     /// <summary>Appends a non-blocking system hint to the chat stream (Step 9C.6-C).</summary>
     public void AddHint(string text)
         => Messages.Add(new ChatMessage { Role = ChatRole.System, Text = text, IsError = true });
+
+    /// <summary>
+    /// Drops blank entries from the UI-supplied reference images and keeps their order
+    /// (Step 9C.5-D). A <c>null</c> / empty list yields an empty list.
+    /// </summary>
+    private static IReadOnlyList<string> NormalizeAdditionalImages(IReadOnlyList<string>? additionalImages)
+    {
+        if (additionalImages is null || additionalImages.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var images = new List<string>(additionalImages.Count);
+        foreach (var path in additionalImages)
+        {
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                images.Add(path);
+            }
+        }
+
+        return images;
+    }
+
+    /// <summary>
+    /// Rebuilds <paramref name="plan"/> with <see cref="EditPlan.AdditionalImages"/> set
+    /// (Step 9C.5-D). <see cref="EditPlan"/> is init-only, so the plan is copied rather
+    /// than mutated; the parser interface is untouched.
+    /// </summary>
+    private static EditPlan WithAdditionalImages(EditPlan plan, IReadOnlyList<string> additionalImages)
+        => new()
+        {
+            PlanId = plan.PlanId,
+            SourcePrompt = plan.SourcePrompt,
+            MainImagePath = plan.MainImagePath,
+            ReferenceImagePath = plan.ReferenceImagePath,
+            AdditionalImages = additionalImages,
+            Mask = plan.Mask,
+            Steps = plan.Steps,
+            CreatedAt = plan.CreatedAt,
+            Resolution = plan.Resolution,
+        };
 
     /// <summary>
     /// Sets (or clears) the intrinsic crop of one node (Step 9C.6-B) and refreshes the
