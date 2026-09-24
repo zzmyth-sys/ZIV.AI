@@ -22,6 +22,11 @@ namespace ZivAiEditor.App;
 /// process manager and IPC client from <c>settings.ini</c>, and builds the Z22
 /// planner chain (<c>LlmPlanner</c> over <c>LocalLlmClient</c>, degrading to
 /// <c>FallbackPlanner</c>) exposed as the frozen <see cref="IPlanner"/> contract.
+///
+/// <para>R-4 (module-boundaries closure): <see cref="Create"/> is grouped by domain
+/// (<c>BuildBackend</c> / <c>BuildTools</c> / <c>BuildAgent</c> / <c>BuildLlm</c> /
+/// <c>BuildPersistence</c> / <c>BuildImaging</c>). Construction order and the
+/// <see cref="AppContext"/> shape are unchanged; each group stays small.</para>
 /// </summary>
 internal sealed class AppContext : IDisposable
 {
@@ -141,6 +146,26 @@ internal sealed class AppContext : IDisposable
     public static AppContext Create(ShellService shell)
     {
         var settings = shell.LoadSettings();
+
+        // R-4: grouped by domain. Construction order is unchanged (backend → tools → agent →
+        // profiles → llm → persistence → imaging); only the grouping is new.
+        var (backend, client) = BuildBackend(settings);
+        var (tools, executionQueue) = BuildTools(client);
+        var (commandParser, session, executor, modelProfiles) =
+            BuildAgent(shell.TemplateDirectory, tools, executionQueue);
+        var llm = BuildLlm(settings, client, tools);
+        var (sessionStore, projects) = BuildPersistence();
+        var imaging = BuildImaging();
+
+        return new AppContext(
+            backend, client, llm.Http, llm.PlannerLlm, llm.Planner, tools, executor, executionQueue,
+            modelProfiles, commandParser, session, session, sessionStore, projects, imaging,
+            llm.RewriterLlm, llm.PromptExpander, llm.LlmPreflight);
+    }
+
+    /// <summary>Backend domain: the Python process manager and the IPC client over it.</summary>
+    private static (PythonProcessManager Backend, IpcInferenceClient Client) BuildBackend(BackendSettings settings)
+    {
         var options = new PythonBackendOptions
         {
             PipeName = settings.PipeName,
@@ -154,26 +179,40 @@ internal sealed class AppContext : IDisposable
 
         var backend = new PythonProcessManager(options);
         var client = new IpcInferenceClient(backend, ownsProcess: true);
+        return (backend, client);
+    }
 
+    /// <summary>Tools domain: the registry plus the single serial execution queue (Z18).</summary>
+    private static (IToolRegistry Tools, ExecutionQueue Queue) BuildTools(IInferenceClient client)
+    {
         // Step 6: real tool registry + single serial execution queue (Z18).
         // Step 7: add the outpainting tool; Segment / Upscale stay unregistered
         // (they need independent models — Step 7.5 candidates).
         var tools = new ToolRegistry();
         tools.Register(new QwenImage21EditTool(client));
         tools.Register(new QwenImage21OutpaintTool(client));
+        return (tools, new ExecutionQueue());
+    }
 
-        var executionQueue = new ExecutionQueue();
-
+    /// <summary>Agent domain: the parser, the in-memory session, the executor and the model profiles.</summary>
+    private static (CommandParser Parser, EditSession Session, IExecutor Executor, IModelProfileRegistry Profiles)
+        BuildAgent(string templateDirectory, IToolRegistry tools, ExecutionQueue executionQueue)
+    {
         // Step 9C.8-A: the executor rebuilds a re-run plan from the DAG, so it needs the
         // session (read + navigate) and the deterministic command parser.
-        var commandParser = new CommandParser(Path.Combine(shell.TemplateDirectory, "commands.json"));
+        var commandParser = new CommandParser(Path.Combine(templateDirectory, "commands.json"));
         var session = new EditSession();
         var executor = new Executor(tools, executionQueue, session, session, commandParser);
 
         // Step 8-2: profiles come from the data file next to commands.json; a missing file
         // falls back to the built-in Qwen-Image-2.1 profile inside the registry.
-        var modelProfiles = new ModelProfileRegistry(Path.Combine(shell.TemplateDirectory, "models.json"));
+        var modelProfiles = new ModelProfileRegistry(Path.Combine(templateDirectory, "models.json"));
+        return (commandParser, session, executor, modelProfiles);
+    }
 
+    /// <summary>LLM domain: the planner chain, the prompt rewriter and the /生成 preflight.</summary>
+    private static LlmParts BuildLlm(BackendSettings settings, IInferenceClient client, IToolRegistry tools)
+    {
         // LocalLlmClient applies its own per-call timeout, so the shared
         // HttpClient stays timeout-free (single source of truth).
         var llmHttp = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
@@ -218,21 +257,36 @@ internal sealed class AppContext : IDisposable
             settings.LlmRewriter.VramTotalMb,
             settings.LlmRewriter.VramNeedMb);
 
-        // Step 8: one in-memory session; Step 9C.6-E: a project store. The UI drives the
-        // session (already built above, before the executor).
-        var sessionStore = new SessionStore();
-        var projects = new ProjectService(sessionStore);
+        return new LlmParts(llmHttp, plannerLlm, planner, rewriterLlm, promptExpander, llmPreflight);
+    }
 
+    /// <summary>Project / session domain: the session store and the project catalog.</summary>
+    private static (ISessionPersistence Store, IProjectService Projects) BuildPersistence()
+    {
+        // Step 8: one in-memory session; Step 9C.6-E: a project store. The UI drives the
+        // session (built in BuildAgent, before the executor).
+        var sessionStore = new SessionStore();
+        return (sessionStore, new ProjectService(sessionStore));
+    }
+
+    /// <summary>Imaging domain: the local crop / mask facade; clears temp dirs orphaned by a prior run.</summary>
+    private static IImagingService BuildImaging()
+    {
         // Module-boundary migration step 4: construct the imaging facade and clear any crop /
         // mask temp dirs orphaned by a previous run (moved here from Program, Q4).
         var imaging = new ImagingService();
         imaging.CleanupAll();
-
-        return new AppContext(
-            backend, client, llmHttp, plannerLlm, planner, tools, executor, executionQueue,
-            modelProfiles, commandParser, session, session, sessionStore, projects, imaging,
-            rewriterLlm, promptExpander, llmPreflight);
+        return imaging;
     }
+
+    /// <summary>The LLM-domain components returned as one bundle from <see cref="BuildLlm"/>.</summary>
+    private sealed record LlmParts(
+        HttpClient Http,
+        LocalLlmClient PlannerLlm,
+        IPlanner Planner,
+        LocalLlmClient RewriterLlm,
+        IPromptExpander PromptExpander,
+        ILlmPreflight LlmPreflight);
 
     public void Dispose()
     {

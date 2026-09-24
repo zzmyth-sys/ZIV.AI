@@ -110,3 +110,12 @@
   - `Task<ProjectSummary?> ReadMetadataAsync(string directory, CancellationToken ct = default)`
   - `Task WriteMetadataNameAsync(string directory, string name, CancellationToken ct = default)`
   - **不含**会话内容读写（见 `ISessionPersistence`）。
+
+## 9. 修订说明（2026-09-25 · 独立审查 R-3）
+
+> 本节为**追加**（只增不改）。
+
+- 新增域实现程序集 **`ZivAiEditor.Imaging`**：实现 §1.5 的 `IImagingService`（crop / mask 导出 /
+  羽化），依赖 `Contracts` + `ZIV.Core` + `ZIV.Imaging`（对应 §7 的 imaging 物理域）。
+- §1.5 `IImagingService` 的实现方为 `ImagingService`（`ZivAiEditor.Imaging`）；UI / App 只依赖端口。
+- 命名空间映射：`ZivAiEditor.Imaging`（程序集与命名空间同名），与 §7 映射一致。

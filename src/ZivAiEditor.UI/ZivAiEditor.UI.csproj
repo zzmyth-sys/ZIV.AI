@@ -8,13 +8,11 @@
     <RootNamespace>ZivAiEditor.UI</RootNamespace>
   </PropertyGroup>
 
+  <!-- UI is a pure view-model / rules library: no Avalonia, no Skia, no ZIV.* direct use.
+       It only needs the frozen Contracts (the sole reference). Views live in ZivAiEditor.App.
+       ZIV.Core flows transitively through Contracts if any contract type needs it. -->
   <ItemGroup>
     <ProjectReference Include="..\ZivAiEditor.Contracts\ZivAiEditor.Contracts.csproj" />
-    <ProjectReference Include="..\..\..\ZIV\src\ZIV.Core\ZIV.Core.csproj" />
-    <ProjectReference Include="..\..\..\ZIV\src\ZIV.Imaging\ZIV.Imaging.csproj" />
-    <PackageReference Include="Avalonia" />
-    <PackageReference Include="Avalonia.Skia" />
-    <PackageReference Include="SkiaSharp" />
   </ItemGroup>
 
 </Project>

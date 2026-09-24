@@ -4920,3 +4920,36 @@ Q1 不拆程序集。
 
 - 纯端口化，零行为变化；未合并 `IProjectMetadataStore` 与 `ISessionPersistence`，未动会话读写 /
   Executor 注入（D5）/ 其它 Z 项 / 遮罩 / outpaint / 7-H / GPU。
+
+---
+
+## [审查收口 R-2/R-3/R-4] - 2026-09-25
+
+### 目标
+
+落实独立代码审查（架构合理性 / 耦合性）的 A 类问题（R-2 / R-3 / R-4）；B 类登记为 Z-007 / Z-008。
+
+### 做了什么
+
+- **R-1（Z-006 收口文档）**：已于 commit `1deaecf` 完成并提交（本步只复核，不重复写入）。
+- **R-2 UI 死引用清理**：`ZivAiEditor.UI.csproj` 删除未使用的 `Avalonia` / `Avalonia.Skia` /
+  `SkiaSharp` / `ZIV.Core` / `ZIV.Imaging`，只保留 `Contracts`。前置只读核对：UI 无 `.axaml`、
+  无任何 Avalonia / Skia / `ZIV.*` 引用、无 XAML 编译项。
+- **R-3 文档同步（只增不改）**：`ARCHITECTURE.md` 修正 §2 / §3 / §4 / §5.1 / §7 / §8 / §12.4 并追加
+  尾部修订说明；`INTERFACES.md` 追加 §9；`FROZEN.md` 追加 Z-007 / Z-008 登记。修正点：项目数
+  7 → 8（补 `ZivAiEditor.Imaging`）、UI 仅依赖 `Contracts`、`HttpInferenceClient` →
+  `IpcInferenceClient`、步级编排 / 流程级编排分层。
+- **R-4 AppContext 按域分组**：`Create()` 拆为 `BuildBackend` / `BuildTools` / `BuildAgent` /
+  `BuildLlm` / `BuildPersistence` / `BuildImaging`（+ `LlmParts` 记录）。构造顺序与 `AppContext`
+  形状不变，行为零变化（不改签名，G3 / G4）。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- 构建 0 警告 / 0 错误；非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）**451 通过 / 0 失败**。
+- 未动 `MainWindow` / 视图 / `FlowRunner` / `Executor` 注入（D5）/ 遮罩 / outpaint / 7-H / GPU。
+
+### 备注
+
+- R-2 判断：Avalonia **非**"为未来 `.axaml` 预留"——UI 程序集自述无 Avalonia、视图在 `App`，
+  故按死引用删除；若将来 UI 增视图，届时再加回（对应 Z-007）。
+- B 类 Z-007 / Z-008 已登记，本轮不动。

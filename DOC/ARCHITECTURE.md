@@ -31,16 +31,17 @@
 
 ```
  L6  ZivAiEditor.App          Avalonia 壳、装配、平台服务、单实例、CLI / URL / HTTP 入口
- L5  ZivAiEditor.UI           主界面、MaskCanvas（自绘遮罩）、任务卡片流、模板面板
- L4  ZivAiEditor.Agent        Planner / Executor 编排
+ L5  ZivAiEditor.UI           视图模型 / 纯规则库（无 Avalonia；视图在 App）—— 正名见 Z-007
+ L4  ZivAiEditor.Agent        Planner / Executor（步级编排）
      ZivAiEditor.Tools        IEditTool 实现 + ToolRegistry
-     ZivAiEditor.Backend      IInferenceClient 实现（HttpInferenceClient）+ Python 进程管理
+     ZivAiEditor.Backend      IInferenceClient 实现（IpcInferenceClient）+ Python 进程管理
+     ZivAiEditor.Imaging      IImagingService 实现（crop / mask 栅格原语）
  L3  ZivAiEditor.Contracts    契约与模型（IInferenceClient / IEditTool / IPlanner /
                               IExecutor / IToolRegistry + EditPlan / EditStep / ToolInput /
                               ToolResult / MaskSpec / TaskState），不依赖 Avalonia / 平台
  L2  ZIV.Core / ZIV.Imaging   共享库：契约、值对象、编解码、图像变换（复用，不复制）
  ─────────────────────────── 进程边界（Z17）───────────────────────────
-     Python 推理后端          Qwen-Image-2.1 + SGLang（Step 1 单主线；LightX2V 为 Step 7 可选加速；独立进程，只经 HTTP）
+      Python 推理后端          ComfyUI 管线（D-7；独立进程，只经 IPC / Named Pipe，D-8）
 ```
 
 **核心分工**
@@ -48,8 +49,11 @@
 - `ZivAiEditor.Contracts`：**只有契约与值对象**，可被所有上层引用；不碰 Avalonia、不碰 IO
 - `ZivAiEditor.Backend`：**只做推理访问与 Python 进程管理**，实现 `IInferenceClient`；不碰 UI
 - `ZivAiEditor.Tools`：**只做单步编辑动作**，实现 `IEditTool` 并注册到 `ToolRegistry`
-- `ZivAiEditor.Agent`：**只做编排**（Planner + Executor），经契约调用工具与推理，不碰 UI / IO
-- `ZivAiEditor.UI`：**只做界面与交互**，解码经 `ZIV.Imaging`，推理只经 `IInferenceClient` 契约
+- `ZivAiEditor.Agent`：**只做步级编排**（Planner + Executor），经契约调用工具与推理，不碰 UI / IO；
+  **流程级编排**（提交 / 重跑 / 取消 / `/生成`）在 `ZivAiEditor.App` 的 `App/Flows`（见 §4 修订说明）
+- `ZivAiEditor.UI`：**只做视图模型 / 交互规则**（无 Avalonia；视图渲染在 `App`），解码经 `ZIV.Imaging`，
+  推理只经 `IInferenceClient` 契约
+- `ZivAiEditor.Imaging`：**只做图像栅格原语**（裁切 / 遮罩导出 / 羽化），实现 `IImagingService`
 - `ZivAiEditor.App`：**唯一装配处与平台实现处**，构造依赖并注入；承载对外接口
 
 > 命名：解决方案 `ZIV.AI.sln`；项目前缀统一 `ZivAiEditor.*`；可执行入口
@@ -67,7 +71,7 @@
         ▲                        ▲                    ▲
         │                        │                    │
 ┌── Agent ────────────┐  ┌── Tools ──────────┐  ┌── Backend ───────────┐
-│ Planner（LLM / 降级）│  │ InpaintTool        │  │ HttpInferenceClient   │
+│ Planner（LLM / 降级）│  │ InpaintTool        │  │ IpcInferenceClient    │
 │ Executor（串行队列） │  │ UpscaleTool        │  │ PythonProcessManager  │
 │ 重跑 / 取消 / 进度   │  │ RemoveObjectTool   │  │ 健康检查 / 任务轮询   │
 │                      │  │ StyleTransferTool  │  │ 空闲卸载（后端协作）  │
@@ -89,7 +93,8 @@
 
 | 功能 / 子模块 | 归属 | 说明 |
 |---|---|---|
-| 推理 HTTP 访问 | `ZivAiEditor.Backend` | `HttpInferenceClient : IInferenceClient` |
+| 推理访问（IPC） | `ZivAiEditor.Backend` | `IpcInferenceClient : IInferenceClient` |
+| 裁切 / 遮罩导出 / 羽化 | `ZivAiEditor.Imaging` | `ImagingService : IImagingService` |
 | Python 进程生命周期 | `ZivAiEditor.Backend` | 启动 / 健康检查 / 关闭 / 端口分配 |
 | 计划生成（LLM） | `ZivAiEditor.Agent` | `LlmPlanner : IPlanner` + `FallbackPlanner` |
 | 步骤执行 / 重跑 / 取消 | `ZivAiEditor.Agent` | `Executor : IExecutor`，单队列 |
@@ -108,6 +113,11 @@
 > `UI` **可以**在编译期引用 `Agent` / `Tools` / `Backend` 程序集（便于 `App` 装配与类型贯通），
 > 但**代码中只允许使用 `Contracts` 的接口**，不得直接调用其实现类。同时明确 Step 1
 > **不引用** `ZIV.Viewer`（查看器能力不进 ZIV.AI）。以下正文为修订后版本。
+>
+> **修订（2026-09-25，独立审查 R-3）**：上述"UI 可编译期引用 `Agent` / `Tools` / `Backend`"的许可
+> **实现未采用**：当前 `ZivAiEditor.UI` **只引用 `Contracts`**（比正文规则更严），视图在 `App`。
+> 同时新增域实现 `ZivAiEditor.Imaging`（`IImagingService`）。并明确：**步级编排在 `Agent`，
+> 流程级编排在 `App/Flows`**。以下规则 3 与新增规则 9 为当前状态。
 
 ```
         ZivAiEditor.App（装配 + 平台 + 对外接口）
@@ -131,16 +141,18 @@
 2. `ZivAiEditor.Agent` / `ZivAiEditor.Tools` / `ZivAiEditor.Backend` 只依赖 `Contracts`
    （+ `ZIV.Core` / `ZIV.Imaging`）；**三者之间禁止互相引用**，协作经 `Contracts` 接口，
    由 `App` 注入装配
-3. `ZivAiEditor.UI` 依赖 `Contracts`（+ Avalonia + `ZIV.Core` / `ZIV.Imaging`），
-   **编译期可引用 `Agent` / `Tools` / `Backend` 程序集**，但**代码中只允许使用 `Contracts`
-   的接口**（如 `IInferenceClient`），**不得直接调用其实现类**；UI 需要的编排 / 推理能力
-   一律经接口注入（Step 1 起）
+3. `ZivAiEditor.UI` **当前只依赖 `Contracts`**（视图在 `App`；UI 为纯视图模型 / 规则库，无
+   Avalonia）。历史上曾许可"编译期引用 `Agent` / `Tools` / `Backend`"，实现未采用；若将来需要，
+   仍**只允许使用 `Contracts` 的接口**（如 `IInferenceClient`），**不得直接调用其实现类**，
+   能力一律经接口注入
 4. `ZivAiEditor.App` 可依赖全部；负责构造实现、组装依赖、承载平台与对外接口
 5. 禁止反向依赖、循环依赖、同层互相引用
 6. 依赖方向严格单向：`App → UI → Agent/Tools/Backend → Contracts → ZIV.Core/Imaging`
 7. `ZIV.Imaging` 只依赖 `ZIV.Core`；`ZIV.AI` 不得反向修改共享库（Z26）
 8. Step 1 **不引用** `ZIV.Viewer`（查看器能力不进 ZIV.AI）；共享库只引用 `ZIV.Core` /
    `ZIV.Imaging`
+9. `ZivAiEditor.Imaging` 只依赖 `Contracts`（+ `ZIV.Core` / `ZIV.Imaging`）；与 `Agent` /
+   `Tools` / `Backend` 同属域实现层，四者**禁止互相引用**（2026-09-25 追加）
 
 > **关于 UI 与 Backend 的关系**：`Backend` 是 `IInferenceClient` 的**实现方**，`UI` 是**使用方**。
 > Step 1 起 `UI` 可在编译期引用 `Backend` 程序集，但**只通过 `Contracts` 中的接口**
@@ -172,7 +184,8 @@ public interface IInferenceClient : IDisposable
 }
 ```
 
-- 实现：`ZivAiEditor.Backend.HttpInferenceClient`（Step 1 起），未来可加命名管道实现。
+- 实现：`ZivAiEditor.Backend.IpcInferenceClient`（Named Pipe + 长度前缀，D-8；见
+  [`../contracts/ipc-protocol.md`](../contracts/ipc-protocol.md)）。
 - 约束：C# 侧只经此接口访问推理（Z17）；不得 `Process.Start` 后直连 stdin/stdout 传二进制图像。
 
 ### 5.2 IEditTool（单步编辑动作）
@@ -394,10 +407,13 @@ ZIV.AI.sln
 │  │   └─ PlaceholderToolRegistry.cs # Step 1 占位（throw-only）
 │  │
 │  ├─ ZivAiEditor.Backend/          # IInferenceClient 实现（net8.0；引用 Contracts）
-│  │   └─ HttpInferenceClient.cs    # Step 1 占位（throw-only）
+│  │   └─ IpcInferenceClient.cs     # Named Pipe 实现（Step 2 起）
 │  │
-│  ├─ ZivAiEditor.UI/               # 界面层（net8.0；引用 Contracts/Agent/Tools/Backend + Avalonia）
-│  │   └─ UiPlaceholder.cs          # Step 1 占位（UI 窗口暂由 App 承载）
+│  ├─ ZivAiEditor.Imaging/          # IImagingService 实现（net8.0；引用 Contracts + ZIV.Core/Imaging）
+│  │   └─ ImagingService.cs         # crop / mask 导出 / 羽化原语（迁移 4）
+│  │
+│  ├─ ZivAiEditor.UI/               # 视图模型 / 规则库（net8.0；只引用 Contracts，无 Avalonia）
+│  │   └─ Chat / Editing / Imaging / Projects   # 视图渲染在 App（正名见 Z-007）
 │  │
 │  ├─ ZivAiEditor.App/              # WinExe（net8.0-windows；AOT；引用全部）
 │  │   ├─ Program.cs
@@ -426,7 +442,7 @@ ZIV.AI.sln
 ```
 
 > 模块树为**草案**，Step 1 起按实际落地修订；文件名以最终实现为准，但**项目边界与依赖方向**不可破。
-> Step 1 实际落地为 **7 个 `ZivAiEditor.*` 项目**（见 `FROZEN.md` 1.1），各项目内的类文件随
+> 当前落地为 **8 个 `ZivAiEditor.*` 项目**（新增 `ZivAiEditor.Imaging`；见 `FROZEN.md` 1.1），各项目内的类文件随
 > 后续 Step 逐步补齐。
 
 ## 8. 状态与生命周期
@@ -437,7 +453,7 @@ ZIV.AI.sln
   1. `PathResolver`（程序目录，Z14）
   2. `SqliteTaskStore`（打开 / 建库 / 迁移）
   3. `PythonProcessManager`（探测端口 / 启动后端，可延迟）
-  4. `HttpInferenceClient`（依赖 3）
+  4. `IpcInferenceClient`（依赖 3）
   5. `ToolRegistry`（注册工具）+ `ModelProfileRegistry`（模型分辨率档位，Step 6.5）
   6. `Planner`（`LlmPlanner` + `FallbackPlanner`）→ `Executor` → `Agent`
   7. `AppContext` 组装 → `new AiEditorWindow(context)`
@@ -558,6 +574,10 @@ ZIV.AI.sln
 | 代价 | 需维护契约与生成代码的同步；生成工具与 AOT 兼容性待核实 |
 | 备选 | gRPC（需 proto 工具链）、命名管道 + 自定义协议（仅 Windows，先不做） |
 
+> **修订（2026-09-25，R-3）**：D-8 已定稿——跨进程传输采用 **IPC（Named Pipe + 长度前缀）**
+> [`../contracts/ipc-protocol.md`](../contracts/ipc-protocol.md)；`contracts/openapi.yaml` 的 8 端点
+> **降级为 Schema 参考**。实现为 `IpcInferenceClient`（草案的 HTTP 客户端未采用）。
+
 ### 12.5 遮罩画布：Avalonia 自绘 vs 第三方
 
 | 维度 | 说明 |
@@ -588,3 +608,18 @@ ZIV.AI.sln
    动态端口避免冲突——需要权衡。
 5. **输出目录策略**：默认输出到主图同目录，还是程序目录 `output/`？
 6. **遮罩画布坐标约定**：以主图原始像素坐标为准（推荐），还是以显示坐标为准？
+
+---
+
+## 修订说明（2026-09-25，独立审查 R-3）
+
+> 本节记录一轮文档同步（对应独立审查报告的 A 类问题 R-3）。**只增不改**：不改历史 Step 段，
+> 仅修正当前状态描述并在此登记。
+
+1. **项目数**：7 → **8**，新增 `ZivAiEditor.Imaging`（§2 分层图 / §3 归属表 / §7 模块树 / §4 规则 9）。
+2. **依赖描述**：`ZivAiEditor.UI` 当前**只引用 `Contracts`**（比 §4 旧措辞更严；视图在 `App`）。
+3. **传输实现**：`HttpInferenceClient` → `IpcInferenceClient`（Named Pipe，D-8；§2 / §3 / §5.1 / §7 / §8 / §12.4）。
+4. **编排分层澄清**：**步级编排在 `Agent`（Planner / Executor），流程级编排在 `App/Flows`**
+   （`FlowRunner`；§2 核心分工）。
+5. **B 类遗留登记**：Z-007（UI 正名 / 拆视图）、Z-008（UI 层 / MainWindow 重构），见
+   `FROZEN.md`「妥协/挂账清单」。
