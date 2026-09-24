@@ -1,10 +1,8 @@
 using System;
-using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
-using Avalonia.Platform;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.UI.Editing;
 using ZivAiEditor.UI.Imaging;
@@ -32,9 +30,6 @@ namespace ZivAiEditor.App.Controls;
 /// </summary>
 public partial class MaskOverlay : UserControl
 {
-    /// <summary>Semi-transparent red for a painted pixel (BGRA bytes, display only).</summary>
-    private const byte Red = 0x80;
-
     private static readonly IPen HaloPen = new Pen(new SolidColorBrush(Color.FromArgb(0xC0, 0x00, 0x00, 0x00)), 3);
     private static readonly IPen CorePen = new Pen(new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF)), 1);
 
@@ -105,11 +100,47 @@ public partial class MaskOverlay : UserControl
         InvalidateVisual();
     }
 
-    /// <summary>Marks the cached bitmap stale so the next render rebuilds it.</summary>
+    /// <summary>Marks the cached bitmap stale so the next render rebuilds it (full + feather).</summary>
     public void MarkDirty()
     {
         _dirty = true;
         InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Patches only the touched rectangle of the cached bitmap (R1: in-stroke incremental
+    /// repaint). The bitmap is hard (un-feathered) while a stroke is active; the committed
+    /// <see cref="MarkDirty"/> pass re-applies feather. A no-op when there is no target yet.
+    /// </summary>
+    public void PatchRegion(MaskState state, int x, int y, int width, int height)
+    {
+        if (state is null || !EnsureHardBitmap(state))
+        {
+            return;
+        }
+
+        var values = state.CopyRegion(x, y, width, height);
+        MaskOverlayBitmap.WriteRegion(_bitmap!, values, x, y, width, height);
+        InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Ensures a hard (un-feathered) bitmap of the current state exists and is not pending a
+    /// full rebuild. Builds one on first paint / size change / stale flag. Never applies feather
+    /// (that is the committed pass) so a stroke stays cheap.
+    /// </summary>
+    private bool EnsureHardBitmap(MaskState state)
+    {
+        if (_bitmap is not null && !_dirty
+            && _bitmap.PixelSize.Width == state.Width && _bitmap.PixelSize.Height == state.Height)
+        {
+            return true;
+        }
+
+        DisposeBitmap();
+        _bitmap = MaskOverlayBitmap.Build(state.CopyPixels(), state.Width, state.Height);
+        _dirty = false;
+        return _bitmap is not null;
     }
 
     public override void Render(DrawingContext context)
@@ -189,47 +220,9 @@ public partial class MaskOverlay : UserControl
 
         // Display-only feather: the live buffer stays hard; the same pure function the
         // exporter uses blooms it into the alpha ramp (byte-identical on both surfaces).
+        // The red BGRA composition is shared with the chat bubble (MaskOverlayBitmap).
         var display = Imaging?.FeatherMask(pixels, width, height, state.FeatherPx) ?? pixels;
-
-        var bitmap = new WriteableBitmap(
-            new PixelSize(width, height),
-            new Vector(96, 96),
-            PixelFormat.Bgra8888,
-            AlphaFormat.Premul);
-
-        using (var buffer = bitmap.Lock())
-        {
-            var rowBytes = buffer.RowBytes;
-            var row = new byte[width * 4];
-            for (var y = 0; y < height; y++)
-            {
-                var source = y * width;
-                for (var x = 0; x < width; x++)
-                {
-                    var offset = x * 4;
-                    var value = display[source + x];
-                    if (value != 0)
-                    {
-                        // BGRA, premultiplied: red scaled by the (possibly feathered) alpha.
-                        row[offset] = 0x00;
-                        row[offset + 1] = 0x00;
-                        row[offset + 2] = (byte)(value * Red / 255);
-                        row[offset + 3] = value;
-                    }
-                    else
-                    {
-                        row[offset] = 0x00;
-                        row[offset + 1] = 0x00;
-                        row[offset + 2] = 0x00;
-                        row[offset + 3] = 0x00;
-                    }
-                }
-
-                Marshal.Copy(row, 0, IntPtr.Add(buffer.Address, y * rowBytes), row.Length);
-            }
-        }
-
-        _bitmap = bitmap;
+        _bitmap = MaskOverlayBitmap.Build(display, width, height);
         _dirty = false;
     }
 

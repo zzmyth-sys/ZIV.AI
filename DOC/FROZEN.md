@@ -3899,3 +3899,57 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 |---|---|---|---|---|
 | Z-007 | `ZivAiEditor.UI` 名实不符：无视图 / 无 Avalonia，实为视图模型 + 规则库，视图在 `App` | 正名 + 拆分影响面大，非本轮范围 | 新增视图 / 重命名程序集 | 后续专项 |
 | Z-008 | `MainWindow` 上帝类（12 个 partial，约 1970 行）+ 字符串 `FindControl` 与 XAML 隐式耦合 | UI 层重构需专项设计与回归验证 | 修改 MainWindow / 拆 UserControl | 后续专项 |
+
+---
+
+## Step 9C.7-C（日期：2026-09-25 · 遮罩修复：送管线对齐 / 持久化 / 气泡可视化 / 羽化上限）
+
+> **修订说明（Step 9C.7-C）**。本段为遮罩 9C.7 / 9C.7-B 验收遗留（9C.7.16 / 9C.7B.16 未通过）
+> 的修复记录，**只增不改**。**无契约签名变化**：改动均在 UI / App 层；`ChatMessage` 属 UI 非契约。
+> **不改动 Step 0–9C.7-B 已冻结行**。
+
+### 9C.7C.1 裁决（冻结 · 记录）
+
+| 裁决 | 取值 | 说明 |
+|---|---|---|
+| E1 | ① | 气泡显示 = 原图 + 遮罩可视化叠加（半透明红，含羽化灰度），UI 层合成，不落盘 |
+| E2 | A + 自动切 | 当前节点为唯一真源；进入遮罩模式时 `NavigateTo(预览节点)` + hint |
+| E4 | 是 | 羽化参与气泡叠加（与预览 / 导出一致） |
+| E8 | 15 | 羽化滑块 / `MaskState.FeatherPx` 上限 25 → 15 |
+| E3/E5/E6/E7 | 不变 | 否 / 允许 / 否 / 保持现状 + Z-009 |
+
+### 9C.7C.2 语义 / 行为（冻结 · 非契约）
+
+- **送管线对齐**：`SessionViewModel.AlignForMask(previewNodeId)` —— 预览节点 ≠ 当前节点时
+  `NavigateTo` 并把当前节点切到预览节点，随后追加 hint「已切换到节点 X 以绘制遮罩」；已为当前 /
+  未知 / 空 → no-op。App 在 `ImagePreview.MaskToolEntered`（遮罩画笔 / 橡皮激活）时调用。
+- **持久化 App 层**：遮罩导出任务由预览窗级提升为**窗口级** `MainWindow._pendingMaskExport`
+  （`ImagePreview.MaskExportScheduled` 事件上报，且在 `MaskCompleted` **之前**发出）。`FlushPendingMaskAsync`
+  / 发送 / `OnClosing` / 预览 `Closed` 均 await 该任务，预览窗关闭后仍可 flush。
+- **气泡可视化**：`ChatMessage` 追加 `MaskPath` / `MaskFeatherPx`（UI 非契约）；`RebuildContext` 从
+  `node.Mask` 填充；App 解码 PNG + 羽化 + `MaskOverlayBitmap.Build`（BGRA 半透明红）叠加到气泡主图；
+  异步加载以 `_chatGeneration` 防串代。
+- **羽化上限**：`MaskState.MaxFeatherPx` 25 → 15；`MaskToolbar` 滑块 Maximum 25 → 15。
+  `MaskFeather.MaxRadiusPx` 保持 25（纯函数内部钳制，产品路径受 `MaskState` 限制）。
+
+### 9C.7C.3 前置核查（冻结 · 记录）
+
+- **mask_binary 现状 = `False`（已修）**：`handlers._dispatch_op` 两处 `pipeline.run` 均传
+  `mask_binary=False`；`pipeline.run` 签名默认 `True` 但被 handlers 覆盖；`_load_mask_tensor` 默认
+  `True`、以 `binary=mask_binary` 调用。故 `mask_feather_result.md` 第 110 行「产品现状
+  mask_binary=True」已过时；S1 未动 `mask_binary`。
+- **羽化算法核查**：`MaskFeather.Apply` = 3 趟可分离 box blur（边界 clamp），**非整片衰减**：宽于
+  ~3·box 过渡带的实心涂抹区核心保持 255；只有窄于过渡带的细线才整体被压低。故 B（σ=10）核区偏弱
+  属 ComfyUI `noise_mask` 混合语义固有，非 C# 羽化 bug；E8 按 15 收口。
+
+### 9C.7C.4 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，无 GPU，排除 `Ipc*` / `PlannerIntegration`）→ **454 通过 / 0 失败**（451 → 454）。
+- **未跑 GPU 端到端**（Z29 / Z30）；9C.7.16 / 9C.7B.16 由用户真机确认。
+
+### 9C.7C.5 妥协/挂账清单 · 追加（9C.7-C）
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-009 | 遮罩气泡叠加为 UI 层实时合成（每次渲染重新解码 + 羽化 + 构位图，不缓存）；预览窗 ↔ 当前节点的对齐仅在进入遮罩模式时单向发生（历史导航不反向同步预览） | 落盘 / 缓存会增加中间产物与失效管理；双向同步超出本轮范围 | 气泡数量大导致渲染开销 / 用户反馈预览与当前节点漂移 | 后续专项 |

@@ -36,7 +36,7 @@
         <Slider x:Name="PART_FeatherSlider"
                 Width="120"
                 Minimum="0"
-                Maximum="25"
+                Maximum="15"
                 Value="0"
                 TickFrequency="1"
                 IsSnapToTickEnabled="True"

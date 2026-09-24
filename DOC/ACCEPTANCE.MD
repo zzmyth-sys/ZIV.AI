@@ -2779,3 +2779,62 @@ B 类登记 Z-007 / Z-008。**无 GPU**（Z29 / Z30）。
 ### 验收后动作
 
 1. 在「验收记录」追加“审查收口 R-2/R-3/R-4 通过，日期：____”（待签）
+
+---
+
+## Step 9C.7-C 验收：遮罩修复（送管线对齐 / 持久化 / 气泡可视化 / 羽化上限）
+
+**目标**：修复发送时遮罩不生效（9C.7.16 / 9C.7B.16）与用户三项反馈（① 未持久化 / ② 结果不返回
+气泡 / ③ 不进管线）。**无 GPU**（Z29 / Z30）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | Release 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 无新项目引用 / 反向 / 循环依赖 | ✅ |
+| G3 | 接口与 FROZEN 一致 | 无契约签名变化（`ChatMessage` 属 UI 非契约） | ✅ |
+| G4 | 未授权修改检查 | 无冻结签名被改 | ✅ |
+| G5 | 文档已更新 | FROZEN 9C.7-C + Z-009 / DEVLOG / ACCEPTANCE / `INTERFACES.md` §10 | ✅ |
+| G6 | 便携性未破 | 落盘位置不变（`_cache/masks/...`）；气泡叠加不落盘 | ✅ |
+| G7 | AI 推理进程隔离未破 | 仅传 PNG 路径；无 C# → GPU 直连 | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.7C.1 | 送管线对齐 | `SessionViewModelTests.AlignForMask_Moves_Current_To_Previewed_Node` | 预览节点 ≠ 当前 → 对齐后当前 = 预览 + hint | ✅ |
+| 9C.7C.2 | 对齐 no-op | `SessionViewModelTests.AlignForMask_NoOp_When_Already_Current_Or_Unknown` | 已当前 / 未知 / 空 → false | ✅ |
+| 9C.7C.3 | 气泡遮罩 | `SessionViewModelTests.SetNodeMask_Shows_Mask_On_The_Bubble_And_Clears_It` | 气泡带 `MaskPath` / `MaskFeatherPx`；清除后空 | ✅ |
+| 9C.7C.4 | 羽化上限 | `MaskStateTests.FeatherPx_Defaults_And_Clamps` | `MaxFeatherPx = 15`；越界钳制 | ✅ |
+| 9C.7C.5 | 持久化（数据流） | `SessionStoreTests.Save_Then_Load_RoundTrips_Mask` | `{nodeId}_mask.png` + `session.json` mask 往返 | ✅ |
+| 9C.7C.6 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；非 GPU **454 通过 / 0 失败** | ✅ |
+| 9C.7C.7 | mask_binary 核查 | 查 `handlers.py` | 两处 `mask_binary=False`（未动 Python） | ✅ |
+| 9C.7C.8 | 羽化算法核查 | 查 `MaskFeather.Apply` | 边界羽化，非整片衰减 | ✅ |
+| 9C.7C.9 | Z8 | 查改动文件 | 均 < 600 | ✅ |
+| 9C.7C.10 | 无 GPU 负载 | 构建 / 测试 | 未启动 Python / 未加载模型（Z29 / Z30） | ✅ |
+| 9C.7C.11 | 真机：发送时遮罩局部编辑 | 用户（GPU） | 后端按遮罩局部编辑 | ⏳ 待用户确认 |
+| 9C.7C.12 | 真机：软边融合 | 用户（GPU） | 发送编辑后软边自然 | ⏳ 待用户确认 |
+| 9C.7C.13 | 真机：气泡遮罩叠加 | 用户 | 气泡显示原图 + 半透明红（含羽化） | ⏳ 待用户确认 |
+
+### 原 9C.7.16 / 9C.7B.16 状态（只增不改既有行）
+
+- 9C.7.16（发送时遮罩生效）/ 9C.7B.16（软边融合）：本轮 S1 已修复「画在预览节点、发在当前节点」
+  的静默失效根因，但 **GPU 端到端未跑**（Z29 / Z30）。按铁律不改 9C.7 / 9C.7-B 既有行；其最终
+  「通过」由用户真机确认后另行标注。
+
+### 通过标准
+
+- 通用 G1–G8 全过；9C.7C.1–9C.7C.10 全过；9C.7C.11–9C.7C.13 由用户真机确认。
+
+### 遗留说明（非阻断）
+
+- **Z-009**：气泡叠加无缓存 + 预览 ↔ 当前节点对齐单向。见 FROZEN「妥协/挂账清单」。
+- **App 层 UI 接线无自动化测试**。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 验收后动作
+
+1. 在「验收记录」追加“Step 9C.7-C 通过，日期：____”（待签）；
+2. 用户真机确认后，将 9C.7.16 / 9C.7B.16 标「本轮通过」（在其节内追加，不改既有行）。

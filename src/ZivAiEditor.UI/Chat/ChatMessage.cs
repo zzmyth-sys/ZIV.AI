@@ -29,6 +29,19 @@ public sealed class ChatMessage
     /// </summary>
     public IReadOnlyList<string> ImagePaths { get; init; } = Array.Empty<string>();
 
+    /// <summary>
+    /// The node's hand-drawn mask (E1): when set, the App overlays it (<b>semi-transparent
+    /// red</b>, feathered) on the bubble's image. A display hint only — the mask itself stays
+    /// a node property / file. <c>null</c> when the bubble's node has no mask.
+    /// </summary>
+    public string? MaskPath { get; init; }
+
+    /// <summary>
+    /// Feather radius (image pixels) used to render <see cref="MaskPath"/> as a soft overlay
+    /// in the bubble. <c>0</c> = hard 0 / 255 edge.
+    /// </summary>
+    public int MaskFeatherPx { get; init; }
+
     public bool IsError { get; init; }
 
     /// <summary>

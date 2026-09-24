@@ -49,9 +49,23 @@ public partial class ImagePreview
     private bool _maskPointerDown;
     private bool _suppressMaskExport;
     private int _maskLoadGeneration;
+    private bool _maskModeActive;
 
     /// <summary>Raised after a mask draw / clear (App stores it on the node).</summary>
     public event EventHandler<MaskCompletedEventArgs>? MaskCompleted;
+
+    /// <summary>
+    /// Raised when the mask brush / eraser becomes active (E2=A): the App aligns the working
+    /// node to the previewed node, so the node the user masks is the node the parser reads.
+    /// Not raised again while a mask tool stays active.
+    /// </summary>
+    public event EventHandler? MaskToolEntered;
+
+    /// <summary>
+    /// Raised when a mask PNG export is scheduled, carrying the chained task (E2 / S2). The App
+    /// keeps it at window level so a flush can await it even after this window closes.
+    /// </summary>
+    public event EventHandler<Task>? MaskExportScheduled;
 
     /// <summary>The mask state (diagnostics / tests).</summary>
     public MaskState? Mask => _mask;
@@ -82,7 +96,11 @@ public partial class ImagePreview
             _maskToolbar.FeatherChanged += OnToolbarFeatherChanged;
         }
 
-        _mask.Changed += (_, _) => OnMaskChanged();
+        // R1: Changed fires during a stroke (incremental repaint only); Committed fires once
+        // per durable change (stroke end / clear / undo / load) and drives the export + the
+        // full (feathered) rebuild.
+        _mask.Changed += (_, _) => OnMaskStrokeChanged();
+        _mask.Committed += (_, _) => OnMaskCommitted();
 
         if (_toolbar is not null)
         {
@@ -148,6 +166,8 @@ public partial class ImagePreview
         }
 
         var wantMask = IsMaskActive && _tools.HasImage;
+        var wasMaskActive = _maskModeActive;
+        _maskModeActive = wantMask;
 
         if (wantMask)
         {
@@ -192,6 +212,12 @@ public partial class ImagePreview
         }
 
         _maskOverlay?.InvalidateVisual();
+
+        // E2=A: entering a mask tool tells the App to make the previewed node current.
+        if (wantMask && !wasMaskActive)
+        {
+            MaskToolEntered?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     /// <summary>
@@ -357,7 +383,29 @@ public partial class ImagePreview
 
     // --- Change / export -------------------------------------------------------
 
-    private void OnMaskChanged()
+    /// <summary>
+    /// Intermediate stroke mutation (R1): patch only the touched rectangle of the overlay.
+    /// Deliberately does <b>not</b> rebuild the whole bitmap, apply feather, export, or touch
+    /// the session — so drawing never blocks the UI thread or storms the chat.
+    /// </summary>
+    private void OnMaskStrokeChanged()
+    {
+        if (_mask is null || _maskOverlay is null)
+        {
+            return;
+        }
+
+        if (_mask.IsStrokeActive && _mask.TakeDirtyRegion() is { } region)
+        {
+            _maskOverlay.PatchRegion(_mask, region.X, region.Y, region.Width, region.Height);
+        }
+    }
+
+    /// <summary>
+    /// Durable mask change (R1): full feathered rebuild, tool-flag refresh and one PNG export
+    /// (which in turn raises <c>MaskCompleted</c> → one <c>SetNodeMask</c> per stroke).
+    /// </summary>
+    private void OnMaskCommitted()
     {
         _maskOverlay?.MarkDirty();
 
@@ -397,8 +445,10 @@ public partial class ImagePreview
         }
 
         _nodeMask = spec;
-        MaskCompleted?.Invoke(this, new MaskCompletedEventArgs(_maskNodeId, spec));
 
+        // Start the export <b>before</b> raising MaskCompleted (S2): the App captures the
+        // chained task from MaskExportScheduled, then its MaskCompleted handler can await it
+        // (bubble overlay + save / close flush) without depending on this window staying open.
         if (spec is not null)
         {
             var sessionId = _maskSessionId;
@@ -408,7 +458,10 @@ public partial class ImagePreview
             var height = _mask.Height;
             var featherPx = _mask.FeatherPx;
             _maskWrite = RunMaskExportAsync(_maskWrite, sessionId, nodeId, pixels, width, height, featherPx);
+            MaskExportScheduled?.Invoke(this, _maskWrite);
         }
+
+        MaskCompleted?.Invoke(this, new MaskCompletedEventArgs(_maskNodeId, spec));
     }
 
     private async Task RunMaskExportAsync(
@@ -424,20 +477,25 @@ public partial class ImagePreview
         {
             await previous.ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // A failed earlier export must not block the next one.
+            // A failed earlier export must not block the next one (it was already logged).
+            MaskDiagnostics.Log($"[mask] previous export faulted: {ex.Message}");
         }
 
         try
         {
-            await _imaging.ExportMaskAsync(sessionId, nodeId, pixels, width, height, featherPx).ConfigureAwait(false);
+            var output = await _imaging
+                .ExportMaskAsync(sessionId, nodeId, pixels, width, height, featherPx)
+                .ConfigureAwait(false);
+            MaskDiagnostics.Log($"[mask] export ok node={nodeId} feather={featherPx} path={output}");
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Swallow IO / encode failures so the chained task never faults: the flush
-            // callers (send / save / close) await this task, and a missing mask file is
-            // handled downstream (no mask sent; a reload drops it with a warning).
+            // Do not swallow (R1/D): record the failure, then let the chained task fault.
+            // Every flush awaiter catches, and the next export skips a faulted predecessor.
+            MaskDiagnostics.Log($"[mask] export FAILED node={nodeId} feather={featherPx}: {ex}");
+            throw;
         }
     }
 

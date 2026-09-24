@@ -37,8 +37,11 @@ public partial class MainWindow
         {
             var preview = new ImagePreview(_imaging);
             _shell.ApplyChrome(preview);
-            preview.Closed += (_, _) =>
+            preview.Closed += async (_, _) =>
             {
+                // S2: wait for any in-flight mask export before dropping the reference, so a
+                // save / close right after a stroke still sees the PNG on disk.
+                await FlushPendingMaskAsync();
                 if (ReferenceEquals(_imagePreview, preview))
                 {
                     _imagePreview = null;
@@ -50,6 +53,11 @@ public partial class MainWindow
 
             // Step 9C.7: a completed mask draw updates the node's intrinsic mask.
             preview.MaskCompleted += OnPreviewMaskCompleted;
+
+            // E2: entering a mask tool aligns the working node; every export is tracked at
+            // window level so it can be flushed after the preview closes.
+            preview.MaskToolEntered += OnPreviewMaskToolEntered;
+            preview.MaskExportScheduled += OnPreviewMaskExportScheduled;
 
             // Step 9C.6-E: "save as" is handled here (the App owns the picker / session).
             preview.SaveRequested += (_, _) => _ = SavePreviewImageAsync(preview);

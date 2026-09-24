@@ -797,6 +797,66 @@ public class SessionViewModelTests
     }
 
     [Fact]
+    public void SetNodeMask_Shows_Mask_On_The_Bubble_And_Clears_It()
+    {
+        var session = new EditSession();
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var rootId = session.CurrentNodeId!;
+
+        vm.SetNodeMask(rootId, new MaskSpec
+        {
+            MaskImagePath = @"C:\img\m.png",
+            Width = 8,
+            Height = 8,
+            FeatherPx = 6,
+        });
+
+        var bubble = vm.Messages.Single(m => m.Role == ChatRole.System && m.ImagePath == Root);
+        Assert.Equal(@"C:\img\m.png", bubble.MaskPath);
+        Assert.Equal(6, bubble.MaskFeatherPx);
+
+        vm.SetNodeMask(rootId, null);
+
+        var cleared = vm.Messages.Single(m => m.Role == ChatRole.System && m.ImagePath == Root);
+        Assert.Null(cleared.MaskPath);
+        Assert.Equal(0, cleared.MaskFeatherPx);
+    }
+
+    [Fact]
+    public void AlignForMask_Moves_Current_To_Previewed_Node()
+    {
+        var session = new EditSession();
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var rootId = session.CurrentNodeId!;
+        var child = session.AppendNode(rootId, @"C:\img\child.png", "child");
+        vm.RefreshHistory();
+
+        Assert.Equal(child.NodeId, session.CurrentNodeId);
+
+        var moved = vm.AlignForMask(rootId);
+
+        Assert.True(moved);
+        Assert.Equal(rootId, session.CurrentNodeId);
+        Assert.Contains(vm.Messages, m => m.Role == ChatRole.System && m.Text.Contains("绘制遮罩"));
+    }
+
+    [Fact]
+    public void AlignForMask_NoOp_When_Already_Current_Or_Unknown()
+    {
+        var session = new EditSession();
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var rootId = session.CurrentNodeId!;
+
+        Assert.False(vm.AlignForMask(rootId));
+        Assert.False(vm.AlignForMask("missing"));
+        Assert.False(vm.AlignForMask(null));
+        Assert.Equal(rootId, session.CurrentNodeId);
+    }
+
+    [Fact]
     public void GetParentPipelineImagePath_Is_Null_For_Root()
     {
         var session = new EditSession();

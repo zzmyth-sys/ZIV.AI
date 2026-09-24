@@ -86,6 +86,9 @@ public partial class ImagePreview
     /// <summary>The image currently displayed (the crop result when one exists), or <c>null</c>.</summary>
     public string? DisplayPath => _displayPath ?? _path;
 
+    /// <summary>The session node currently shown (the crop / mask target), or <c>null</c>.</summary>
+    public string? NodeId => _nodeId;
+
     /// <summary>Wires the crop overlay / actions. Called from <see cref="Init"/>.</summary>
     private void InitCrop()
     {

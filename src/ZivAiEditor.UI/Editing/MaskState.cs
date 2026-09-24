@@ -21,8 +21,12 @@ public sealed class MaskState
     /// <summary>Highest brush / eraser diameter, in image pixels (slider clamp).</summary>
     public const int MaxBrushDiameter = 200;
 
-    /// <summary>Highest feather radius, in image pixels (slider clamp).</summary>
-    public const int MaxFeatherPx = 25;
+    /// <summary>
+    /// Highest feather radius, in image pixels (slider / setter clamp). E8 lowered this from
+    /// 25 to 15: GPU testing (<c>mask_feather_result.md</c>) showed a large feather weakens the
+    /// edit strength of the mask core, so the product cap is kept conservative.
+    /// </summary>
+    public const int MaxFeatherPx = 15;
 
     /// <summary>Maximum number of undo snapshots kept (D4/R4).</summary>
     public const int MaxUndo = 20;
@@ -49,8 +53,29 @@ public sealed class MaskState
     private double _lastX;
     private double _lastY;
 
-    /// <summary>Raised whenever the mask buffer / undo stack / content flag changes.</summary>
+    // Dirty region since the last TakeDirtyRegion(): allows the overlay to patch only the
+    // touched rectangle during a stroke instead of rebuilding the whole bitmap (R1).
+    private bool _dirtyAll;
+    private bool _hasDirtyRegion;
+    private int _dirtyMinX;
+    private int _dirtyMinY;
+    private int _dirtyMaxX;
+    private int _dirtyMaxY;
+
+    /// <summary>
+    /// Raised on <b>every</b> mutation, including the intermediate steps of an active stroke
+    /// (<see cref="BeginStroke"/> / <see cref="ContinueStroke"/>). Consumers that need live
+    /// feedback (e.g. the overlay) use it to repaint the changed region only.
+    /// </summary>
     public event EventHandler? Changed;
+
+    /// <summary>
+    /// Raised when a mutation produces a <b>durable</b> state (stroke end / clear / undo /
+    /// canvas (re)load). Only these need a full redraw and a PNG export, so an active stroke
+    /// never triggers the expensive downstream work (R1: one commit per stroke).
+    /// <see cref="Changed"/> is also raised immediately before this.
+    /// </summary>
+    public event EventHandler? Committed;
 
     /// <summary>Canvas width in pipeline-image pixels; 0 when no canvas is allocated.</summary>
     public int Width => _width;
@@ -101,7 +126,7 @@ public sealed class MaskState
     public void SetCanvas(int width, int height)
     {
         Allocate(width, height);
-        RaiseChanged();
+        RaiseCommitted();
     }
 
     /// <summary>
@@ -120,13 +145,12 @@ public sealed class MaskState
         }
 
         _hasContent = ComputeHasContent();
-        RaiseChanged();
+        RaiseCommitted();
     }
 
     /// <summary>
     /// Clears every pixel. When there is content the current buffer is pushed onto the undo
-    /// stack first, so a clear can be undone. A no-op on an empty mask. Raises
-    /// <see cref="Changed"/>.
+    /// stack first, so a clear can be undone. A no-op on an empty mask. Raises <see cref="Committed"/>.
     /// </summary>
     public void Clear()
     {
@@ -138,13 +162,14 @@ public sealed class MaskState
         PushUndo((byte[])_pixels.Clone());
         Array.Clear(_pixels, 0, _pixels.Length);
         _hasContent = false;
-        RaiseChanged();
+        MarkDirtyAll();
+        RaiseCommitted();
     }
 
     /// <summary>
     /// Restores the most recent snapshot (pushed by a completed stroke or a clear) and
     /// recomputes <see cref="HasContent"/>. A no-op when the stack is empty. Raises
-    /// <see cref="Changed"/>.
+    /// <see cref="Committed"/>.
     /// </summary>
     public void Undo()
     {
@@ -161,7 +186,8 @@ public sealed class MaskState
         }
 
         _hasContent = ComputeHasContent();
-        RaiseChanged();
+        MarkDirtyAll();
+        RaiseCommitted();
     }
 
     /// <summary>
@@ -216,7 +242,8 @@ public sealed class MaskState
     /// <summary>
     /// Ends the active stroke. The snapshot is committed to the undo stack only when the
     /// stroke changed at least one pixel; <see cref="HasContent"/> is recomputed. A no-op
-    /// when no stroke is active. Raises <see cref="Changed"/>.
+    /// when no stroke is active. Raises <see cref="Committed"/> (the single durable event per
+    /// stroke — R1).
     /// </summary>
     public void EndStroke()
     {
@@ -234,7 +261,7 @@ public sealed class MaskState
 
         _pendingSnapshot = null;
         _strokeChanged = false;
-        RaiseChanged();
+        RaiseCommitted();
     }
 
     /// <summary>
@@ -242,6 +269,52 @@ public sealed class MaskState
     /// export so the UI thread can keep mutating the live buffer (D3).
     /// </summary>
     public byte[] CopyPixels() => _pixels is null ? Array.Empty<byte>() : (byte[])_pixels.Clone();
+
+    /// <summary>
+    /// Copies one clipped rectangle out of the buffer (row-major, <paramref name="width"/>×
+    /// <paramref name="height"/>). Out-of-range / empty requests return an appropriately sized
+    /// zero buffer, so the overlay can patch a region without cloning the whole mask (R1).
+    /// </summary>
+    public byte[] CopyRegion(int x, int y, int width, int height)
+    {
+        var region = new byte[Math.Max(0, width) * Math.Max(0, height)];
+        if (_pixels is null || width <= 0 || height <= 0
+            || x < 0 || y < 0 || x + width > _width || y + height > _height)
+        {
+            return region;
+        }
+
+        for (var row = 0; row < height; row++)
+        {
+            Array.Copy(_pixels, (y + row) * _width + x, region, row * width, width);
+        }
+
+        return region;
+    }
+
+    /// <summary>
+    /// Returns and clears the rectangle touched since the last call (a full-canvas signal after
+    /// a load / clear / undo). <c>null</c> when nothing changed. Used by the overlay for the
+    /// in-stroke incremental repaint (R1).
+    /// </summary>
+    public (int X, int Y, int Width, int Height)? TakeDirtyRegion()
+    {
+        if (_dirtyAll)
+        {
+            _dirtyAll = false;
+            _hasDirtyRegion = false;
+            return _width > 0 && _height > 0 ? (0, 0, _width, _height) : null;
+        }
+
+        if (!_hasDirtyRegion)
+        {
+            return null;
+        }
+
+        var region = (_dirtyMinX, _dirtyMinY, _dirtyMaxX - _dirtyMinX + 1, _dirtyMaxY - _dirtyMinY + 1);
+        _hasDirtyRegion = false;
+        return region;
+    }
 
     private void Allocate(int width, int height)
     {
@@ -253,6 +326,7 @@ public sealed class MaskState
         _pendingSnapshot = null;
         _strokeActive = false;
         _strokeChanged = false;
+        MarkDirtyAll();
     }
 
     private void PushUndo(byte[] snapshot)
@@ -328,6 +402,11 @@ public sealed class MaskState
             }
         }
 
+        if (changed)
+        {
+            MarkDirtyRegion(minX, minY, maxX, maxY);
+        }
+
         return changed;
     }
 
@@ -349,5 +428,37 @@ public sealed class MaskState
         return false;
     }
 
+    private void MarkDirtyAll() => _dirtyAll = true;
+
+    private void MarkDirtyRegion(int x0, int y0, int x1, int y1)
+    {
+        if (_dirtyAll)
+        {
+            return;
+        }
+
+        if (!_hasDirtyRegion)
+        {
+            _hasDirtyRegion = true;
+            _dirtyMinX = x0;
+            _dirtyMinY = y0;
+            _dirtyMaxX = x1;
+            _dirtyMaxY = y1;
+            return;
+        }
+
+        if (x0 < _dirtyMinX) { _dirtyMinX = x0; }
+        if (y0 < _dirtyMinY) { _dirtyMinY = y0; }
+        if (x1 > _dirtyMaxX) { _dirtyMaxX = x1; }
+        if (y1 > _dirtyMaxY) { _dirtyMaxY = y1; }
+    }
+
     private void RaiseChanged() => Changed?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>Raises <see cref="Changed"/> then <see cref="Committed"/> (durable mutation).</summary>
+    private void RaiseCommitted()
+    {
+        RaiseChanged();
+        Committed?.Invoke(this, EventArgs.Empty);
+    }
 }

@@ -4965,3 +4965,61 @@ Q1 不拆程序集。
 - `1deaecf` = Z-006 收口（`IProjectMetadataStore` 端口）+ R-1 文档。
 - `06fd2bd` = R-2（UI 死引用清理）/ R-3（文档同步）/ R-4（AppContext 分组）。
 - 裁决：`d9195d4` / `a1df53e` / `1deaecf` **不改写**；步骤 1–5 不逐项拆 commit。
+
+---
+
+## [Step 9C.7-C] - 2026-09-25：遮罩修复（送管线对齐 / 持久化 / 气泡可视化 / 羽化上限）
+
+### 目标
+
+修复 9C.7 / 9C.7-B 遗留的「发送时遮罩不生效」（验收项 9C.7.16 / 9C.7B.16 未通过）与用户三项反馈
+（① 未持久化 / ② 结果不返回聊天流气泡 / ③ 不进管线）。流程：S0.1c 只读核查 + 只读调查报告 → 用户
+裁决（E1=① / E2=A+自动切 / E4=是 / E8=15 / E3,E5,E6,E7 不变）→ 实施 S1–S5。**无 GPU**（Z29 / Z30）。
+
+### 前置核查
+
+- **S0.1c 羽化算法**：`MaskFeather.Apply` 为 3 趟 box blur，核心区**未**被整片衰减，B 核区偏弱属
+  `noise_mask` 混合固有；E8 维持「上限 25 → 15」。
+- **mask_binary 现状**：`handlers._dispatch_op` 两处均 `False`（已修）；`mask_feather_result.md` 的
+  旧结论过时，未动 Python。
+
+### 做了什么
+
+- **S1 送管线对齐**：`SessionViewModel.AlignForMask` + `ImagePreview.MaskToolEntered` →
+  `MainWindow.OnPreviewMaskToolEntered`；进入遮罩模式把当前节点切到预览节点并 hint。
+- **S2 持久化 App 层**：`ImagePreview.MaskExportScheduled` 事件 + `MainWindow._pendingMaskExport`
+  窗口级任务；`ScheduleMaskExport` 先起任务再发事件；`FlushPendingMaskAsync` / 发送 / `OnClosing` /
+  预览 `Closed` 统一 await 窗口级任务。
+- **S3 气泡可视化**：`ChatMessage` 追加 `MaskPath` / `MaskFeatherPx`；`SetNodeMask` 非 Busy 时
+  `RebuildContext`；`RebuildContext` 填 mask；App `MainWindow.Chat` 叠加半透明红（`MaskOverlayBitmap`
+  与预览 `MaskOverlay` 共用），异步加载以 `_chatGeneration` 防串代；App 在 flush 后再刷一次。
+- **S4**：`MaskState.MaxFeatherPx` 25 → 15；`MaskToolbar` 滑块 Maximum 15。
+- **测试**：`SessionViewModelTests` +3（AlignForMask 移动 / no-op；SetNodeMask 气泡 mask）；
+  `MaskStateTests` 追加 E8 值断言。
+
+### 关键决策
+
+1. **当前节点为唯一真源**（E2=A）：parser 读 `GetCurrentMaskSpec()`，故预览节点必须先成为当前节点；
+   进入遮罩模式即切，避免「画在 A、发在 B」的静默失效。
+2. **窗口级导出任务**：遮罩导出是异步链，且预览窗可先关闭；任务上提窗口层后，保存 / 关闭 / 发送
+   都能确定等待。
+3. **气泡叠加 UI 层合成**：`MaskOverlayBitmap` 抽为预览与气泡共用，显示 = 导出同羽化函数；不落盘。
+4. **防串代**：`_chatGeneration` 保证迟到的异步叠加不画进已替换的聊天代。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- 构建 0/0；非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）**451 → 454 通过 / 0 失败**。
+- 三条数据流（对齐 → 注入；导出 → 保存；导出 → 气泡）见 `ACCEPTANCE.MD` Step 9C.7-C。
+- **未跑 GPU 端到端**；9C.7.16 / 9C.7B.16 待用户真机确认。
+
+### 遗留
+
+- **遮罩气泡叠加无缓存 / 对齐单向**（Z-009）。
+- **App 层 UI 接线无自动化测试**（与既有 App 层一致）。
+- **GPU 端到端**（发送时遮罩局部编辑 / 软边融合）待用户确认。
+
+### 备注
+
+- 无契约签名变化；未动 `python/server/*` / `ipc-protocol.md` / `C:\AI\ComfyUI_PIC` / 裁切 / outpaint /
+  `FindNodeByImagePath` / 主窗口遮罩编辑；无新 NuGet；文件均 < 600（Z8）。
+- `FROZEN.md` 尾部追加 9C.7-C + Z-009；`ACCEPTANCE.MD` 追加 9C.7-C；`INTERFACES.md` 追加 §10。

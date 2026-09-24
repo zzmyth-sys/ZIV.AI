@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using ZivAiEditor.App.Controls;
 using ZivAiEditor.UI.Chat;
 using Path = Avalonia.Controls.Shapes.Path;
 
@@ -88,7 +91,7 @@ public partial class MainWindow
         Child = child,
     };
 
-    private void AddPreview(Panel panel, string path)
+    private void AddPreview(Panel panel, string path, string? maskPath = null, int maskFeatherPx = 0)
     {
         try
         {
@@ -120,7 +123,12 @@ public partial class MainWindow
             AttachRerunMenuToImage(image, path);
             ToolTip.SetTip(image, "左键查看大图 / 右键重跑");
 
-            panel.Children.Add(image);
+            AddImageWithMaskOverlay(panel, image, bitmap, maskPath, maskFeatherPx, overlay =>
+            {
+                overlay.MaxWidth = BubbleImageSize;
+                overlay.MaxHeight = BubbleImageSize;
+                overlay.HorizontalAlignment = HorizontalAlignment.Left;
+            });
         }
         catch (Exception ex)
         {
@@ -134,18 +142,107 @@ public partial class MainWindow
     }
 
     /// <summary>
+    /// Adds <paramref name="image"/> to <paramref name="panel"/>, wrapping it in a Grid with a
+    /// display-only mask overlay when the node has a mask (E1). The overlay is loaded off the
+    /// UI thread and applied only while its chat generation is still current.
+    /// </summary>
+    private void AddImageWithMaskOverlay(
+        Panel panel,
+        Image image,
+        Bitmap original,
+        string? maskPath,
+        int maskFeatherPx,
+        Action<Image> configureOverlay)
+    {
+        if (string.IsNullOrWhiteSpace(maskPath) || !File.Exists(maskPath))
+        {
+            if (!string.IsNullOrWhiteSpace(maskPath))
+            {
+                MaskDiagnostics.Log($"[overlay] skip (file missing): {maskPath}");
+            }
+
+            panel.Children.Add(image);
+            return;
+        }
+
+        var host = new Grid
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+        host.Children.Add(image);
+        panel.Children.Add(host);
+
+        var generation = _chatGeneration;
+        _ = AddMaskOverlayAsync(host, original.PixelSize, maskPath, maskFeatherPx, generation, configureOverlay);
+    }
+
+    /// <summary>
+    /// Decodes the mask PNG, applies the same feather the preview / export use, and adds a
+    /// semi-transparent red overlay image aligned with the bubble image (E1, UI only).
+    /// </summary>
+    private async Task AddMaskOverlayAsync(
+        Grid host,
+        PixelSize size,
+        string maskPath,
+        int maskFeatherPx,
+        int generation,
+        Action<Image> configureOverlay)
+    {
+        var loaded = await _imaging.LoadMaskAsync(maskPath);
+        if (generation != _chatGeneration || loaded is not { } data)
+        {
+            MaskDiagnostics.Log(
+                $"[overlay] skip (gen {generation}/{_chatGeneration}, load={(loaded is null ? "null" : "ok")}): {maskPath}");
+            return;
+        }
+
+        // The mask lives in the pipeline-image pixel space, so it must match the bubble image.
+        if (data.Width != size.Width || data.Height != size.Height)
+        {
+            MaskDiagnostics.Log(
+                $"[overlay] skip (size {data.Width}x{data.Height} vs {size.Width}x{size.Height}): {maskPath}");
+            return;
+        }
+
+        var display = maskFeatherPx > 0
+            ? _imaging.FeatherMask(data.Pixels, data.Width, data.Height, maskFeatherPx)
+            : data.Pixels;
+
+        var overlay = MaskOverlayBitmap.Build(display, data.Width, data.Height);
+        if (overlay is null || generation != _chatGeneration)
+        {
+            MaskDiagnostics.Log($"[overlay] skip (build null or gen {generation}/{_chatGeneration}): {maskPath}");
+            overlay?.Dispose();
+            return;
+        }
+
+        _bitmaps.Add(overlay);
+        var image = new Image
+        {
+            Source = overlay,
+            Stretch = Stretch.Uniform,
+            IsHitTestVisible = false,
+        };
+        configureOverlay(image);
+        host.Children.Add(image);
+        MaskDiagnostics.Log($"[overlay] applied {data.Width}x{data.Height} feather={maskFeatherPx}: {maskPath}");
+    }
+
+    /// <summary>
     /// Renders a message's image(s) (Step 9C.10): a multi-image bubble (an image-pack root)
-    /// shows a horizontal thumbnail row, otherwise the existing single preview is used.
+    /// shows a horizontal thumbnail row, otherwise the existing single preview is used. E1: a
+    /// node's mask overlays its <b>main</b> image (the first thumbnail for a pack).
     /// </summary>
     private void AddMessageImages(Panel panel, ChatMessage message)
     {
         if (message.ImagePaths.Count > 1)
         {
-            AddPreviewPack(panel, message.ImagePaths);
+            AddPreviewPack(panel, message.ImagePaths, message.MaskPath, message.MaskFeatherPx);
         }
         else if (message.ImagePath is { Length: > 0 } path)
         {
-            AddPreview(panel, path);
+            AddPreview(panel, path, message.MaskPath, message.MaskFeatherPx);
         }
     }
 
@@ -157,7 +254,7 @@ public partial class MainWindow
     /// horizontal row plus a "+N" label when the pack is larger. Each thumbnail reuses the
     /// tracked bitmap path (Z9) and the click-to-preview / rerun-menu behavior.
     /// </summary>
-    private void AddPreviewPack(Panel panel, IReadOnlyList<string> paths)
+    private void AddPreviewPack(Panel panel, IReadOnlyList<string> paths, string? maskPath = null, int maskFeatherPx = 0)
     {
         const int maxThumbs = 4;
         var row = new StackPanel
@@ -170,7 +267,8 @@ public partial class MainWindow
         var shown = Math.Min(paths.Count, maxThumbs);
         for (var i = 0; i < shown; i++)
         {
-            AddPackThumb(row, paths[i]);
+            // E1: the mask belongs to the node's main image, i.e. the first thumbnail.
+            AddPackThumb(row, paths[i], i == 0 ? maskPath : null, maskFeatherPx);
         }
 
         if (paths.Count > shown)
@@ -187,7 +285,7 @@ public partial class MainWindow
         panel.Children.Add(row);
     }
 
-    private void AddPackThumb(Panel row, string path)
+    private void AddPackThumb(Panel row, string path, string? maskPath = null, int maskFeatherPx = 0)
     {
         try
         {
@@ -215,7 +313,11 @@ public partial class MainWindow
             AttachRerunMenuToImage(image, path);
             ToolTip.SetTip(image, "左键查看大图 / 右键重跑");
 
-            row.Children.Add(image);
+            AddImageWithMaskOverlay(row, image, bitmap, maskPath, maskFeatherPx, overlay =>
+            {
+                overlay.Width = PackThumbSize;
+                overlay.Height = PackThumbSize;
+            });
         }
         catch (Exception ex)
         {

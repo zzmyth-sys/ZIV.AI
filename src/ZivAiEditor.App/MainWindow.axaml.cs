@@ -45,6 +45,12 @@ public partial class MainWindow : Window
 
     private readonly List<Bitmap> _bitmaps = new();
 
+    /// <summary>
+    /// Bumped on every <see cref="RenderChat"/>; a chat image's async mask-overlay load checks
+    /// it so a late continuation cannot paint into a stream generation that has been replaced.
+    /// </summary>
+    private int _chatGeneration;
+
     private SessionViewModel _vm = null!;
     private FlowRunner _flow = null!;
     private ISessionPersistence _store = null!;
@@ -262,6 +268,7 @@ public partial class MainWindow : Window
         }
 
         ReleaseBitmaps();
+        _chatGeneration++;
         stream.Children.Clear();
         foreach (var message in _vm.Messages)
         {
@@ -462,12 +469,21 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Step 9C.7: a just-released mask stroke may still be exporting. Cancel this close
-        // once, await the flush, then re-enter so the dirty check sees the written file.
-        if (_imagePreview is { } preview && !preview.FlushMaskAsync().IsCompleted)
+        // Step 9C.7 / S2: a just-released mask stroke may still be exporting. Cancel this
+        // close once, await the window-level export, then re-enter so the dirty check sees the
+        // written file. Independent of whether the preview window is still open.
+        if (_pendingMaskExport is { IsCompleted: false } pendingMask)
         {
             e.Cancel = true;
-            await preview.FlushMaskAsync();
+            try
+            {
+                await pendingMask;
+            }
+            catch
+            {
+                // Exports swallow their own IO errors; a flush must never block the close.
+            }
+
             Close();
             return;
         }

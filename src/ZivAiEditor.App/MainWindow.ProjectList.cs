@@ -178,15 +178,26 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// Awaits the preview's pending mask export, if any (Step 9C.7). Called before reading
-    /// the dirty signature or saving, so a just-drawn mask is on disk. A no-op when no
-    /// preview is open.
+    /// Awaits the latest mask export, if one is still in flight (Step 9C.7 / S2). Called before
+    /// reading the dirty signature, saving, sending or closing, so a just-drawn mask is on disk.
+    /// Uses the <b>window-level</b> task (<see cref="_pendingMaskExport"/>), so it still works
+    /// after the preview window has been closed.
     /// </summary>
     private async Task FlushPendingMaskAsync()
     {
-        if (_imagePreview is not null)
+        var pending = _pendingMaskExport;
+        if (pending is not { IsCompleted: false })
         {
-            await _imagePreview.FlushMaskAsync();
+            return;
+        }
+
+        try
+        {
+            await pending;
+        }
+        catch (Exception)
+        {
+            // Exports swallow their own IO / encode errors; a flush must never throw.
         }
     }
 }

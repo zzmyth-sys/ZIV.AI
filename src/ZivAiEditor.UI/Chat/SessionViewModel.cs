@@ -238,6 +238,40 @@ public sealed partial class SessionViewModel
     {
         _writer.SetNodeMask(nodeId, mask);
         RefreshHistory();
+
+        // E1: the node's chat bubble shows the mask visualization (original + overlay), so a
+        // mask change must re-render the stream. Skipped while generating, to avoid clearing
+        // the in-flight bubble (mirrors SetNodeCrop).
+        if (!IsBusy)
+        {
+            RebuildContext();
+        }
+    }
+
+    /// <summary>
+    /// Aligns the working node to the node the preview is showing before a mask stroke (E2=A).
+    /// The parser reads the <b>current</b> node's mask, so the previewed node must become
+    /// current or a drawn mask would silently not reach the pipeline. Returns <c>true</c> when
+    /// the selection moved; a no-op (<c>false</c>) when the id is empty / unknown or already
+    /// current. On a move a chat hint tells the user which node is now the mask target.
+    /// </summary>
+    public bool AlignForMask(string? previewNodeId)
+    {
+        if (string.IsNullOrEmpty(previewNodeId)
+            || string.Equals(previewNodeId, _session.CurrentNodeId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // NavigateTo rebuilds the chat (root → node path) and returns false for an unknown id.
+        if (!NavigateTo(previewNodeId))
+        {
+            return false;
+        }
+
+        var shortId = previewNodeId.Length <= 8 ? previewNodeId : previewNodeId[..8];
+        AddHint($"已切换到节点 {shortId} 以绘制遮罩");
+        return true;
     }
 
     private MaskSpec? FindNodeMask(string nodeId)
@@ -323,6 +357,8 @@ public sealed partial class SessionViewModel
             Text = "起始图像",
             ImagePath = ChatFlowRules.PipelinePath(path[0]),
             ImagePaths = ChatFlowRules.BuildDisplayPack(path[0]),
+            MaskPath = path[0].Mask?.MaskImagePath,
+            MaskFeatherPx = path[0].Mask?.FeatherPx ?? 0,
             NodeId = path[0].NodeId,
         });
 
@@ -335,6 +371,8 @@ public sealed partial class SessionViewModel
                 Text = "完成",
                 ImagePath = ChatFlowRules.PipelinePath(node),
                 ImagePaths = new[] { ChatFlowRules.PipelinePath(node) },
+                MaskPath = node.Mask?.MaskImagePath,
+                MaskFeatherPx = node.Mask?.FeatherPx ?? 0,
                 NodeId = node.NodeId,
             });
         }

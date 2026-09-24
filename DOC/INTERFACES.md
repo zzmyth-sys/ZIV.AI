@@ -119,3 +119,14 @@
   羽化），依赖 `Contracts` + `ZIV.Core` + `ZIV.Imaging`（对应 §7 的 imaging 物理域）。
 - §1.5 `IImagingService` 的实现方为 `ImagingService`（`ZivAiEditor.Imaging`）；UI / App 只依赖端口。
 - 命名空间映射：`ZivAiEditor.Imaging`（程序集与命名空间同名），与 §7 映射一致。
+
+## 10. 追加说明（Step 9C.7-C · 遮罩修复）
+
+> 本节为**追加**（只增不改）。
+
+- **无新增 / 修改契约**。本轮改动在 `ZivAiEditor.UI`（`SessionViewModel.AlignForMask`，
+  `ChatMessage.MaskPath` / `MaskFeatherPx`，`MaskState.MaxFeatherPx` 25 → 15）与
+  `ZivAiEditor.App`（`ImagePreview.MaskToolEntered` / `MaskExportScheduled` 事件，`MainWindow`
+  窗口级遮罩导出任务 `_pendingMaskExport`，`MaskOverlayBitmap` 气泡 / 预览共用叠加）。
+- `MaskSpec.FeatherPx` 契约不变；`MaskFeather.MaxRadiusPx` 保持 25（纯函数内部钳制，产品路径受
+  `MaskState.MaxFeatherPx = 15` 限制）。

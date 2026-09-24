@@ -260,6 +260,7 @@ public class MaskStateTests
     {
         var mask = new MaskState();
         Assert.Equal(0, mask.FeatherPx);
+        Assert.Equal(15, MaskState.MaxFeatherPx); // E8: 25 -> 15
 
         mask.FeatherPx = -3;
         Assert.Equal(0, mask.FeatherPx);
@@ -282,5 +283,86 @@ public class MaskStateTests
 
         mask.EndStroke();
         Assert.False(mask.IsStrokeActive);
+    }
+
+    [Fact]
+    public void Stroke_Raises_Changed_During_But_Committed_Only_At_End()
+    {
+        var mask = Canvas(60, 60);
+        var changed = 0;
+        var committed = 0;
+        mask.Changed += (_, _) => changed++;
+        mask.Committed += (_, _) => committed++;
+
+        mask.BeginStroke(20, 20, erase: false);
+        mask.ContinueStroke(40, 40);
+
+        Assert.True(mask.IsStrokeActive);
+        Assert.True(changed >= 2);
+        Assert.Equal(0, committed); // R1: nothing durable mid-stroke
+
+        mask.EndStroke();
+
+        Assert.False(mask.IsStrokeActive);
+        Assert.Equal(1, committed); // one commit per stroke
+    }
+
+    [Fact]
+    public void Clear_And_Undo_Raise_Committed()
+    {
+        var mask = Canvas(40, 40);
+        mask.BeginStroke(20, 20, erase: false);
+        mask.EndStroke();
+
+        var committed = 0;
+        mask.Committed += (_, _) => committed++;
+
+        mask.Clear();
+        Assert.Equal(1, committed);
+
+        mask.Undo();
+        Assert.Equal(2, committed);
+    }
+
+    [Fact]
+    public void Dirty_Region_Tracks_Stamps_And_Is_Consumed()
+    {
+        var mask = Canvas(100, 100);
+
+        // SetCanvas marks the whole canvas dirty; taking consumes it.
+        var initial = mask.TakeDirtyRegion();
+        Assert.NotNull(initial);
+        Assert.Equal(100, initial!.Value.Width);
+        Assert.Null(mask.TakeDirtyRegion());
+
+        mask.BeginStroke(50, 50, erase: false);
+        var region = mask.TakeDirtyRegion();
+        Assert.NotNull(region);
+        Assert.True(region!.Value.Width > 0 && region.Value.Height > 0);
+        Assert.Null(mask.TakeDirtyRegion());
+
+        // Clear marks the whole canvas dirty again.
+        mask.EndStroke();
+        mask.Clear();
+        var full = mask.TakeDirtyRegion();
+        Assert.NotNull(full);
+        Assert.Equal(0, full!.Value.X);
+        Assert.Equal(0, full.Value.Y);
+        Assert.Equal(100, full.Value.Width);
+        Assert.Equal(100, full.Value.Height);
+    }
+
+    [Fact]
+    public void CopyRegion_Clips_And_Returns_Sub_Buffer()
+    {
+        var mask = Canvas(10, 10);
+        mask.BeginStroke(5, 5, erase: false);
+        mask.EndStroke();
+
+        Assert.Equal(100, mask.CopyRegion(0, 0, 10, 10).Length);
+
+        var outOfRange = mask.CopyRegion(5, 5, 10, 10);
+        Assert.Equal(100, outOfRange.Length);
+        Assert.All(outOfRange, value => Assert.Equal(0, value));
     }
 }
