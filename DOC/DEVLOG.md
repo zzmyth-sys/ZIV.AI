@@ -3631,3 +3631,108 @@ Approved，无 P0 / P1；R1–R5 澄清全部落实。
   `C:\AI\ComfyUI_PIC`；无新 NuGet / Python 依赖。
 - `contracts/ipc-protocol.md` 头部 `ipc_version` 升 `0.8`，§3.4 追加 `additional_images`，
   §7 追加 0.7 → 0.8 变更点。
+
+---
+
+## [Step 9C.7] - 2026-09-24：手绘遮罩（MaskCanvas）
+
+### 目标
+
+实现遮罩**画笔 / 橡皮 / 撤销 / 清空 + 二值 PNG 导出**（Z19），并接入送管线；遮罩为**节点属性**
+（类比裁切，可重编辑 / 持久化）。流程：只读调查（7 项）→ 用户裁决（D1–D7 + R1–R6）→
+light-rip（Large，含前置 / 后置复审）。
+
+### 用户裁决（D1–D7 + R1–R6）
+
+- **D1** = A：遮罩为节点属性（`EditNode.Mask` / `IEditNode.Mask` / `IEditSessionWriter.SetNodeMask`）。
+- **D2** = 遮罩坐标 = 当前 pipeline 图（裁切结果画布）；与裁切**数据上不互斥**（`ToolMode` 单选，
+  同一时刻只一个工具激活）；`SetNodeCrop` 裁切**实际变化**时清空该节点遮罩 + VM 提示
+  「裁切已改，遮罩已重置」。
+- **D3** = 纯逻辑 `byte[]` 缓冲（0/255）+ SKBitmap 仅导出；显示层用 Avalonia `WriteableBitmap`。
+- **D4** = `byte[]` 快照撤销栈，上限 20。
+- **D5** = 发送后**保留**。
+- **D6** = 固定画笔 40px（大小滑块登记遗留）。
+- **D7** = 持久化 `session.json`（新增 `mask` 字段，向后兼容，`FormatVersion` 仍为 1）。
+- **R1** = 落盘 `_cache/masks/{sessionId}/{nodeId}.png`（覆盖式）；项目保存拷 `{nodeId}_mask.png`。
+- **R2** = 导出 PNG 只含 0/255（像素级测试）；半透明红仅 UI。
+- **R3** = `ToolStateMachine.CanUndo` / `CanClearMask` 由 `MaskState` 喂入。
+- **R4** = 撤销栈有界 20；**R5** = 画笔轨迹插值；**R6** = `MaskSpec.Invert` 保持 false。
+
+### 前置只读调查（7 项，节选）
+
+- `EditPlan.Mask` / `PlanRequest.Mask` / `ToolInput.Mask` 三字段**已存在**，`QwenImage21EditTool`
+  已消费 `input.Mask?.MaskImagePath` → `EditRequest.MaskPath`；缺的只有 **UI → plan 注入**。
+- `CommandParser` 解析时**从不设** `Mask`；故新增 `IEditSession.GetCurrentMaskSpec()` 并在两条解析
+  路径注入。
+- 裁切模式（节点属性 + `_cache/crops` + `CropOverlay` + `ImagePreview.Crop` + `SessionStore` 拷贝 +
+  `SessionLoader` 解析）被完整类比。
+
+### 做了什么
+
+- **Contracts（追加式）**：`IEditNode` +`MaskSpec? Mask`；`IEditSession` +`GetCurrentMaskSpec()`；
+  `IEditSessionWriter` +`SetNodeMask`。既有成员 / 签名**零变化**。
+- **Agent**：`EditSession` 增 `EditNode.Mask` / `SetNodeMask` / `GetCurrentMaskSpec`；`SetNodeCrop`
+  仅在 `CropEquals` 为假时清空遮罩、否则保留；`Restore` / `SessionLoader.Rebuild` / `LoadFromJson`
+  均拷贝 `Mask`（节点重建不漏字段）。`CommandParser` 两条路径注入 `Mask`。`SessionStore` 新增内部
+  `SessionFileMask` DTO + 保存拷 `{nodeId}_mask.png`；`SessionLoader` 解析 / 缺文件丢弃 + 警告
+  （**保留节点**）。
+- **UI 逻辑**：`MaskState`（纯逻辑 `byte[]`：画笔 / 橡皮 / 插值 / 有界快照撤销 / 可撤销清空 /
+  边界钳制 / 全 0/255）；`MaskExporter`（8-bit 灰度 PNG 落盘 / 读回阈值化 / 会话清理，镜像
+  `ImageCropper`）。
+- **App**：`MaskOverlay`（自绘、`IsHitTestVisible=false`、显示用 `WriteableBitmap` 半透明红）；
+  `ImagePreview.Mask.cs`（指针路由、导出链式、`FlushMaskAsync`、`MaskCompleted`）；`MainWindow.Mask.cs`
+  → `SessionViewModel.SetNodeMask`；`ImagePreview.axaml` 叠加层 z-order 在 `CropOverlay` 之后。
+- **送管线**：`CommandParser` 注入 → `EditPlan.Mask` → `Executor` → `ToolInput.Mask` →
+  `QwenImage21EditTool` → `EditRequest.MaskPath`（链路既有，仅补注入）。
+- **测试**：新增 `MaskStateTests` / `MaskExporterTests`（含像素级 0/255）；扩充 `EditSessionTests` /
+  `SessionStoreTests` / `SessionLoaderTests` / `CommandParserTests` / `SessionViewModelTests`。
+- **文档**：本段 + `FROZEN.md` 尾部 9C.7 + `ACCEPTANCE.MD` Step 9C.7。
+
+### 关键决策
+
+1. **遮罩坐标 = pipeline 图**：与 `MainImagePath` 天然 1:1，无需裁剪 / 缩放；裁切变则遮罩失效
+   （清空 + 提示），避免尺寸不符。
+2. **D1 节点属性**：与裁切同构，可重编辑 / 持久化；发送后保留（D5）。
+3. **导出时机**：每次描边结束（`MaskState.Changed`）即**同步**写节点 `MaskSpec`（路径确定）+
+   **后台**落盘；导出**链式**（前一导出未完成则排队），避免旧帧覆盖新帧。
+4. **脏标记**：遮罩不新增节点，故 `ComputeSignature` 纳入 `node.Mask` 路径 / 尺寸 + 文件
+   mtime+长度，保证遮罩改动被 `IsDirty` 捕获（否则关闭不提示保存）。
+5. **保存 / 关闭 / 发送前 flush**：`FlushPendingMaskAsync` 在 `AskSaveIfDirtyAsync` /
+   `SaveCurrentAsync` / 项目切换 / `OnClosing` 前 await 未完成导出，避免 `CopyIfNeeded` 拷到未落盘文件。
+6. **清理**：`MaskExporter.CleanupSession/CleanupAll` 接入与 `ImageCropper` 相同生命周期
+   （启动 / 关闭 / 切项目 / 重置 root）。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**，排除 `Ipc*` / `PlannerIntegration`）→ **322 通过 / 0 失败**；
+  受影响类（MaskState / MaskExporter / EditSession / SessionStore / SessionLoader / CommandParser /
+  SessionViewModel）→ **125 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步不加载模型、不启动 Python、不占 GPU。
+- **Z8**：新增 / 改动文件均 < 600 行（遮罩 UI 独立 partial `ImagePreview.Mask.cs`）。
+
+### 复审修订（2026-09-24）
+
+- **P1（脏标记）**：后置复审发现 `ComputeSignature` 未含 `node.Mask` → 仅画遮罩不改脏、关闭不提示
+  保存；已纳入遮罩路径 / 尺寸 + 文件戳。
+- **P1（保存竞态）**：项目保存未 await 未完成导出 → `CopyIfNeeded` 静默跳过；已在
+  `AskSaveIfDirtyAsync` / `SaveCurrentAsync` / 切项目 / `OnClosing` 前 flush。
+- **P2（清理未接线）**：`MaskExporter.Cleanup*` 无生产调用点 → 已接入启动 / 关闭 / 切项目 / 重置。
+- **P2（导出异常）**：导出任务失败会 fault 并抛入 `async void` 路径 → 导出链内吞异常，flush 不再抛。
+
+### 遗留项
+
+- **画笔大小 UI 滑块**（D6 未做，固定 40px）。
+- **`MaskSpec.Width/Height` XML 注释**仍写「主图原始像素（SPEC §3.9）」，实际按 D2 用 pipeline
+  图坐标；属 Contracts 既有注释，本步不改（只增原则），仅登记。
+- **遮罩内容脏标记用文件 mtime+长度**作代理：极端情况下（同长度 + 同时戳粒度）可能漏判脏，
+  概率极低；如需强一致可改为内容哈希。
+- **App 层 UI 接线（脏标记 / flush / 关闭重入）无自动化测试**：`ComputeSignature` 私有且依赖窗口，
+  与既有 App 层一致由真机 / 无头探针覆盖。
+- **未跑 GPU 端到端**（Z29 / Z30）；发送时遮罩生效需 GPU 测试（待用户确认）。
+
+### 备注
+
+- 未改 `python/server/*` / `contracts/ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；无新 NuGet；
+  未改 chrome / 项目列表 / 分辨率选择器 / 图片导入 / 多图管线。
+- `FROZEN.md` 尾部追加 9C.7（追加式契约 + 持久化字段 + 语义）；`ACCEPTANCE.MD` 追加 Step 9C.7。

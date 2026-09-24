@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ZivAiEditor.Agent;
+using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Planning;
 using Xunit;
 
@@ -60,6 +61,48 @@ public class SessionStoreTests
             Cleanup(root);
             Cleanup(source);
             _ = cropSessionId;
+        }
+    }
+
+    [Fact]
+    public async Task Save_Then_Load_RoundTrips_Mask()
+    {
+        var root = NewRoot();
+        var source = NewRoot();
+
+        try
+        {
+            var store = new SessionStore(root);
+            var session = new EditSession();
+            session.SetRoot(WriteFile(source, "root.png"));
+            var rootNode = session.GetHistory()[0];
+
+            session.SetNodeMask(rootNode.NodeId, new MaskSpec
+            {
+                MaskImagePath = WriteFile(source, "mask.png"),
+                Width = 64,
+                Height = 48,
+                IsBinary = true,
+                Invert = false,
+            });
+
+            await store.SaveAsync(session, "遮罩项目");
+            var loaded = await store.LoadAsync(session.SessionId);
+
+            Assert.Empty(loaded.Warnings);
+            var loadedRoot = loaded.Session.GetHistory().Single(n => n.NodeId == rootNode.NodeId);
+            Assert.NotNull(loadedRoot.Mask);
+            Assert.Equal(64, loadedRoot.Mask!.Width);
+            Assert.Equal(48, loadedRoot.Mask.Height);
+            Assert.True(loadedRoot.Mask.IsBinary);
+            Assert.False(loadedRoot.Mask.Invert);
+            Assert.True(File.Exists(loadedRoot.Mask.MaskImagePath));
+            Assert.EndsWith(rootNode.NodeId + "_mask.png", loadedRoot.Mask.MaskImagePath, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Cleanup(root);
+            Cleanup(source);
         }
     }
 

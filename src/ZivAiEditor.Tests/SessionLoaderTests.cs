@@ -189,6 +189,83 @@ public class SessionLoaderTests
         }
     }
 
+    [Fact]
+    public void Missing_Mask_Image_Drops_Mask_With_Warning_But_Keeps_Node()
+    {
+        var dir = NewDir();
+        try
+        {
+            WriteImage(dir, "a.png");
+            var node = "{\"node_id\": \"a\", \"parent_node_id\": null, \"image_path\": \"a.png\", "
+                       + "\"command\": \"c\", \"created_at\": \"2026-01-01T00:00:00+00:00\", "
+                       + "\"mask\": {\"image_path\": \"gone_mask.png\", \"width\": 10, \"height\": 20, "
+                       + "\"is_binary\": true, \"invert\": false}}";
+            var json = MakeFile("p", "a", node);
+
+            var result = SessionLoader.LoadFromJson(json, dir);
+
+            var loaded = Assert.Single(result.Session.GetHistory());
+            Assert.Null(loaded.Mask);
+            Assert.Contains(result.Warnings, w => w.Contains("遮罩", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Cleanup(dir);
+        }
+    }
+
+    [Fact]
+    public void Json_Without_Mask_Field_Leaves_Node_Mask_Null()
+    {
+        var dir = NewDir();
+        try
+        {
+            WriteImage(dir, "a.png");
+            var json = MakeFile("p", "a", Node("a", null, "a.png"));
+
+            var result = SessionLoader.LoadFromJson(json, dir);
+
+            var loaded = Assert.Single(result.Session.GetHistory());
+            Assert.Null(loaded.Mask);
+            Assert.Empty(result.Warnings);
+        }
+        finally
+        {
+            Cleanup(dir);
+        }
+    }
+
+    [Fact]
+    public void Loads_Mask_When_File_Exists()
+    {
+        var dir = NewDir();
+        try
+        {
+            WriteImage(dir, "a.png");
+            WriteImage(dir, "a_mask.png");
+            var node = "{\"node_id\": \"a\", \"parent_node_id\": null, \"image_path\": \"a.png\", "
+                       + "\"command\": \"c\", \"created_at\": \"2026-01-01T00:00:00+00:00\", "
+                       + "\"mask\": {\"image_path\": \"a_mask.png\", \"width\": 64, \"height\": 48, "
+                       + "\"is_binary\": true, \"invert\": false}}";
+            var json = MakeFile("p", "a", node);
+
+            var result = SessionLoader.LoadFromJson(json, dir);
+
+            var loaded = Assert.Single(result.Session.GetHistory());
+            Assert.NotNull(loaded.Mask);
+            Assert.Equal(64, loaded.Mask!.Width);
+            Assert.Equal(48, loaded.Mask.Height);
+            Assert.True(loaded.Mask.IsBinary);
+            Assert.False(loaded.Mask.Invert);
+            Assert.True(File.Exists(loaded.Mask.MaskImagePath));
+            Assert.Empty(result.Warnings);
+        }
+        finally
+        {
+            Cleanup(dir);
+        }
+    }
+
     private static void Cleanup(string directory)
     {
         try

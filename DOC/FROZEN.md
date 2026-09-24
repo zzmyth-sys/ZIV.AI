@@ -2466,3 +2466,59 @@ Agent 编排，应下沉至 Agent；涉及 `IExecutor` 设计变更，单独立�
 
 - **GPU 3 场景验证**（`<image2>` / `<image3>` 引用）由用户执行（D2，本步不跑 GPU）。
 - **`commands.json` 的 `mode` 字段**仍后置。
+
+---
+
+## Step 9C.7 — 手绘遮罩（MaskCanvas）
+
+> 追加式冻结：以下均为**新增成员 / 新字段**，既有契约成员 / 签名**零变化**；语义变更仅说明。
+
+### 9C.7.1 契约（冻结 · 追加 → 非破坏）
+
+| 类型 | 文件 | 追加成员 |
+|---|---|---|
+| `IEditNode` | `ZivAiEditor.Contracts/Planning/IEditNode.cs` | `MaskSpec? Mask { get; }` |
+| `IEditSession` | `ZivAiEditor.Contracts/Planning/IEditSession.cs` | `MaskSpec? GetCurrentMaskSpec();` |
+| `IEditSessionWriter` | `ZivAiEditor.Contracts/Planning/IEditSessionWriter.cs` | `void SetNodeMask(string nodeId, MaskSpec? mask);` |
+
+- `MaskSpec` 复用既有类型（`MaskImagePath` / `Width` / `Height` / `IsBinary` / `Invert`），**未改**。
+- 遮罩为**节点属性**（D1）：至多一个 / 节点，可重编辑，**不新增节点**。
+
+### 9C.7.2 语义（冻结 · 变更说明）
+
+- **遮罩坐标 = 当前 pipeline 图**（裁切结果画布，D2），而非主图原图；与裁切**数据上不互斥**
+  （`ToolMode` 单选，同一时刻只一个工具激活）。
+- `EditSession.SetNodeCrop` 仅在裁切**实际变化**（X/Y/W/H/ResultImagePath 任一不同）时清空该节点
+  遮罩；同值重设**保留**遮罩。提示「裁切已改，遮罩已重置」由 `SessionViewModel` 发出（Agent 不发 UI 提示）。
+- 发送后遮罩**保留**（D5）。
+
+### 9C.7.3 持久化（冻结 · 追加字段，向后兼容）
+
+- `session.json` 每节点新增可选 `mask` 对象：`image_path`（项目内 `{nodeId}_mask.png`）/ `width` /
+  `height` / `is_binary` / `invert`。`SessionStore.FormatVersion` **仍为 1**；缺字段 → `null`
+  （旧项目加载不受影响）。
+- 项目保存时把 `_cache/masks/{sessionId}/{nodeId}.png` 拷为 `{nodeId}_mask.png`；加载缺文件 →
+  丢遮罩 + 警告，**保留节点**。
+
+### 9C.7.4 临时区（冻结 · Z14）
+
+- 遮罩临时落盘 `_cache/masks/{sessionId}/{nodeId}.png`（覆盖式，一节点一文件），生命周期与
+  `_cache/crops` 一致（启动 / 关闭 / 切项目 / 重置 root 清理）。
+
+### 9C.7.5 送管线（冻结）
+
+- `CommandParser.ParseSlashCommand` / `ParseNaturalLanguage` 以 `session.GetCurrentMaskSpec()` 注入
+  `EditPlan.Mask`；既有 `EditPlan.Mask` → `ToolInput.Mask` → `EditRequest.MaskPath` 链路不变。
+- 二值 PNG 仅含 0 / 255（Z19 / R2）；`MaskSpec.Invert` 保持 false（R6）。
+
+### 9C.7.6 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**，排除 `Ipc*` / `PlannerIntegration`）→ **322 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）；发送时遮罩生效由用户真机确认。
+
+### 9C.7.7 遗留项（冻结）
+
+- **画笔大小 UI 滑块**（D6 固定 40px）。
+- **`MaskSpec.Width/Height` 注释**仍为「主图原始像素」，与 D2 实际（pipeline 图坐标）不符，仅登记不改。
+- **遮罩脏标记用文件 mtime+长度**代理（非内容哈希）。

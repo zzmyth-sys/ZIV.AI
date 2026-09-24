@@ -170,6 +170,13 @@ public partial class MainWindow
         var progress = new Progress<TaskProgress>(OnProgress);
         try
         {
+            // Step 9C.7: the parser reads the current node's mask spec at submit time; make
+            // sure the mask PNG has been flushed to disk before the plan is built.
+            if (_imagePreview is not null)
+            {
+                await _imagePreview.FlushMaskAsync();
+            }
+
             await _vm.SubmitAsync(text, progress, _cts.Token, references);
         }
         catch (Exception ex)

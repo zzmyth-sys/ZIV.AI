@@ -27,6 +27,9 @@ internal static class Program
         // _cache/crops is an orphan from a previous run — clean it before the session starts.
         ImageCropper.CleanupAll();
 
+        // Step 9C.7: same for the mask temp area (_cache/masks).
+        MaskExporter.CleanupAll();
+
         var builder = BuildAvaloniaApp();
         builder.AfterSetup(b =>
         {

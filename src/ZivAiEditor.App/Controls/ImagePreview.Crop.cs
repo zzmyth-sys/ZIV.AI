@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Planning;
 using ZivAiEditor.UI.Editing;
 using ZivAiEditor.UI.Imaging;
@@ -119,17 +120,22 @@ public partial class ImagePreview
     /// <summary>
     /// Opens a node in the preview (Step 9C.6-B): remembers the node so crop edits target
     /// it, and shows the node's crop result when it has one. The node's original image is
-    /// kept for cropping and for the compare "right" side.
+    /// kept for cropping and for the compare "right" side. Step 9C.7: the node's mask is
+    /// also passed in so the mask overlay targets the same node.
     /// </summary>
-    public void LoadNode(string? sessionId, string? nodeId, string originalPath, CropSpec? crop)
+    public void LoadNode(string? sessionId, string? nodeId, string originalPath, CropSpec? crop, MaskSpec? mask = null)
     {
         _sessionId = sessionId;
         _nodeId = nodeId;
+        _maskSessionId = sessionId;
+        _maskNodeId = nodeId;
         _nodeOriginalPath = originalPath;
         _nodeCrop = crop;
         _displayPath = crop is { ResultImagePath.Length: > 0 } ? crop.ResultImagePath : originalPath;
         _pendingViewRestore = null;
         _viewBeforeCrop = null;
+
+        SetNodeMaskSource(mask);
 
         // While cropping, show the original (crop coordinates are original-relative);
         // RefreshCropBounds runs after the decode and re-seeds the rectangle.
@@ -141,6 +147,9 @@ public partial class ImagePreview
         {
             LoadImage(_displayPath);
         }
+
+        // A repeat display path skips the async load, so refresh the mask canvas here too.
+        RefreshMaskCanvas();
     }
 
     /// <summary>

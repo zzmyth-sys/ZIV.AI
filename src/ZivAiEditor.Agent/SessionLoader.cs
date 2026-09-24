@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Planning;
 
 namespace ZivAiEditor.Agent;
@@ -83,6 +84,27 @@ public static class SessionLoader
                 }
             }
 
+            MaskSpec? mask = null;
+            if (dtoNode.Mask is { } dtoMask)
+            {
+                var maskPath = Resolve(projectDirectory, dtoMask.ImagePath);
+                if (!string.IsNullOrWhiteSpace(maskPath) && File.Exists(maskPath))
+                {
+                    mask = new MaskSpec
+                    {
+                        MaskImagePath = maskPath,
+                        Width = dtoMask.Width,
+                        Height = dtoMask.Height,
+                        IsBinary = dtoMask.IsBinary,
+                        Invert = dtoMask.Invert,
+                    };
+                }
+                else
+                {
+                    warnings.Add($"节点 {ShortId(dtoNode.NodeId)} 的遮罩图缺失，已忽略遮罩。");
+                }
+            }
+
             nodes.Add(new EditNode
             {
                 NodeId = dtoNode.NodeId,
@@ -90,6 +112,7 @@ public static class SessionLoader
                 ImagePath = imagePath,
                 Command = dtoNode.Command,
                 Crop = crop,
+                Mask = mask,
                 CreatedAt = dtoNode.CreatedAt,
             });
         }
@@ -148,6 +171,7 @@ public static class SessionLoader
         ImagePath = node.ImagePath,
         Command = node.Command,
         Crop = node.Crop,
+        Mask = node.Mask,
         CreatedAt = node.CreatedAt,
     };
 

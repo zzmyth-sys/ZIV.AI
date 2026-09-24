@@ -129,8 +129,9 @@ public sealed class SessionViewModel
     {
         if (options.ImagePath is { Length: > 0 } image)
         {
-            // Replacing the root drops the previous DAG, so its crop temp files are orphans.
+            // Replacing the root drops the previous DAG, so its crop / mask temp files are orphans.
             ImageCropper.CleanupSession(_session.SessionId);
+            MaskExporter.CleanupSession(_session.SessionId);
             _writer.SetRoot(image);
         }
 
@@ -290,8 +291,9 @@ public sealed class SessionViewModel
             return;
         }
 
-        // Resetting the root drops the existing DAG, so its crop temp files are orphans.
+        // Resetting the root drops the existing DAG, so its crop / mask temp files are orphans.
         ImageCropper.CleanupSession(_session.SessionId);
+        MaskExporter.CleanupSession(_session.SessionId);
         _writer.ResetToRoot(imagePath);
         RefreshHistory();
         RebuildContext();
@@ -412,9 +414,14 @@ public sealed class SessionViewModel
     /// Sets (or clears) the intrinsic crop of one node (Step 9C.6-B) and refreshes the
     /// history. A crop is a node property, not an edit step: no node is added. A no-op when
     /// the node is unknown.
+    ///
+    /// <para>Step 9C.7 (D2): a crop change clears the node's mask; when that happens a hint
+    /// is appended to the chat after any context rebuild.</para>
     /// </summary>
     public void SetNodeCrop(string nodeId, CropSpec? crop)
     {
+        var hadMask = FindNodeMask(nodeId) is not null;
+
         _writer.SetNodeCrop(nodeId, crop);
         RefreshHistory();
 
@@ -425,6 +432,36 @@ public sealed class SessionViewModel
         {
             RebuildContext();
         }
+
+        if (hadMask && FindNodeMask(nodeId) is null)
+        {
+            AddHint("裁切已改，遮罩已重置");
+        }
+    }
+
+    /// <summary>
+    /// Sets (or clears) the hand-drawn mask of one node (Step 9C.7) and refreshes the
+    /// history. A mask is a node property, not an edit step: no node is added, and the
+    /// displayed pipeline image is unchanged, so the chat stream is not rebuilt. A no-op
+    /// when the node is unknown.
+    /// </summary>
+    public void SetNodeMask(string nodeId, MaskSpec? mask)
+    {
+        _writer.SetNodeMask(nodeId, mask);
+        RefreshHistory();
+    }
+
+    private MaskSpec? FindNodeMask(string nodeId)
+    {
+        foreach (var node in _session.GetHistory())
+        {
+            if (string.Equals(node.NodeId, nodeId, StringComparison.Ordinal))
+            {
+                return node.Mask;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

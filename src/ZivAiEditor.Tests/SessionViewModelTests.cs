@@ -1,5 +1,6 @@
 using ZivAiEditor.Agent;
 using ZivAiEditor.Contracts.Execution;
+using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Planning;
 using ZivAiEditor.UI;
 using ZivAiEditor.UI.Chat;
@@ -578,5 +579,50 @@ public class SessionViewModelTests
         vm.AddHint("请先导入图片");
 
         Assert.Contains(vm.Messages, m => m.Role == ChatRole.System && m.IsError && m.Text == "请先导入图片");
+    }
+
+    [Fact]
+    public void SetNodeMask_Forwards_To_Session_Without_Adding_A_Node()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var rootId = session.CurrentNodeId!;
+        var mask = new MaskSpec { MaskImagePath = @"C:\img\mask.png", Width = 32, Height = 32 };
+
+        vm.SetNodeMask(rootId, mask);
+
+        Assert.Single(vm.History);
+        Assert.Same(mask, session.Nodes[rootId].Mask);
+        Assert.Same(mask, vm.History[0].Node.Mask);
+        Assert.Same(mask, session.GetCurrentMaskSpec());
+    }
+
+    [Fact]
+    public void SetNodeCrop_That_Clears_Mask_Adds_Hint()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var rootId = session.CurrentNodeId!;
+        vm.SetNodeMask(rootId, new MaskSpec { MaskImagePath = @"C:\img\mask.png", Width = 32, Height = 32 });
+
+        vm.SetNodeCrop(rootId, new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\c.png" });
+
+        Assert.Null(session.Nodes[rootId].Mask);
+        Assert.Contains(vm.Messages, m => m.Role == ChatRole.System && m.Text == "裁切已改，遮罩已重置");
+    }
+
+    [Fact]
+    public void SetNodeCrop_Without_Mask_Adds_No_Reset_Hint()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var rootId = session.CurrentNodeId!;
+
+        vm.SetNodeCrop(rootId, new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\c.png" });
+
+        Assert.DoesNotContain(vm.Messages, m => m.Text == "裁切已改，遮罩已重置");
     }
 }

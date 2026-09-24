@@ -460,6 +460,16 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Step 9C.7: a just-released mask stroke may still be exporting. Cancel this close
+        // once, await the flush, then re-enter so the dirty check sees the written file.
+        if (_imagePreview is { } preview && !preview.FlushMaskAsync().IsCompleted)
+        {
+            e.Cancel = true;
+            await preview.FlushMaskAsync();
+            Close();
+            return;
+        }
+
         // Nothing to save when the session is empty or unchanged (Step 9C.6-E).
         var hasContent = _vm.History.Count > 0 || !string.IsNullOrEmpty(_session.RootImagePath);
         if (!hasContent || !IsDirty)

@@ -210,6 +210,7 @@ public sealed class CommandParser : ICommandParser
         {
             SourcePrompt = text,
             MainImagePath = mainImage ?? "",
+            Mask = session.GetCurrentMaskSpec(),
             Steps = new[] { step },
             Resolution = BuildResolution(command, args),
         };
@@ -241,6 +242,7 @@ public sealed class CommandParser : ICommandParser
         {
             SourcePrompt = prompt,
             MainImagePath = mainImage ?? "",
+            Mask = session.GetCurrentMaskSpec(),
             Steps = new[] { step },
         };
 

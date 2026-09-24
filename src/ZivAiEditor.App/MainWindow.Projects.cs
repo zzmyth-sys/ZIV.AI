@@ -260,11 +260,15 @@ public partial class MainWindow
                 return false;
             }
 
+            // Step 9C.7: let any in-flight mask export land before its temp dir is cleaned.
+            await FlushPendingMaskAsync();
+
             // Decision A: clean the OLD session's crop temp files BEFORE Restore rewrites SessionId.
             var oldId = _session.SessionId;
             if (!string.Equals(oldId, sessionId, StringComparison.Ordinal))
             {
                 ImageCropper.CleanupSession(oldId);
+                MaskExporter.CleanupSession(oldId); // Step 9C.7
             }
 
             _session.Restore(
@@ -295,6 +299,10 @@ public partial class MainWindow
 
     private async Task<bool> AskSaveIfDirtyAsync()
     {
+        // Step 9C.7: a mask export is written off-thread; flush it before reading the
+        // dirty signature so a just-drawn mask is neither missed nor half-written.
+        await FlushPendingMaskAsync();
+
         var hasContent = _vm.History.Count > 0 || !string.IsNullOrEmpty(_session.RootImagePath);
         if (!hasContent || !IsDirty)
         {
@@ -323,7 +331,11 @@ public partial class MainWindow
 
     private async Task ResetToEmptyProjectAsync()
     {
+        // Step 9C.7: let any in-flight mask export land before its temp dir is cleaned.
+        await FlushPendingMaskAsync();
+
         ImageCropper.CleanupSession(_session.SessionId);
+        MaskExporter.CleanupSession(_session.SessionId); // Step 9C.7
         var fresh = new EditSession();
         _session.Restore(fresh.GetHistory(), fresh.CurrentNodeId, fresh.SessionId, fresh.CreatedAt);
         _projectName = UnnamedProject;
@@ -339,6 +351,11 @@ public partial class MainWindow
         {
             return false;
         }
+
+        // Step 9C.7: the project save copies each node's mask temp PNG, so the pending
+        // export must land on disk first (otherwise SessionStore.CopyIfNeeded silently
+        // skips a not-yet-written file and the reload would drop the mask).
+        await FlushPendingMaskAsync();
 
         try
         {
@@ -429,6 +446,19 @@ public partial class MainWindow
         return UnnamedProject;
     }
 
+    /// <summary>
+    /// Awaits the preview's pending mask export, if any (Step 9C.7). Called before reading
+    /// the dirty signature or saving, so a just-drawn mask is on disk. A no-op when no
+    /// preview is open.
+    /// </summary>
+    private async Task FlushPendingMaskAsync()
+    {
+        if (_imagePreview is not null)
+        {
+            await _imagePreview.FlushMaskAsync();
+        }
+    }
+
     private string ComputeSignature()
     {
         var builder = new StringBuilder();
@@ -445,9 +475,41 @@ public partial class MainWindow
                        .Append(crop.ResultImagePath);
             }
 
+            if (node.Mask is { } mask)
+            {
+                // Step 9C.7: a mask adds no node, so without this a mask-only edit would
+                // look clean and the close prompt would not fire. The per-node file is
+                // overwritten in place, so its write stamp + length stand in for content.
+                builder.Append(mask.MaskImagePath).Append(',').Append(mask.Width).Append(',')
+                       .Append(mask.Height);
+                AppendFileStamp(builder, mask.MaskImagePath);
+            }
+
             builder.Append(';');
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// Appends a file's last-write ticks + length as a cheap content proxy (Step 9C.7).
+    /// A missing / unreadable file contributes nothing (treated as absent).
+    /// </summary>
+    private static void AppendFileStamp(StringBuilder builder, string? path)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return;
+            }
+
+            var info = new FileInfo(path);
+            builder.Append(':').Append(info.LastWriteTimeUtc.Ticks).Append(':').Append(info.Length);
+        }
+        catch (Exception)
+        {
+            // Unreadable stamp is not fatal — the mask path itself is already in the signature.
+        }
     }
 }

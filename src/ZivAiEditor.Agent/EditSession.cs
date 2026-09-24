@@ -1,3 +1,4 @@
+using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Planning;
 
 namespace ZivAiEditor.Agent;
@@ -112,6 +113,7 @@ public sealed class EditSession : IEditSession, IEditSessionWriter
                 ImagePath = node.ImagePath,
                 Command = node.Command,
                 Crop = node.Crop,
+                Mask = node.Mask,
                 CreatedAt = node.CreatedAt,
             };
         }
@@ -168,8 +170,44 @@ public sealed class EditSession : IEditSession, IEditSessionWriter
     /// <paramref name="nodeId"/> is unknown (defensive: the caller is the preview / close
     /// path, which must never throw). The root reference is re-pointed when the root node
     /// is updated, so <see cref="RootImagePath"/> stays valid.
+    ///
+    /// <para>Step 9C.7 (D2): when the crop actually <b>changes</b> the node's mask is
+    /// cleared, because the mask coordinates belong to the previous pipeline canvas. An
+    /// identical re-set preserves the mask.</para>
     /// </summary>
     public void SetNodeCrop(string nodeId, CropSpec? crop)
+    {
+        if (string.IsNullOrEmpty(nodeId) || !Nodes.TryGetValue(nodeId, out var node))
+        {
+            return;
+        }
+
+        var cropChanged = !CropEquals(node.Crop, crop);
+        var updated = new EditNode
+        {
+            NodeId = node.NodeId,
+            ParentNodeId = node.ParentNodeId,
+            ImagePath = node.ImagePath,
+            Command = node.Command,
+            CreatedAt = node.CreatedAt,
+            Crop = crop,
+            Mask = cropChanged ? null : node.Mask,
+        };
+
+        Nodes[nodeId] = updated;
+        if (ReferenceEquals(_rootNode, node))
+        {
+            _rootNode = updated;
+        }
+    }
+
+    /// <summary>
+    /// Sets (or clears) the hand-drawn mask of one node (Step 9C.7). Like
+    /// <see cref="SetNodeCrop"/> the node is rebuilt in place with the same identity /
+    /// parent / image / command / timestamp and its crop preserved. A no-op when
+    /// <paramref name="nodeId"/> is unknown.
+    /// </summary>
+    public void SetNodeMask(string nodeId, MaskSpec? mask)
     {
         if (string.IsNullOrEmpty(nodeId) || !Nodes.TryGetValue(nodeId, out var node))
         {
@@ -183,7 +221,8 @@ public sealed class EditSession : IEditSession, IEditSessionWriter
             ImagePath = node.ImagePath,
             Command = node.Command,
             CreatedAt = node.CreatedAt,
-            Crop = crop,
+            Crop = node.Crop,
+            Mask = mask,
         };
 
         Nodes[nodeId] = updated;
@@ -191,6 +230,39 @@ public sealed class EditSession : IEditSession, IEditSessionWriter
         {
             _rootNode = updated;
         }
+    }
+
+    /// <summary>
+    /// The current node's hand-drawn mask (Step 9C.7), or <c>null</c> when no node is
+    /// current or the node has no mask. Consumed by the command parser as the plan's mask.
+    /// </summary>
+    public MaskSpec? GetCurrentMaskSpec()
+    {
+        if (string.IsNullOrEmpty(CurrentNodeId) || !Nodes.TryGetValue(CurrentNodeId, out var node))
+        {
+            return null;
+        }
+
+        return node.Mask;
+    }
+
+    private static bool CropEquals(CropSpec? a, CropSpec? b)
+    {
+        if (ReferenceEquals(a, b))
+        {
+            return true;
+        }
+
+        if (a is null || b is null)
+        {
+            return false;
+        }
+
+        return a.X == b.X
+               && a.Y == b.Y
+               && a.Width == b.Width
+               && a.Height == b.Height
+               && string.Equals(a.ResultImagePath, b.ResultImagePath, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -377,6 +449,12 @@ public sealed class EditNode : IEditNode
     /// per node — re-adjusting replaces it, never appends a node.
     /// </summary>
     public CropSpec? Crop { get; init; }
+
+    /// <summary>
+    /// The node's hand-drawn mask (Step 9C.7); <c>null</c> when unmasked. At most one per
+    /// node — re-drawing replaces it, never appends a node. Cleared when the crop changes.
+    /// </summary>
+    public MaskSpec? Mask { get; init; }
 
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.Now;
 }

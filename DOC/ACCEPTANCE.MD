@@ -1978,3 +1978,58 @@ V4（App 装配统一）、#6（删死状态写入）、#7（导入事件命名�
 - **GPU 3 场景验证**（`<image2>` / `<image3>` 引用）由用户执行（D2）。
 - **未跑 GPU 端到端**（Z29 / Z30）。
 - **`commands.json` 的 `mode` 字段**仍后置。
+
+---
+
+## Step 9C.7 验收：手绘遮罩（MaskCanvas）
+
+**目标**：遮罩画笔 / 橡皮 / 撤销 / 清空 + 二值 PNG 导出（Z19），节点属性，接入送管线；裁切变化
+清空遮罩。范围外：羽化 / 膨胀 / 智能遮罩 / 遮罩模板 / 多图遮罩作用域 / AI 辅助遮罩 / 画笔大小
+UI（D6 遗留）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 仅追加契约成员；无新项目引用 / 反向 / 循环依赖 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `IEditNode.Mask` / `IEditSession.GetCurrentMaskSpec` / `IEditSessionWriter.SetNodeMask` 均为追加；既有签名零变化 | ✅ |
+| G4 | 未授权修改检查 | 无既有冻结签名被改；追加已在 FROZEN 9C.7 记录 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `FROZEN` 追加 9C.7 | ✅ |
+| G6 | 便携性未破 | 临时区 `_cache/masks` 随程序目录（Z14）；`session.json` 追加可选字段（v1 兼容） | ✅ |
+| G7 | AI 推理进程隔离未破 | 遮罩仅落 PNG 路径，经 IPC 传后端；无 C# → GPU 直连 | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.7.1 | 画笔 / 橡皮 | `MaskStateTests` | 画笔置 255 / 橡皮清 0；`HasContent` / `CanClear` 正确 | ✅ |
+| 9C.7.2 | 轨迹插值 | `MaskStateTests` | 线段中点连续无断点 | ✅ |
+| 9C.7.3 | 撤销 / 有界 | `MaskStateTests` | 撤销恢复；栈上限 20 | ✅ |
+| 9C.7.4 | 清空 | `MaskStateTests` | 清空后可撤销恢复 | ✅ |
+| 9C.7.5 | 边界钳制 | `MaskStateTests` | 越界坐标不抛、仅界内像素 | ✅ |
+| 9C.7.6 | 二值导出 | `MaskExporterTests` | 解码后每像素恰为 0 或 255 | ✅ |
+| 9C.7.7 | 落盘 / 读回 | `MaskExporterTests` | 往返一致；覆盖式；清理幂等 | ✅ |
+| 9C.7.8 | 节点属性 | `EditSessionTests` | 设置遮罩不新增节点；`SetNodeMask` 保裁切 | ✅ |
+| 9C.7.9 | 裁切清空遮罩 | `EditSessionTests` / `SessionViewModelTests` | 裁切变化清空 + 提示；同值保留 | ✅ |
+| 9C.7.10 | 持久化 | `SessionStoreTests` / `SessionLoaderTests` | 往返含 w/h/is_binary/invert；缺文件丢遮罩保留节点；无字段兼容 | ✅ |
+| 9C.7.11 | 送管线注入 | `CommandParserTests` | `EditPlan.Mask.MaskImagePath` = 节点遮罩 | ✅ |
+| 9C.7.12 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；非 GPU 322 通过 | ✅ |
+| 9C.7.13 | 无 GPU 负载 | 构建 / 测试 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.7.14 | 手动：涂抹 / 擦除 / 撤销 / 清空 | 用户 | 交互正确 | ⏳ 待用户确认 |
+| 9C.7.15 | 手动：导出 PNG 黑白 | 用户 | 图片查看器仅见黑白 | ⏳ 待用户确认 |
+| 9C.7.16 | 手动：发送时遮罩生效 | 用户（GPU） | 后端按遮罩局部编辑 | ⏳ 待用户确认 |
+
+### Step 9C.7 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.7.1–9C.7.13 全过；9C.7.14–9C.7.16 由用户真机确认。
+
+### Step 9C.7 遗留说明（非阻断）
+
+- **画笔大小 UI 滑块**（D6 未做，固定 40px）。
+- **`MaskSpec.Width/Height` 注释**与 D2 实际坐标不符（仅登记，不改既有注释）。
+- **遮罩脏标记用文件 mtime+长度**代理（非内容哈希）。
+- **App 层 UI 接线无自动化测试**（私有 + 依赖窗口）。
+- **未跑 GPU 端到端**（Z29 / Z30）。

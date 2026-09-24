@@ -1,3 +1,5 @@
+using ZivAiEditor.Contracts.Imaging;
+
 namespace ZivAiEditor.Contracts.Planning;
 
 /// <summary>
@@ -27,6 +29,13 @@ public interface IEditNode
     /// never a node of its own. <c>null</c> when the node is uncropped.
     /// </summary>
     CropSpec? Crop { get; }
+
+    /// <summary>
+    /// The node's hand-drawn mask (Step 9C.7): at most one per node, re-drawable, never a
+    /// node of its own. <c>null</c> when the node has no mask. Coordinates are the node's
+    /// current pipeline (crop-result) image pixels.
+    /// </summary>
+    MaskSpec? Mask { get; }
 
     DateTimeOffset CreatedAt { get; }
 }

@@ -149,6 +149,7 @@ public partial class ImagePreview : Window
         _model.SetImage(bitmap.Size.Width, bitmap.Size.Height);
         ApplyModel();
         RefreshCropBounds();
+        RefreshMaskCanvas();
         ApplyPendingViewRestore();
 
         if (_emptyLabel is not null)
@@ -201,6 +202,7 @@ public partial class ImagePreview : Window
         }
 
         InitCrop();
+        InitMask();
 
         // Right-slot title-bar buttons (reset view / compare). Marked "User" so the OS
         // treats them as client content inside the caption area.
@@ -298,6 +300,7 @@ public partial class ImagePreview : Window
         HideScrollBars();
         _overlay?.InvalidateVisual();
         _cropOverlay?.InvalidateVisual();
+        _maskOverlay?.InvalidateVisual();
 
         // The scroll-bar range follows the new zoom one layout pass later; re-apply
         // the offset then so the anchored position survives the range update.
@@ -412,6 +415,13 @@ public partial class ImagePreview : Window
             return;
         }
 
+        // Mask mode owns the pointer: stamp the brush / eraser (no pan).
+        if (IsMaskActive)
+        {
+            MaskOnPressed(_pressPoint, e);
+            return;
+        }
+
         // In compare mode a press near the divider starts a divider drag instead of a pan.
         if (_compareState.IsCompareMode && IsNearDivider(_pressPoint.X))
         {
@@ -439,6 +449,12 @@ public partial class ImagePreview : Window
         if (IsCropActive)
         {
             CropOnMoved(point);
+            return;
+        }
+
+        if (IsMaskActive)
+        {
+            MaskOnMoved(point);
             return;
         }
 
@@ -481,6 +497,12 @@ public partial class ImagePreview : Window
             return;
         }
 
+        if (IsMaskActive)
+        {
+            MaskOnReleased(e);
+            return;
+        }
+
         if (!_pressed)
         {
             return;
@@ -519,6 +541,7 @@ public partial class ImagePreview : Window
         _model.ClearImage();
         _pendingViewRestore = null;
         _viewBeforeCrop = null;
+        ResetMask();
 
         if (_box is not null)
         {
@@ -566,6 +589,7 @@ public partial class ImagePreview : Window
     {
         DisposeBitmap();
         DisposeParentBitmap();
+        ResetMask();
     }
 
     private static double Distance(Point a, Point b)

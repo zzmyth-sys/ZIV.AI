@@ -1,4 +1,5 @@
 using ZivAiEditor.Agent;
+using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Planning;
 using Xunit;
 
@@ -376,5 +377,102 @@ public class EditSessionTests
         Assert.Null(session.Nodes[rootId].Crop);
         Assert.Equal(@"C:\img\root.png", session.GetCurrentPipelineImagePath());
         Assert.Equal(@"C:\img\root.png", session.RootImagePath);
+    }
+
+    [Fact]
+    public void SetNodeMask_Sets_Mask_On_Node()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        var mask = new MaskSpec { MaskImagePath = @"C:\img\m.png", Width = 10, Height = 20 };
+
+        session.SetNodeMask(rootId, mask);
+
+        Assert.Same(mask, session.Nodes[rootId].Mask);
+        Assert.Same(mask, session.GetCurrentMaskSpec());
+    }
+
+    [Fact]
+    public void SetNodeMask_Preserves_Crop()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        var crop = new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\c.png" };
+        session.SetNodeCrop(rootId, crop);
+
+        session.SetNodeMask(rootId, new MaskSpec { MaskImagePath = @"C:\img\m.png", Width = 4, Height = 4 });
+
+        Assert.Same(crop, session.Nodes[rootId].Crop);
+    }
+
+    [Fact]
+    public void SetNodeMask_Unknown_Node_Is_NoOp()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+
+        session.SetNodeMask("missing", new MaskSpec { MaskImagePath = @"C:\img\m.png", Width = 1, Height = 1 });
+
+        Assert.Null(session.GetCurrentMaskSpec());
+        Assert.Single(session.Nodes);
+    }
+
+    [Fact]
+    public void SetNodeCrop_Same_Crop_Preserves_Mask()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        session.SetNodeCrop(rootId, new CropSpec { X = 1, Y = 2, Width = 30, Height = 40, ResultImagePath = @"C:\img\c.png" });
+        var mask = new MaskSpec { MaskImagePath = @"C:\img\m.png", Width = 8, Height = 8 };
+        session.SetNodeMask(rootId, mask);
+
+        // An identical crop (fresh instance, same values) must not drop the mask.
+        session.SetNodeCrop(rootId, new CropSpec { X = 1, Y = 2, Width = 30, Height = 40, ResultImagePath = @"C:\img\c.png" });
+
+        Assert.Same(mask, session.Nodes[rootId].Mask);
+    }
+
+    [Fact]
+    public void SetNodeCrop_Different_Crop_Clears_Mask()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        session.SetNodeCrop(rootId, new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\a.png" });
+        session.SetNodeMask(rootId, new MaskSpec { MaskImagePath = @"C:\img\m.png", Width = 8, Height = 8 });
+
+        session.SetNodeCrop(rootId, new CropSpec { Width = 20, Height = 20, ResultImagePath = @"C:\img\b.png" });
+
+        Assert.Null(session.Nodes[rootId].Mask);
+        Assert.NotNull(session.Nodes[rootId].Crop);
+    }
+
+    [Fact]
+    public void SetNodeCrop_Clearing_To_Null_Clears_Mask()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        session.SetNodeCrop(rootId, new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\a.png" });
+        session.SetNodeMask(rootId, new MaskSpec { MaskImagePath = @"C:\img\m.png", Width = 8, Height = 8 });
+
+        session.SetNodeCrop(rootId, null);
+
+        Assert.Null(session.Nodes[rootId].Mask);
+    }
+
+    [Fact]
+    public void GetCurrentMaskSpec_Null_When_No_Mask()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+
+        Assert.Null(session.GetCurrentMaskSpec());
+
+        var empty = new EditSession();
+        Assert.Null(empty.GetCurrentMaskSpec());
     }
 }

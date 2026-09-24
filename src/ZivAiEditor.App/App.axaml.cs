@@ -50,6 +50,7 @@ public partial class App : Application
                 if (_context is { } ctx)
                 {
                     ImageCropper.CleanupSession(ctx.Session.SessionId);
+                    MaskExporter.CleanupSession(ctx.Session.SessionId); // Step 9C.7
                 }
 
                 _context?.Dispose();

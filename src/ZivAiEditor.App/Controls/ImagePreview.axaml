@@ -65,6 +65,9 @@
         <!-- Crop overlay + floating confirm / cancel actions (Step 9C.4). -->
         <c:CropOverlay x:Name="PART_CropOverlay" IsVisible="False" />
 
+        <!-- Mask overlay (Step 9C.7): semi-transparent red where painted. -->
+        <c:MaskOverlay x:Name="PART_MaskOverlay" IsVisible="False" />
+
         <Border x:Name="PART_CropActions"
                 Margin="8"
                 Padding="6"

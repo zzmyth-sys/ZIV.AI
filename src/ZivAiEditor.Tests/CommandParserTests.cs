@@ -232,4 +232,38 @@ public class CommandParserTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task Plan_Carries_Current_Node_Mask()
+    {
+        var parser = ParserWithoutFile();
+        var session = SessionWithImage();
+        var rootId = session.CurrentNodeId!;
+        session.SetNodeMask(rootId, new MaskSpec
+        {
+            MaskImagePath = @"C:\img\mask.png",
+            Width = 32,
+            Height = 32,
+            IsBinary = true,
+        });
+
+        var slash = await parser.ParseAsync("/去水印", session);
+        var natural = await parser.ParseAsync("把天空换成日落", session);
+
+        Assert.NotNull(slash.Plan!.Mask);
+        Assert.Equal(@"C:\img\mask.png", slash.Plan.Mask!.MaskImagePath);
+        Assert.NotNull(natural.Plan!.Mask);
+        Assert.Equal(@"C:\img\mask.png", natural.Plan.Mask!.MaskImagePath);
+    }
+
+    [Fact]
+    public async Task Plan_Has_No_Mask_When_Node_Unmasked()
+    {
+        var parser = ParserWithoutFile();
+
+        var result = await parser.ParseAsync("/去水印", SessionWithImage());
+
+        Assert.True(result.Success);
+        Assert.Null(result.Plan!.Mask);
+    }
 }

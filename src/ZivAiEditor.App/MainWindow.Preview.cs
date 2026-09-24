@@ -47,6 +47,9 @@ public partial class MainWindow
             // Step 9C.6-B: a confirmed crop updates the node's intrinsic crop.
             preview.CropCompleted += OnPreviewCropCompleted;
 
+            // Step 9C.7: a completed mask draw updates the node's intrinsic mask.
+            preview.MaskCompleted += OnPreviewMaskCompleted;
+
             // Step 9C.6-E: "save as" is handled here (the App owns the picker / session).
             preview.SaveRequested += (_, _) => _ = SavePreviewImageAsync(preview);
 
@@ -60,7 +63,7 @@ public partial class MainWindow
 
         // The clicked path may be the node's own image or its crop result; always pass the
         // node's own image as the crop source so re-cropping never chains.
-        _imagePreview.LoadNode(_vm.Session.SessionId, node?.NodeId, node?.ImagePath ?? path, node?.Crop);
+        _imagePreview.LoadNode(_vm.Session.SessionId, node?.NodeId, node?.ImagePath ?? path, node?.Crop, node?.Mask);
 
         // Swipe-compare reference: the parent node's pipeline image (Step 9C.6-B); null
         // for the root image, which disables the compare button.

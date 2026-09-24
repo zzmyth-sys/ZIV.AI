@@ -1,3 +1,5 @@
+using ZivAiEditor.Contracts.Imaging;
+
 namespace ZivAiEditor.Contracts.Planning;
 
 /// <summary>
@@ -33,6 +35,12 @@ public interface IEditSession
     /// the image an AI edit consumes. Returns <c>null</c> when no node is current.
     /// </summary>
     string? GetCurrentPipelineImagePath();
+
+    /// <summary>
+    /// The current node's hand-drawn mask (Step 9C.7), or <c>null</c> when no node is
+    /// current or the node has no mask. Consumed by the command parser as the plan's mask.
+    /// </summary>
+    MaskSpec? GetCurrentMaskSpec();
 
     /// <summary>All nodes, oldest first (stable for equal timestamps).</summary>
     IReadOnlyList<IEditNode> GetHistory();

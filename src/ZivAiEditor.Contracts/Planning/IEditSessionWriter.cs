@@ -1,3 +1,5 @@
+using ZivAiEditor.Contracts.Imaging;
+
 namespace ZivAiEditor.Contracts.Planning;
 
 /// <summary>
@@ -34,4 +36,11 @@ public interface IEditSessionWriter
     /// preserved. A no-op when <paramref name="nodeId"/> is unknown.
     /// </summary>
     void SetNodeCrop(string nodeId, CropSpec? crop);
+
+    /// <summary>
+    /// Sets (or clears) the hand-drawn mask of one node (Step 9C.7). Like the crop it is a
+    /// node property — no node is added, and the node's identity / parent / image are
+    /// preserved. A no-op when <paramref name="nodeId"/> is unknown.
+    /// </summary>
+    void SetNodeMask(string nodeId, MaskSpec? mask);
 }

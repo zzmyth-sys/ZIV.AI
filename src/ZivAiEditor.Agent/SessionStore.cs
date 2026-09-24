@@ -286,6 +286,21 @@ public sealed class SessionStore
                 };
             }
 
+            SessionFileMask? mask = null;
+            if (node.Mask is { } maskSpec && !string.IsNullOrWhiteSpace(maskSpec.MaskImagePath))
+            {
+                var maskName = node.NodeId + "_mask.png";
+                CopyIfNeeded(maskSpec.MaskImagePath, Path.Combine(directory, maskName));
+                mask = new SessionFileMask
+                {
+                    ImagePath = maskName,
+                    Width = maskSpec.Width,
+                    Height = maskSpec.Height,
+                    IsBinary = maskSpec.IsBinary,
+                    Invert = maskSpec.Invert,
+                };
+            }
+
             nodes.Add(new SessionFileNode
             {
                 NodeId = node.NodeId,
@@ -293,6 +308,7 @@ public sealed class SessionStore
                 ImagePath = imageName,
                 Command = node.Command,
                 Crop = crop,
+                Mask = mask,
                 CreatedAt = node.CreatedAt,
             });
         }
@@ -416,6 +432,9 @@ internal sealed class SessionFileNode
     [JsonPropertyName("crop")]
     public SessionFileCrop? Crop { get; init; }
 
+    [JsonPropertyName("mask")]
+    public SessionFileMask? Mask { get; init; }
+
     [JsonPropertyName("created_at")]
     public DateTimeOffset CreatedAt { get; init; }
 }
@@ -438,8 +457,28 @@ internal sealed class SessionFileCrop
     public string ResultImagePath { get; init; } = "";
 }
 
+internal sealed class SessionFileMask
+{
+    /// <summary>Relative mask image name (<c>{NodeId}_mask.png</c>), resolved against the project dir.</summary>
+    [JsonPropertyName("image_path")]
+    public string ImagePath { get; init; } = "";
+
+    [JsonPropertyName("width")]
+    public int Width { get; init; }
+
+    [JsonPropertyName("height")]
+    public int Height { get; init; }
+
+    [JsonPropertyName("is_binary")]
+    public bool IsBinary { get; init; } = true;
+
+    [JsonPropertyName("invert")]
+    public bool Invert { get; init; }
+}
+
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(SessionFileDto))]
+[JsonSerializable(typeof(SessionFileMask))]
 internal partial class SessionStoreJsonContext : JsonSerializerContext
 {
 }
