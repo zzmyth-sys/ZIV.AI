@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using SkiaSharp;
 using ZIV.Imaging.Codecs.Skia;
 
-namespace ZivAiEditor.UI.Imaging;
+namespace ZivAiEditor.Imaging;
 
 /// <summary>
 /// Crops (or outpaints) a source image to a pixel rectangle and writes the result as a new
@@ -23,7 +23,8 @@ namespace ZivAiEditor.UI.Imaging;
 /// startup. AI result images and user imports are untouched.</para>
 ///
 /// <para>Pure BCL + SkiaSharp + ZIV.Imaging, so it is unit-testable without a UI thread
-/// or GPU.</para>
+/// or GPU. Reached through <see cref="IImagingService"/> (module-boundary migration step 4);
+/// <c>ZivAiEditor.UI</c> / <c>ZivAiEditor.App</c> do not reference this type directly.</para>
 /// </summary>
 public static class ImageCropper
 {

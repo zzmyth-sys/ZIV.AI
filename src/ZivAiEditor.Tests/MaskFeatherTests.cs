@@ -1,5 +1,5 @@
 using Xunit;
-using ZivAiEditor.UI.Imaging;
+using ZivAiEditor.Imaging;
 
 namespace ZivAiEditor.Tests;
 

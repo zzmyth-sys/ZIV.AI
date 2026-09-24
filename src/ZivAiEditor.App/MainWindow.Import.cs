@@ -87,35 +87,9 @@ public partial class MainWindow
         UpdateSendEnabled();
     }
 
+    // Shell-domain facade (module-boundary migration step 5): the picker lives in ShellService.
     private async Task<IReadOnlyList<string>> PickImagesAsync()
-    {
-        var storage = StorageProvider;
-        if (storage is null)
-        {
-            return Array.Empty<string>();
-        }
-
-        try
-        {
-            var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
-            {
-                Title = "选择图片",
-                AllowMultiple = true,
-                FileTypeFilter = new[] { FilePickerFileTypes.ImageAll },
-            });
-
-            return files
-                .Select(file => file.TryGetLocalPath())
-                .Where(path => !string.IsNullOrEmpty(path))
-                .Cast<string>()
-                .ToArray();
-        }
-        catch (Exception ex)
-        {
-            SetStatus(ex.Message);
-            return Array.Empty<string>();
-        }
-    }
+        => await _shell.PickImagesAsync(this);
 
     private void OnDragOver(object? sender, DragEventArgs e)
     {

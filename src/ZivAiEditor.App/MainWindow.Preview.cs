@@ -35,7 +35,8 @@ public partial class MainWindow
 
         if (_imagePreview is null)
         {
-            var preview = new ImagePreview();
+            var preview = new ImagePreview(_imaging);
+            _shell.ApplyChrome(preview);
             preview.Closed += (_, _) =>
             {
                 if (ReferenceEquals(_imagePreview, preview))
@@ -110,36 +111,12 @@ public partial class MainWindow
             return;
         }
 
-        var storage = StorageProvider;
-        if (storage is null)
-        {
-            SetStatus("无法打开文件对话框");
-            return;
-        }
-
+        // Shell-domain facade (module-boundary migration step 5): the picker lives in ShellService.
         var node = FindNodeByImagePath(path);
         var rootPath = _session.RootImagePath;
-        IStorageFolder? start = null;
-        if (!string.IsNullOrWhiteSpace(rootPath))
-        {
-            var directory = Path.GetDirectoryName(rootPath);
-            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
-            {
-                start = await storage.TryGetFolderFromPathAsync(new Uri(directory));
-            }
-        }
+        var startDirectory = string.IsNullOrWhiteSpace(rootPath) ? null : Path.GetDirectoryName(rootPath);
 
-        var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title = "另存为",
-            SuggestedFileName = BuildSaveName(rootPath, node?.Command),
-            SuggestedStartLocation = start,
-            DefaultExtension = "png",
-            ShowOverwritePrompt = true,
-            FileTypeChoices = new[] { new FilePickerFileType("PNG 图像") { Patterns = new[] { "*.png" } } },
-        });
-
-        var target = file?.TryGetLocalPath();
+        var target = await _shell.PickSaveFileAsync(this, BuildSaveName(rootPath, node?.Command), startDirectory);
         if (string.IsNullOrWhiteSpace(target))
         {
             return;

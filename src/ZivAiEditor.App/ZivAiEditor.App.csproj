@@ -47,5 +47,8 @@
       <_Parameter1>ZivAiEditor.Tests</_Parameter1>
     </AssemblyAttribute>
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ZivAiEditor.Imaging\ZivAiEditor.Imaging.csproj" />
+  </ItemGroup>
 
 </Project>

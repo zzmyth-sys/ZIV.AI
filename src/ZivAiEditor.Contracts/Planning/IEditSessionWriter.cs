@@ -31,6 +31,29 @@ public interface IEditSessionWriter
     void ResetToRoot(string imagePath);
 
     /// <summary>
+    /// Resets this session to a brand-new empty session <b>in place</b> (module-boundary
+    /// migration step 2): the DAG, the root and the current-node selection are dropped, and a
+    /// fresh <see cref="IEditSession.SessionId"/> / <see cref="IEditSession.CreatedAt"/> are
+    /// adopted. The instance identity is preserved so consumers holding
+    /// <see cref="IEditSession"/> / <see cref="IEditSessionWriter"/> stay valid. Equivalent to
+    /// the initial state of a newly constructed session.
+    /// </summary>
+    void NewSession();
+
+    /// <summary>
+    /// Replaces this session's contents <b>in place</b> from a persisted project (Step 9C.6-E):
+    /// clears the DAG, rebuilds it from <paramref name="nodes"/>, re-points the root (the single
+    /// node with no parent) and selects <paramref name="currentId"/> (falling back to the root
+    /// when unknown), then adopts <paramref name="sessionId"/> / <paramref name="createdAt"/>.
+    /// The instance identity is preserved so UI consumers stay valid.
+    /// </summary>
+    void Restore(
+        IReadOnlyList<IEditNode> nodes,
+        string? currentId,
+        string sessionId,
+        DateTimeOffset createdAt);
+
+    /// <summary>
     /// Appends a new output node under <paramref name="parentId"/> and makes it
     /// current. <paramref name="parentId"/> is <c>null</c> for a direct child of
     /// the root.

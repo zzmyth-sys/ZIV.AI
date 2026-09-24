@@ -22,4 +22,8 @@
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\ZivAiEditor.Imaging\ZivAiEditor.Imaging.csproj" />
+  </ItemGroup>
+
 </Project>

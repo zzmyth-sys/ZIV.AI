@@ -16,9 +16,12 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using ZivAiEditor.Agent;
 using ZivAiEditor.App.Controls;
+using ZivAiEditor.App.Flows;
 using ZivAiEditor.Backend;
 using ZivAiEditor.Contracts.Execution;
+using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Models;
+using ZivAiEditor.Contracts.Planning;
 using ZivAiEditor.UI;
 using ZivAiEditor.UI.Chat;
 
@@ -41,9 +44,14 @@ public partial class MainWindow : Window
     private readonly List<Bitmap> _bitmaps = new();
 
     private SessionViewModel _vm = null!;
+    private FlowRunner _flow = null!;
     private SessionStore _store = null!;
+    private ProjectService _projects = null!;
+    private IImagingService _imaging = null!;
+    private ShellService _shell = null!;
     private IModelProfileRegistry _modelProfiles = null!;
-    private EditSession _session = null!;
+    private IEditSession _session = null!;
+    private IEditSessionWriter _writer = null!;
     private readonly IReadOnlyList<CommandDefinition> _commands = Array.Empty<CommandDefinition>();
     private readonly IPromptExpander? _promptExpander;
     private readonly ILlmPreflight? _llmPreflight;
@@ -63,11 +71,15 @@ public partial class MainWindow : Window
         InitializeComponent();
     }
 
-    public MainWindow(
-        EditSession session,
+    internal MainWindow(
+        IEditSession session,
+        IEditSessionWriter sessionWriter,
         ICommandParser commandParser,
         IExecutor executor,
         SessionStore sessionStore,
+        ProjectService projects,
+        IImagingService imaging,
+        ShellService shell,
         IModelProfileRegistry modelProfiles,
         LaunchOptions? launchOptions = null,
         IReadOnlyList<CommandDefinition>? commands = null,
@@ -75,22 +87,31 @@ public partial class MainWindow : Window
         ILlmPreflight? llmPreflight = null)
     {
         _store = sessionStore ?? throw new ArgumentNullException(nameof(sessionStore));
+        _projects = projects ?? throw new ArgumentNullException(nameof(projects));
+        _imaging = imaging ?? throw new ArgumentNullException(nameof(imaging));
+        _shell = shell ?? throw new ArgumentNullException(nameof(shell));
         _modelProfiles = modelProfiles ?? throw new ArgumentNullException(nameof(modelProfiles));
         _session = session ?? throw new ArgumentNullException(nameof(session));
+        _writer = sessionWriter ?? throw new ArgumentNullException(nameof(sessionWriter));
         _commands = commands ?? Array.Empty<CommandDefinition>();
         _promptExpander = promptExpander;
         _llmPreflight = llmPreflight;
 
-        // Step 9C.5: the same EditSession instance is passed as both the read-only
-        // session view and the writer (it implements IEditSession / IEditSessionWriter);
-        // the UI view model never references the Agent implementation type.
-        _vm = new SessionViewModel(session, session, commandParser, executor, _store.DeleteNodeArtifacts);
+        // Step 9C.5: the same session instance is passed as both the read-only view and the
+        // writer (it implements IEditSession / IEditSessionWriter); the UI view model never
+        // references the Agent implementation type.
+        //
+        // Module-boundary migration step 6: the view model holds only UI state; the cross-domain
+        // orchestration lives in the App's FlowRunner. Two-phase wiring (the runner holds the
+        // view model, which holds the runner): build the view model, then the runner, then attach.
+        _vm = new SessionViewModel(session, sessionWriter, _imaging);
+        _flow = new FlowRunner(
+            _vm, session, sessionWriter, commandParser, executor,
+            _promptExpander, _llmPreflight, _store.DeleteNodeArtifacts);
+        _vm.AttachFlowRunner(_flow);
 
         InitializeComponent();
-        if (this.FindControl<ChromeTitleBar>("PART_Chrome") is { } chrome)
-        {
-            ChromeBehavior.Init(this, chrome);
-        }
+        _shell.ApplyChrome(this);
 
         InitChat();
         InitImport();
@@ -461,8 +482,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var save = await ConfirmDialog.ShowAsync(this, "保存本次项目？");
-            if (save == true)
+            if (await _shell.ConfirmAsync(this, "保存本次项目？"))
             {
                 await SaveCurrentAsync();
             }

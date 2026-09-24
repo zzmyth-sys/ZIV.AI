@@ -13,9 +13,6 @@ using ZivAiEditor.Contracts.Planning;
 
 namespace ZivAiEditor.Agent;
 
-/// <summary>One saved project as shown in the project list (Step 9C.6-E).</summary>
-public sealed record ProjectInfo(string SessionId, string Name, DateTimeOffset CreatedAt);
-
 /// <summary>Raised when a project's <c>version</c> is not supported (Step 9C.6-E).</summary>
 public sealed class ProjectFormatException : Exception
 {
@@ -50,7 +47,6 @@ public sealed partial class SessionStore
     public const int FormatVersion = 2;
 
     private const string SessionFileName = "session.json";
-    private const string LastProjectFileName = "last_project.txt";
     private const string UnnamedProject = "未命名";
 
     private static readonly SessionStoreJsonContext Json = new(new JsonSerializerOptions
@@ -69,20 +65,24 @@ public sealed partial class SessionStore
     /// <summary>The directory holding every project.</summary>
     public string RootDirectory { get; }
 
-    /// <summary>The directory of one project.</summary>
-    public string GetProjectDirectory(string sessionId) => Path.Combine(RootDirectory, sessionId);
+    /// <summary>
+    /// The directory of one project. Module-boundary migration step 3: the public accessor moved
+    /// to <see cref="ProjectService.GetDirectory"/>; this stays private to the store's own
+    /// save / load paths.
+    /// </summary>
+    private string GetDirectory(string sessionId) => Path.Combine(RootDirectory, sessionId);
 
     /// <summary>
     /// Writes the session as a project (overwriting an existing one) and returns its info.
     /// Images are copied as relative names; a source already inside the project directory
     /// is left in place. A missing source image is skipped (the node is still recorded).
     /// </summary>
-    public async Task<ProjectInfo> SaveAsync(EditSession session, string name, CancellationToken ct = default)
+    public async Task<ProjectSummary> SaveAsync(IEditSession session, string name, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(session);
-        var directory = GetProjectDirectory(session.SessionId);
+        var directory = GetDirectory(session.SessionId);
         await WriteProjectAsync(directory, session, name, ct).ConfigureAwait(false);
-        return new ProjectInfo(session.SessionId, name, session.CreatedAt);
+        return new ProjectSummary(session.SessionId, name, session.CreatedAt);
     }
 
     /// <summary>
@@ -92,7 +92,7 @@ public sealed partial class SessionStore
     /// </summary>
     public async Task<SessionLoadResult> LoadAsync(string sessionId, CancellationToken ct = default)
     {
-        var directory = GetProjectDirectory(sessionId);
+        var directory = GetDirectory(sessionId);
         var path = Path.Combine(directory, SessionFileName);
         string json;
         try
@@ -107,52 +107,13 @@ public sealed partial class SessionStore
         return SessionLoader.LoadFromJson(json, directory);
     }
 
-    /// <summary>Scans the project root and returns the readable projects, newest first.</summary>
-    public async Task<IReadOnlyList<ProjectInfo>> ListAsync(CancellationToken ct = default)
+    /// <summary>
+    /// Rewrites the <c>name</c> metadata of one saved project (module-boundary migration step 3:
+    /// the catalog moved to <see cref="ProjectService"/>, which calls this session-format
+    /// primitive). A no-op when the file is missing / unreadable; never throws.
+    /// </summary>
+    public async Task WriteMetadataNameAsync(string directory, string name, CancellationToken ct = default)
     {
-        var result = new List<ProjectInfo>();
-        if (!Directory.Exists(RootDirectory))
-        {
-            return result;
-        }
-
-        foreach (var directory in Directory.GetDirectories(RootDirectory))
-        {
-            ct.ThrowIfCancellationRequested();
-            var info = await TryReadInfoAsync(directory, ct).ConfigureAwait(false);
-            if (info is not null)
-            {
-                result.Add(info);
-            }
-        }
-
-        return result.OrderByDescending(project => project.CreatedAt).ToArray();
-    }
-
-    /// <summary>Deletes one project directory. Never throws.</summary>
-    public Task DeleteAsync(string sessionId, CancellationToken ct = default)
-        => Task.Run(
-            () =>
-            {
-                try
-                {
-                    var directory = GetProjectDirectory(sessionId);
-                    if (Directory.Exists(directory))
-                    {
-                        Directory.Delete(directory, recursive: true);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[session] delete failed '{sessionId}': {ex.Message}");
-                }
-            },
-            ct);
-
-    /// <summary>Renames a saved project (rewrites <c>name</c> in its JSON). No-op when missing.</summary>
-    public async Task RenameAsync(string sessionId, string name, CancellationToken ct = default)
-    {
-        var directory = GetProjectDirectory(sessionId);
         var path = Path.Combine(directory, SessionFileName);
         if (!File.Exists(path))
         {
@@ -182,7 +143,7 @@ public sealed partial class SessionStore
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[session] rename failed '{sessionId}': {ex.Message}");
+            Debug.WriteLine($"[session] rename failed '{directory}': {ex.Message}");
         }
     }
 
@@ -213,55 +174,9 @@ public sealed partial class SessionStore
         }
     }
 
-    /// <summary>The last opened project id, or <c>null</c> when none / unreadable.</summary>
-    public string? GetLastProjectId()
-    {
-        try
-        {
-            var path = Path.Combine(RootDirectory, LastProjectFileName);
-            if (!File.Exists(path))
-            {
-                return null;
-            }
-
-            var value = File.ReadAllText(path).Trim();
-            return value.Length == 0 ? null : value;
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[session] read last-project failed: {ex.Message}");
-            return null;
-        }
-    }
-
-    /// <summary>Records (or clears, when blank) the last opened project id. Never throws.</summary>
-    public async Task SetLastProjectIdAsync(string? sessionId, CancellationToken ct = default)
-    {
-        try
-        {
-            Directory.CreateDirectory(RootDirectory);
-            var path = Path.Combine(RootDirectory, LastProjectFileName);
-            if (string.IsNullOrWhiteSpace(sessionId))
-            {
-                if (File.Exists(path))
-                {
-                    File.Delete(path);
-                }
-
-                return;
-            }
-
-            await File.WriteAllTextAsync(path, sessionId.Trim(), ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[session] write last-project failed: {ex.Message}");
-        }
-    }
-
     private static async Task WriteProjectAsync(
         string directory,
-        EditSession session,
+        IEditSession session,
         string name,
         CancellationToken ct)
     {
@@ -388,7 +303,12 @@ public sealed partial class SessionStore
         File.Copy(source, destination, overwrite: true);
     }
 
-    private static async Task<ProjectInfo?> TryReadInfoAsync(string directory, CancellationToken ct)
+    /// <summary>
+    /// Reads a saved project's list metadata (module-boundary migration step 3: the catalog scan
+    /// moved to <see cref="ProjectService"/>, which calls this session-format primitive). Returns
+    /// <c>null</c> for a missing file / unsupported version / unreadable JSON.
+    /// </summary>
+    public async Task<ProjectSummary?> ReadMetadataAsync(string directory, CancellationToken ct = default)
     {
         try
         {
@@ -424,7 +344,7 @@ public sealed partial class SessionStore
                 ? parsed
                 : DateTimeOffset.MinValue;
 
-            return new ProjectInfo(id!, string.IsNullOrWhiteSpace(name) ? UnnamedProject : name!, created);
+            return new ProjectSummary(id!, string.IsNullOrWhiteSpace(name) ? UnnamedProject : name!, created);
         }
         catch (Exception)
         {

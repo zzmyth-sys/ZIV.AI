@@ -1,5 +1,6 @@
 using ZivAiEditor.Agent;
 using ZivAiEditor.App;
+using ZivAiEditor.Contracts.Planning;
 using Xunit;
 
 namespace ZivAiEditor.Tests;

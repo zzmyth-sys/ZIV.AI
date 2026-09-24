@@ -23,6 +23,12 @@ public interface IEditSession
     string? CurrentNodeId { get; }
 
     /// <summary>
+    /// When the session was created (Step 9C.6-E); persisted as the project's
+    /// <c>created_at</c>. A <see cref="IEditSessionWriter.NewSession"/> reset updates it.
+    /// </summary>
+    DateTimeOffset CreatedAt { get; }
+
+    /// <summary>
     /// The working image path: the current node's output, or the root image when no
     /// node is current. Returns <c>null</c> when neither exists. Consumed by the
     /// command parser as the plan's source image.

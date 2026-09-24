@@ -4,10 +4,12 @@ using System.IO;
 using ZivAiEditor.Agent;
 using ZivAiEditor.Backend;
 using ZivAiEditor.Contracts.Execution;
+using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Inference;
 using ZivAiEditor.Contracts.Models;
 using ZivAiEditor.Contracts.Planning;
 using ZivAiEditor.Contracts.Tools;
+using ZivAiEditor.Imaging;
 using ZivAiEditor.Tools;
 
 namespace ZivAiEditor.App;
@@ -33,13 +35,16 @@ internal sealed class AppContext : IDisposable
         ExecutionQueue executionQueue,
         IModelProfileRegistry modelProfiles,
         CommandParser commandParser,
-        EditSession session,
+        IEditSession session,
+        IEditSessionWriter sessionWriter,
         SessionStore sessionStore,
+        ProjectService projects,
+        IImagingService imaging,
         LocalLlmClient rewriterLlm,
         IPromptExpander promptExpander,
         ILlmPreflight llmPreflight)
     {
-        Backend = backend;
+        _backend = backend;
         Client = client;
 
         // App-layer wiring (ARCHITECTURE §6): surface backend preview frames
@@ -54,7 +59,10 @@ internal sealed class AppContext : IDisposable
         ModelProfiles = modelProfiles;
         _commandParser = commandParser;
         Session = session;
+        SessionWriter = sessionWriter;
         SessionStore = sessionStore;
+        Projects = projects;
+        Imaging = imaging;
         _rewriterLlm = rewriterLlm;
         PromptExpander = promptExpander;
         LlmPreflight = llmPreflight;
@@ -64,8 +72,7 @@ internal sealed class AppContext : IDisposable
     private readonly ExecutionQueue _executionQueue;
     private readonly CommandParser _commandParser;
     private readonly LocalLlmClient _rewriterLlm;
-
-    public PythonProcessManager Backend { get; }
+    private readonly PythonProcessManager _backend;
 
     public IInferenceClient Client { get; }
 
@@ -96,10 +103,30 @@ internal sealed class AppContext : IDisposable
     public ILlmPreflight LlmPreflight { get; }
 
     /// <summary>The single in-memory edit session (Step 8); persisted as a project on save.</summary>
-    public EditSession Session { get; }
+    public IEditSession Session { get; }
+
+    /// <summary>
+    /// The write surface of <see cref="Session"/> (module-boundary migration step 2): the same
+    /// instance, consumed by the App for project load / new-session resets. Kept separate from
+    /// the read-only <see cref="Session"/> so read consumers cannot mutate the session.
+    /// </summary>
+    public IEditSessionWriter SessionWriter { get; }
 
     /// <summary>Persists sessions as projects (Step 9C.6-E); the UI drives save / open.</summary>
     public SessionStore SessionStore { get; }
+
+    /// <summary>
+    /// Project catalog (module-boundary migration step 3): list / delete / rename / locate
+    /// projects and the last-opened id. Owns the <c>sessions/</c> directory tree; the session
+    /// content save / load stays on <see cref="SessionStore"/>.
+    /// </summary>
+    public ProjectService Projects { get; }
+
+    /// <summary>
+    /// Imaging-domain facade (module-boundary migration step 4): local crop / mask raster ops.
+    /// The UI / controls depend on the <see cref="IImagingService"/> port, not the implementation.
+    /// </summary>
+    public IImagingService Imaging { get; }
 
     /// <summary>
     /// Raised for every backend preview frame (<c>0x02</c>, JPEG bytes) so the App
@@ -108,9 +135,9 @@ internal sealed class AppContext : IDisposable
     /// </summary>
     public event Action<byte[]>? PreviewReceived;
 
-    public static AppContext Create()
+    public static AppContext Create(ShellService shell)
     {
-        var settings = SettingsLoader.Load();
+        var settings = shell.LoadSettings();
         var options = new PythonBackendOptions
         {
             PipeName = settings.PipeName,
@@ -136,7 +163,7 @@ internal sealed class AppContext : IDisposable
 
         // Step 9C.8-A: the executor rebuilds a re-run plan from the DAG, so it needs the
         // session (read + navigate) and the deterministic command parser.
-        var commandParser = new CommandParser(ResolveCommandsPath());
+        var commandParser = new CommandParser(Path.Combine(shell.TemplateDirectory, "commands.json"));
         var session = new EditSession();
         var executor = new Executor(tools, executionQueue, session, session, commandParser);
 
@@ -189,40 +216,17 @@ internal sealed class AppContext : IDisposable
         // Step 8: one in-memory session; Step 9C.6-E: a project store. The UI drives the
         // session (already built above, before the executor).
         var sessionStore = new SessionStore();
+        var projects = new ProjectService(sessionStore);
+
+        // Module-boundary migration step 4: construct the imaging facade and clear any crop /
+        // mask temp dirs orphaned by a previous run (moved here from Program, Q4).
+        var imaging = new ImagingService();
+        imaging.CleanupAll();
 
         return new AppContext(
             backend, client, llmHttp, plannerLlm, planner, tools, executor, executionQueue,
-            modelProfiles, commandParser, session, sessionStore,
+            modelProfiles, commandParser, session, session, sessionStore, projects, imaging,
             rewriterLlm, promptExpander, llmPreflight);
-    }
-
-    /// <summary>
-    /// Resolves <c>Template/commands.json</c> from the program directory, falling
-    /// back to walking up to the repository root (mirrors <see cref="SettingsLoader"/>).
-    /// If nothing is found the <see cref="CommandParser"/> uses its built-in set (Z28).
-    /// </summary>
-    private static string ResolveCommandsPath()
-    {
-        var programDirectory = System.AppContext.BaseDirectory;
-        var candidate = Path.Combine(programDirectory, "Template", "commands.json");
-        if (File.Exists(candidate))
-        {
-            return candidate;
-        }
-
-        var directory = new DirectoryInfo(programDirectory);
-        while (directory is not null)
-        {
-            var repository = Path.Combine(directory.FullName, "Template", "commands.json");
-            if (File.Exists(repository) && File.Exists(Path.Combine(directory.FullName, "DOC", "FROZEN.md")))
-            {
-                return repository;
-            }
-
-            directory = directory.Parent;
-        }
-
-        return candidate;
     }
 
     public void Dispose()
@@ -237,7 +241,7 @@ internal sealed class AppContext : IDisposable
         _rewriterLlm.Dispose();
         _llmHttp.Dispose();
         Client.Dispose();
-        Backend.Dispose();
+        _backend.Dispose();
         _executionQueue.Dispose();
     }
 }

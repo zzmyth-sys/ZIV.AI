@@ -161,7 +161,7 @@ public class SessionStoreTests
             await store.SaveAsync(session, "p");
 
             var json = await File.ReadAllTextAsync(
-                Path.Combine(store.GetProjectDirectory(session.SessionId), "session.json"));
+                Path.Combine(root, session.SessionId, "session.json"));
             Assert.Contains("\"version\": 2", json);
             Assert.Contains(rootNode.NodeId + ".png", json);
             Assert.DoesNotContain(source.Replace("\\", "\\\\"), json);
@@ -235,7 +235,7 @@ public class SessionStoreTests
             await store.SaveAsync(session, "p");
 
             var json = await File.ReadAllTextAsync(
-                Path.Combine(store.GetProjectDirectory(session.SessionId), "session.json"));
+                Path.Combine(root, session.SessionId, "session.json"));
             Assert.DoesNotContain("additional_images", json);
         }
         finally
@@ -330,83 +330,6 @@ public class SessionStoreTests
     }
 
     [Fact]
-    public async Task List_Returns_Saved_Projects_Newest_First()
-    {
-        var root = NewRoot();
-        var source = NewRoot();
-
-        try
-        {
-            var store = new SessionStore(root);
-            var first = new EditSession();
-            first.SetRoot(WriteFile(source, "a.png"));
-            await store.SaveAsync(first, "A");
-            await Task.Delay(20);
-            var second = new EditSession();
-            second.SetRoot(WriteFile(source, "b.png"));
-            await store.SaveAsync(second, "B");
-
-            var projects = await store.ListAsync();
-
-            Assert.Equal(2, projects.Count);
-            Assert.Equal("B", projects[0].Name);
-            Assert.Equal("A", projects[1].Name);
-        }
-        finally
-        {
-            Cleanup(root);
-            Cleanup(source);
-        }
-    }
-
-    [Fact]
-    public async Task Delete_Removes_Project_Directory()
-    {
-        var root = NewRoot();
-        var source = NewRoot();
-
-        try
-        {
-            var store = new SessionStore(root);
-            var session = new EditSession();
-            session.SetRoot(WriteFile(source, "root.png"));
-            await store.SaveAsync(session, "p");
-
-            await store.DeleteAsync(session.SessionId);
-
-            Assert.False(Directory.Exists(store.GetProjectDirectory(session.SessionId)));
-            Assert.Empty(await store.ListAsync());
-        }
-        finally
-        {
-            Cleanup(root);
-            Cleanup(source);
-        }
-    }
-
-    [Fact]
-    public async Task Last_Project_Id_RoundTrips_And_Clears()
-    {
-        var root = NewRoot();
-
-        try
-        {
-            var store = new SessionStore(root);
-            Assert.Null(store.GetLastProjectId());
-
-            await store.SetLastProjectIdAsync("abc123");
-            Assert.Equal("abc123", store.GetLastProjectId());
-
-            await store.SetLastProjectIdAsync(null);
-            Assert.Null(store.GetLastProjectId());
-        }
-        finally
-        {
-            Cleanup(root);
-        }
-    }
-
-    [Fact]
     public async Task ExportTo_Writes_To_External_Directory()
     {
         var root = NewRoot();
@@ -450,35 +373,12 @@ public class SessionStoreTests
             var loaded = await store.LoadAsync(session.SessionId);
             await store.SaveAsync(loaded.Session, "p2");
 
-            Assert.Equal("p2", (await store.ListAsync())[0].Name);
+            Assert.Equal("p2", (await new ProjectService(store).ListAsync())[0].Name);
         }
         finally
         {
             Cleanup(root);
             Cleanup(source);
-        }
-    }
-
-    [Fact]
-    public async Task List_Skips_Unsupported_Version()
-    {
-        var root = NewRoot();
-        var projectDir = Path.Combine(root, "old");
-
-        try
-        {
-            Directory.CreateDirectory(projectDir);
-            await File.WriteAllTextAsync(
-                Path.Combine(projectDir, "session.json"),
-                "{\"version\": 99, \"session_id\": \"old\", \"name\": \"old\"}");
-
-            var store = new SessionStore(root);
-
-            Assert.Empty(await store.ListAsync());
-        }
-        finally
-        {
-            Cleanup(root);
         }
     }
 
@@ -502,7 +402,7 @@ public class SessionStoreTests
             });
 
             await store.SaveAsync(session, "p");
-            var projectDir = store.GetProjectDirectory(session.SessionId);
+            var projectDir = Path.Combine(root, session.SessionId);
             Assert.True(File.Exists(Path.Combine(projectDir, node.NodeId + ".png")));
             Assert.Single(Directory.GetFiles(Path.Combine(projectDir, "refs"), node.NodeId + "_ref*"));
 
@@ -539,7 +439,7 @@ public class SessionStoreTests
                 AdditionalImages = new[] { WriteFile(source, "ref1.png") },
             });
             await store.SaveAsync(session, "p");
-            var projectDir = store.GetProjectDirectory(session.SessionId);
+            var projectDir = Path.Combine(root, session.SessionId);
 
             store.DeleteNodeArtifacts(session.SessionId, new[] { node.NodeId }, includeReferences: false);
 
@@ -563,7 +463,7 @@ public class SessionStoreTests
             var store = new SessionStore(root);
             store.DeleteNodeArtifacts("missing", new[] { "n1" }, includeReferences: true);
 
-            Assert.False(Directory.Exists(store.GetProjectDirectory("missing")));
+            Assert.False(Directory.Exists(Path.Combine(root, "missing")));
         }
         finally
         {

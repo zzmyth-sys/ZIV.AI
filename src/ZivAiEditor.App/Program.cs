@@ -1,7 +1,6 @@
 using System;
 using Avalonia;
 using ZivAiEditor.UI;
-using ZivAiEditor.UI.Imaging;
 
 namespace ZivAiEditor.App;
 
@@ -14,28 +13,23 @@ internal static class Program
         // abort the launch — the app starts with a default session.
         var options = LaunchOptions.Parse(args);
 
-        using var single = new SingleInstance();
+        // Module-boundary migration step 5: the shell facade owns the single-instance guard
+        // (created here, before Avalonia; disposed when the app exits).
+        using var shell = new ShellService();
 
         // A later process hands its request to the running one, then exits without a window.
-        if (!single.IsFirstInstance)
+        if (!shell.IsFirstInstance)
         {
-            single.SendToExistingInstance(options);
+            shell.SendToExistingInstance(options);
             return;
         }
-
-        // Step 9C.6-B2: the app is single-instance, so any crop temp directory left under
-        // _cache/crops is an orphan from a previous run — clean it before the session starts.
-        ImageCropper.CleanupAll();
-
-        // Step 9C.7: same for the mask temp area (_cache/masks).
-        MaskExporter.CleanupAll();
 
         var builder = BuildAvaloniaApp();
         builder.AfterSetup(b =>
         {
             if (b.Instance is App app)
             {
-                app.SingleInstance = single;
+                app.Shell = shell;
             }
         });
 

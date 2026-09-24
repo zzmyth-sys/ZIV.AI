@@ -1,5 +1,5 @@
 using System;
-using ZivAiEditor.Agent;
+using ZivAiEditor.Contracts.Planning;
 
 namespace ZivAiEditor.App;
 

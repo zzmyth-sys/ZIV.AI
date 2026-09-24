@@ -3204,3 +3204,320 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **P5**：批量。
 - **观察项**：图包上限仅在 VM（`SessionViewModel`），手改 v2 JSON 可载入 >10；`used/` 跨节点别名待 P3/P4 复核。
 - **未跑 GPU 端到端**（Z29 / Z30）。
+
+---
+
+## 模块边界迁移 · 第 1 步：ICommandParser 上提 Contracts（日期：2026-09-24）
+
+> **契约搬迁（追加 · 签名零变化）**
+>
+> 依据模块边界设计定稿（Q9：端口接口放 kernel = 现 `ZivAiEditor.Contracts`，保留程序集名）与
+> 渐进搬迁策略。本步把命令解析契约从 `ZivAiEditor.Agent` 移到 `ZivAiEditor.Contracts.Planning`，
+> 消除 `ZivAiEditor.UI` → `ZivAiEditor.Agent` 的编译期依赖。**只挪位置 + 改命名空间，方法签名逐字不变**（G3 / G4）。
+
+### 迁移.1 契约（搬迁 · 签名不变）
+
+| 类型 | 原位置 | 新位置 | 说明 |
+|---|---|---|---|
+| `ICommandParser` | `Agent/CommandParser.cs`（`ZivAiEditor.Agent`） | `Contracts/Planning/ICommandParser.cs`（`ZivAiEditor.Contracts.Planning`） | 三个 `ParseAsync` 重载签名零变化 |
+| `ParseResult` | 同上 | `Contracts/Planning/ParseResult.cs` | 成员零变化 |
+| `CommandDefinition` | 同上 | `Contracts/Planning/CommandDefinition.cs` | 成员零变化（含 `[JsonPropertyName]`） |
+
+- 实现类 `CommandParser : ICommandParser`、`CommandsFileDto`、`CommandJsonContext`、`BuiltInCommands()` 保留在 `ZivAiEditor.Agent`（实现细节）。
+
+### 迁移.2 依赖解耦（UI）
+
+- `ZivAiEditor.UI/Chat/SessionViewModel.cs`：删除 `using ZivAiEditor.Agent;`（`ICommandParser` 现来自 Contracts）。
+- `ZivAiEditor.UI.csproj`：**删除**对 `ZivAiEditor.Agent` 的 `ProjectReference`（保留 Tools / Backend）。
+- UI 对 Agent 的引用面归零：`grep "using ZivAiEditor.Agent" src/ZivAiEditor.UI/` → 零命中。
+
+### 迁移.3 调用点同步（namespace 迁移）
+
+- `App/CommandRequirements.cs`：`using ZivAiEditor.Agent;` → `using ZivAiEditor.Contracts.Planning;`。
+- `App/MainWindow.axaml.cs`：追加 `using ZivAiEditor.Contracts.Planning;`（保留 Agent，仍需 `EditSession` / `SessionStore`）。
+- `Tests/CommandRequirementsTests.cs`：追加 `using ZivAiEditor.Contracts.Planning;`（保留 Agent，仍需 `CommandParser`）。
+
+### 迁移.4 验收（无 GPU，Z29）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `grep "using ZivAiEditor.Agent" src/ZivAiEditor.UI/` → **零命中**；`ZivAiEditor.UI.csproj` 不再引用 Agent。
+- `dotnet test`（Release）：受影响类 **106 通过 / 0 失败**；**全量 448 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 迁移.5 本步不做（范围）
+
+- 不动 `IPlanner` / `IExecutor` / 其他接口、不动 session 域、不改行为逻辑、不拆程序集、不改 `commands.json` 结构。
+
+---
+
+## 模块边界迁移 · 第 2 步：App 不再持 session 具体类型（日期：2026-09-24）
+
+> **契约追加 + 参数窄化（追加式 · 不改既有成员语义）**
+>
+> 依据模块边界设计定稿与第 2 步裁决（Q1 窄化 `SessionStore.SaveAsync`；Q2 空会话方法名 `NewSession()`；
+> Q3 `AppContext` ctor 改接口、属性双开；Q4 `SessionLoadResult.Session` 保留具体；Q5 `ExportToAsync` 不动）。
+> 目标：`ZivAiEditor.App` 不再 `new` / 持具体 `EditSession`（装配点 `AppContext.Create` 除外），改为持
+> `IEditSession`（读）+ `IEditSessionWriter`（写）。
+
+### 迁移2.1 契约追加（`Contracts/Planning`）
+
+| 接口 | 追加成员 | 说明 |
+|---|---|---|
+| `IEditSession` | `DateTimeOffset CreatedAt { get; }` | 会话创建时间（持久化为项目 `created_at`）。`EditSession` 已有该属性（`get`/`set`），无需改实现 |
+| `IEditSessionWriter` | `void NewSession();` | 就地重置为全新空会话（清 DAG / root / current，采纳新 `SessionId` / `CreatedAt`）；等价于新建 `EditSession` 的初始态 |
+| `IEditSessionWriter` | `void Restore(IReadOnlyList<IEditNode> nodes, string? currentId, string sessionId, DateTimeOffset createdAt);` | 就地按持久化项目重建会话（原 `EditSession.Restore` 的公共签名，现升为契约） |
+
+- 既有成员语义零改动（追加式）；`EditSession` 新增 `public void NewSession()`，`Restore` 原已实现。
+
+### 迁移2.2 `SessionStore` 参数窄化（Agent · 非契约）
+
+- `SessionStore.SaveAsync` 与私有 `WriteProjectAsync` 的参数 `EditSession` → **`IEditSession`**（行为不变；
+  仅经 `GetHistory()` / `SessionId` / `CurrentNodeId` / `CreatedAt`）。
+- `SessionStore.ExportToAsync` **不动**（Q5；仍取具体 `EditSession`，UI 未用）。
+
+### 迁移2.3 App 装配（不再持具体类型）
+
+- `AppContext`：ctor 参数 `EditSession session` → `IEditSession session, IEditSessionWriter sessionWriter`；
+  属性 `Session` 类型 → `IEditSession`，新增 `SessionWriter: IEditSessionWriter`（同一实例）。
+  `Create` 内 `new EditSession()` 为**唯一装配点**。
+- `App.axaml.cs`：`new MainWindow(Session, SessionWriter, …)`。
+- `MainWindow`：字段 `_session:IEditSession` + `_writer:IEditSessionWriter`；ctor 参数改接口；
+  `new SessionViewModel(session, sessionWriter, …)`。
+- `MainWindow.Projects.cs`：`_session.Restore(...)` → `_writer.Restore(...)`（打开项目）；
+  `ResetToEmptyProjectAsync` 的 `new EditSession()` + `Restore(...)` → **`_writer.NewSession()`**（清空项目）。
+
+### 迁移2.4 验收（无 GPU，Z29）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `grep "\bEditSession\b" src/ZivAiEditor.App/`：具体类型仅 `AppContext.cs` 装配点 `new EditSession()`；
+  `MainWindow` / `App` 均只引用 `IEditSession` / `IEditSessionWriter`。
+- `dotnet test`（Release）：**全量 448 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 迁移2.5 本步不做（范围）
+
+- 不新建 `ISessionReader` / `ISessionWriter` / `SessionService`；不重命名接口；不动 `session.json` 格式；
+  不抽 project 域（第 4 步）/ execution 域（第 5 步）；`SessionLoadResult.Session` 保留具体（Q4）。
+
+---
+
+## 模块边界迁移 · 第 3 步：project 域抽取（日期：2026-09-24）
+
+> **编目所有权迁移（追加 · 不改磁盘格式）**
+>
+> 依据第 3 步裁决（Q1 选项 2：`ProjectService` 拥有编目 `GetDirectory` / `DeleteAsync` / `RenameAsync` /
+> `GetLastProjectId` / `SetLastProjectIdAsync` / `ListAsync`；`SessionStore` 保留会话读写 +
+> 元数据原语；Q2 原语留 `SessionStore`；Q3 `ProjectSummary` 上提 Contracts、`ProjectInfo` 替换；
+> Q4 不实现 `NewDirectory`；Q5 `MainWindow.Projects.cs` 瘦身 <300；Q6 保持异步）。
+> 不新建项目/程序集，`ProjectService` 与 session 同处 Agent；不动磁盘格式。
+
+### 迁移3.1 新增类型
+
+| 类型 | 文件 | 说明 |
+|---|---|---|
+| `ProjectSummary`（record） | `Contracts/Planning/ProjectSummary.cs` | `SessionId` / `Name` / `CreatedAt`；**取代**原 Agent 的 `ProjectInfo`（后者删除） |
+| `ProjectService`（类） | `Agent/ProjectService.cs` | 项目编目门面：`ListAsync` / `DeleteAsync` / `RenameAsync` / `GetDirectory` / `GetLastProjectId` / `SetLastProjectIdAsync` / `RootDirectory` |
+| `SessionSignature`（静态类） | `Agent/SessionSignature.cs` | 纯脏签名 `Compute(IEditSession)`（含文件戳） |
+| `ProjectNaming`（静态类） | `Agent/ProjectNaming.cs` | `Unnamed` 常量 + `EffectiveName(explicitName, rootImagePath)` |
+
+### 迁移3.2 `SessionStore` 收敛（会话读写 + 元数据原语）
+
+- **保留**：`SaveAsync`（返回改 `ProjectSummary`）/ `LoadAsync` / `ExportToAsync` / `DeleteNodeArtifacts`；
+  新增公开元数据原语 `ReadMetadataAsync(directory, ct)`（原 `TryReadInfoAsync`，改实例方法、返回 `ProjectSummary?`）
+  与 `WriteMetadataNameAsync(directory, name, ct)`（原 `RenameAsync` 的 JSON 改写体）。
+- **移出**（至 `ProjectService`）：`ListAsync` / `DeleteAsync` / `RenameAsync` / `GetLastProjectId` /
+  `SetLastProjectIdAsync` / 公开 `GetProjectDirectory`（改私有 `GetDirectory`）；`last_project.txt` 逻辑随迁。
+- `ProjectInfo` 记录删除；`ProjectFormatException` / `ProjectCorruptException` 不动。
+
+### 迁移3.3 App 装配与瘦身
+
+- `AppContext`：新增 `ProjectService Projects` 属性；`Create` 内 `new ProjectService(sessionStore)`。
+- `MainWindow`：新增字段/ctor 参数 `ProjectService _projects`（`_store` 仍用于会话保存/加载/清理）。
+- `MainWindow.Projects.cs`：编目调用改走 `_projects`；`ComputeSignature` → `SessionSignature.Compute(_session)`；
+  `EffectiveProjectName` → `ProjectNaming.EffectiveName(...)`；`UnnamedProject` → `ProjectNaming.Unnamed`。
+- 新增 `MainWindow.ProjectList.cs`：左侧项目列表 UI（`InitProjects` / `BuildProjectRow` / `RefreshProjectListAsync` /
+  防抖 open timer / `FlushPendingMaskAsync`）。
+- **Z8**：`MainWindow.Projects.cs` **260 行**（<300 达标，原 515）；`MainWindow.ProjectList.cs` 191。
+
+
+### 迁移3.4 测试
+
+- 编目用例（`List_Returns_Saved_Projects_Newest_First` / `Delete_Removes_Project_Directory` /
+  `Last_Project_Id_RoundTrips_And_Clears` / `List_Skips_Unsupported_Version`）从 `SessionStoreTests`
+  搬到新 **`ProjectServiceTests`**；`SessionStoreTests` 保留会话读写 + 清理用例并改用 `Path.Combine` 定位。
+
+### 迁移3.5 验收（无 GPU，Z29）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Release）：**447 通过 / 1 失败**（`IpcIdleUnloadTests.Idle_Timeout_Unloads_Then_Reloads_On_Next_Submit`，
+  GPU 后端空闲卸载后 VRAM 15s 回落窗口的时序抖动；**孤立重跑通过**，与本次会话/编目改动无关）。
+- **未主动跑 GPU 端到端新增项**（Z29 / Z30）。
+
+### 迁移3.6 本步不做（范围）
+
+- 不动 `SaveAsync` / `LoadAsync` / `ExportToAsync`；不动 `session.json` 格式 / `last_project.txt` 格式；
+  不抽 execution / ui / shell / imaging 域；不改项目列表 UI 行为；不实现 `NewDirectory`；无新 NuGet。
+
+---
+
+## 模块边界迁移 · 第 4 步：imaging 域抽取 + 三域门面化（日期：2026-09-24）
+
+> **新项目 + 端口 + 全注入（追加 · 不改行为）**
+>
+> 依据第 4 步裁决（Q1 新建 `ZivAiEditor.Imaging`；Q2 全注入；Q3 `IImagingService` 成员集；
+> Q4 `CleanupAll` 移入 `AppContext.Create`；Q5 inference/tools 不新增接口、删 `AppContext.Backend`；
+> Q6 测试迁命名空间）。把栅格操作从 UI 层抽到独立 imaging 域，UI/App 只经端口访问。
+
+### 迁移4.1 新项目 `ZivAiEditor.Imaging`
+
+- `src/ZivAiEditor.Imaging/`（net8.0；引用 `Contracts` + `ZIV.Core` + `ZIV.Imaging` + `SkiaSharp` 包，
+  CPM 版本复用）；加入 `ZIV.AI.sln`（sln 仍只含 `ZivAiEditor.*`，ZIV 项目不入 sln）。
+- 迁入并改命名空间为 `ZivAiEditor.Imaging`：`ImageCropper`、`MaskExporter`、`MaskFeather`；
+  新增门面实现 `ImagingService : IImagingService`。
+- **`MaskFeather` 改为 `internal`**（`<InternalsVisibleTo Include="ZivAiEditor.Tests" />`）；UI 不再可见。
+
+### 迁移4.2 契约端口（`Contracts/Imaging/IImagingService.cs`）
+
+`CropAsync(sourceImagePath, sessionId, nodeId, x, y, width, height, ct)` /
+`ExportMaskAsync(sessionId, nodeId, pixels, width, height, featherPx, ct)` /
+`LoadMaskAsync(path, ct)` / `ResolveMaskPath(sessionId, nodeId)` /
+`FeatherMask(pixels, width, height, radiusPx)` / `CleanupSession(sessionId?)` / `CleanupAll()`。
+
+### 迁移4.3 全注入（UI / App 只经端口）
+
+- UI：`SessionViewModel` ctor 增可选参数 `IImagingService? imaging = null`（测试免改；生产注入）；
+  `SetRootImage` / `ApplyRequest` 的 crop+mask 清理合并为 `_imaging?.CleanupSession(...)`。UI 项目
+  **不引用** `ZivAiEditor.Imaging`（仅 Contracts）。
+- App：`AppContext` 构造 `ImagingService` 并 `CleanupAll()`，暴露 `Imaging` 端口属性；**删除**
+  `AppContext.Backend`（`PythonProcessManager` 改私有字段）。`MainWindow` 增 `_imaging` 并传入
+  `SessionViewModel` 与 `ImagePreview`；`MainWindow.Projects` / `App.axaml` 退出清理走 `_imaging` /
+  `ctx.Imaging`；`Program.cs` 删除启动 `CleanupAll`。
+- 控件：`ImagePreview` 增 ctor 注入 + 无参重载（Avalonia `x:Class` 加载器需要；生产用注入重载）；
+  `CropAsync` / `LoadMaskAsync` / `ExportMaskAsync` / `ResolveMaskPath` 走端口；`MaskOverlay` 增
+  `Imaging` 属性（由 `ImagePreview` 设置），显示羽化走 `IImagingService.FeatherMask`。
+
+### 迁移4.4 inference / tools
+
+- **不新增**门面接口：`IInferenceClient`（Contracts）与 `IToolRegistry`（Contracts）即门面。
+- 删除无消费者的 `AppContext.Backend`（原暴露 `PythonProcessManager` 机制类型）。
+
+### 迁移4.5 验收（无 GPU，Z29）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**（`ImagePreview` 加无参重载消除 AVLN3001）。
+- `dotnet test`（Release）：**448 通过 / 0 失败**。
+- `grep "ImageCropper\.\|MaskExporter\.\|MaskFeather\." src/ZivAiEditor.App src/ZivAiEditor.UI` → **0 命中**。
+- `grep "ZivAiEditor.Imaging" src/ZivAiEditor.UI` → **0 命中**。
+- **未跑 GPU 端到端新增项**（Z29 / Z30）。
+
+### 迁移4.6 本步不做（范围）
+
+- 不动 execution 域 / ui 域瘦身 / shell 域 / flows 层；不改 `CropState` / `MaskState` / overlay 渲染行为；
+  不改 python / ipc-protocol / chrome / 项目列表 / 分辨率 / 重跑 / 取消 / 模板；无新 NuGet。
+
+---
+
+## 模块边界迁移 · 第 5 步：shell 域收拢（日期：2026-09-24）
+
+> **App 层内 shell 域 + 门面（追加 · 不改行为）**
+>
+> 依据第 5 步裁决（Q1 方案 1：门面 + 非 XAML 文件入 `Shell/`，命名空间不变；Q2 `ShellService` 持
+> `SingleInstance`，`Program.Main` 先建；Q3 省略 URL 协议 / 文件夹选择；Q4 专用对话框留直连；
+> Q5 `TemplateDirectory` 抽到 shell；Q6 不拆项目；Q7 `LoadSettings` 返回 internal `BackendSettings`）。
+> 平台服务收拢为 `ZivAiEditor.App` 内 `Shell/` 文件夹与 `ShellService` 门面。
+
+### 迁移5.1 shell 域结构与门面
+
+- 新增 `App/Shell/` 文件夹；`SingleInstance.cs` / `SettingsLoader.cs` **迁入**（`namespace ZivAiEditor.App`
+  不变，无 `x:Class` 影响）。
+- 新增 `App/Shell/ShellService.cs`（`internal sealed`，`IDisposable`）门面成员：
+  `IsFirstInstance` / `LaunchRequested`（事件）/ `SendToExistingInstance` / `ProgramDirectory` /
+  `TemplateDirectory` / `LoadSettings()` / `PickImagesAsync` / `PickSaveFileAsync` / `ConfirmAsync` /
+  `PromptAsync` / `ApplyChrome`。
+- **省略**：`RegisterUrlProtocol()`（无实现）、`PickFolderAsync()`（无调用者）——Q3。
+- 对话框（`ConfirmDialog` / `TextPromptDialog`）与 chrome 控件物理**留原位**，门面包装；专用选择框
+  `MultiImagePromptDialog` / `PromptConfirmDialog` 留直连（Q4）。
+- `PickSaveFileAsync` 增加 `suggestedDirectory` 参数以保留「另存为起始目录 = root 图目录」行为。
+
+### 迁移5.2 App 调用点改经门面
+
+- `Program.cs`：`new ShellService()`（含单实例）→ `IsFirstInstance` / `SendToExistingInstance` →
+  `app.Shell = shell`。
+- `App.axaml.cs`：`SingleInstance` 属性 → `ShellService? Shell`；`AppContext.Create(Shell!)`；
+  `Shell.LaunchRequested` 订阅（替代 `PathReceived`）。
+- `AppContext`：`Create(ShellService shell)`；`settings = shell.LoadSettings()`；
+  `CommandParser(Path.Combine(shell.TemplateDirectory, "commands.json"))`；删除本地 `ResolveCommandsPath`。
+- `MainWindow`：注入构造改 `internal`（`ShellService` 为 internal）；持 `_shell`；`ApplyChrome(this)`；
+  确认/文本/文件名对话框、picker、图片导入、另存为、项目保存/删除/改名均经门面。
+- `ImagePreview`：移除自身 `ChromeBehavior.Init`（改由 `MainWindow` 调 `_shell.ApplyChrome(preview)`）。
+
+### 迁移5.3 验收（无 GPU，Z29）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Release）：**448 通过 / 0 失败**。
+- `grep "\bStorageProvider\b\|\bConfirmDialog\.ShowAsync\|\bTextPromptDialog\.ShowAsync"`
+  `src/ZivAiEditor.App` → 仅 `Shell/ShellService.cs`（4 命中）。（子串匹配会额外命中
+  `MainWindow.Generate.cs` 的 `PromptConfirmDialog.ShowAsync`——Q4 保留的专用框，非本次收拢对象。）
+- **未跑 GPU 端到端新增项**（Z29 / Z30）。
+
+### 迁移5.4 本步不做（范围）
+
+- 不抽 flows 层（第 6 步）；不瘦 UI / execution；不拆 `ZivAiEditor.Shell` 项目；不改 chrome 视觉 /
+  对话框外观 / `settings.ini` 格式 / 模板机制；无新 NuGet。
+
+---
+
+## 模块边界迁移 · 第 6 步：ui 域瘦身 + flows 层引入（日期：2026-09-24）
+
+> **flows 层（App 层内）+ UI 端口 + 单份实现（追加 · 不改行为）**
+>
+> 裁决：W1 `MainWindow` 二段式装配；W2 `VM` 保留可观察状态、`FlowRunner` 经 `SetXxx` 写回；
+> W3 `FlowRunner.GenerateAsync` 承载域编排、MainWindow 保留视图前后；**W4(ii) 单份实现 + 测试机械改造**
+> （不做「旧实现 + 端口」双份，避免分叉）。
+> 端口放 UI（方案 A），消除 `VM → FlowRunner` 的循环依赖。
+
+### 迁移6.1 新增类型
+
+| 类型 | 文件 | 说明 |
+|---|---|---|
+| `IEditFlowRunner`（接口） | `ZivAiEditor.UI/Chat/IEditFlowRunner.cs` | UI 侧端口：`SubmitAsync` / `RerunNodeAsync` / `CancelCurrent`（签名与 VM 原方法逐字一致） |
+| `ChatFlowRules`（静态类） | `ZivAiEditor.UI/Chat/ChatFlowRules.cs` | 纯规则/投影（`CanSend` / `CanRerun` / `AssembleReferences` / `BuildDisplayPack` / `NormalizeRootImages` / `IsSuccess` / `IsOutOfMemory` / `BuildFailureMessage` / `BuildUsedImages` / `NormalizeAdditionalImages` / `WithAdditionalImages` / `BuildRerunSpec` / `DeleteArtifact` / `FindAssistantMessage` / `FindNode` / `CurrentPack(Extras)` / `PipelinePath`），VM 与 FlowRunner **共用**（不分叉） |
+| `FlowRunner`（类，partial） | `ZivAiEditor.App/Flows/{FlowRunner,FlowRunner.Submit,FlowRunner.Rerun,FlowRunner.Generate,FlowRunner.Cancel}.cs` | `: IEditFlowRunner`；持 VM + 域端口（session/writer/parser/executor/expander/preflight/`nodeArtifactsCleaner`）；CTS / `_cancelRequested` 在此 |
+| `GenerateOutcome`（枚举） | `FlowRunner.Generate.cs` | `Canceled` / `Failed` / `Submitted` |
+| `FlowRunnerHarness`（测试） | `ZivAiEditor.Tests/Helpers/FlowRunnerHarness.cs` | 二段式装配 VM + FlowRunner |
+
+### 迁移6.2 `SessionViewModel` 瘦身（职责）
+
+- **保留（UI 状态 + 用户意图）**：`Messages` / `History` / `IsBusy` / `Resolution` / `Mode` /
+  `LaunchOptions` / `LastRunCanceled`；`Start` / `ApplyRequest` / `NavigateTo` / `SetNodeCrop` /
+  `SetNodeMask` / `SetRootImage` / `PrepareAttachments` / `StartNewSessionFrom` / `CanSend` /
+  `CanRerun` / `RefreshHistory` / `RebuildContext` / `ReplacePending` / `AddHint` / `AddInfo` /
+  `GetParent*`。
+- **转发（薄 wrapper → 端口）**：`SubmitAsync` / `RerunNodeAsync` / `CancelCurrent`。
+- **写回入口（供 FlowRunner）**：`AttachFlowRunner` / `SetBusy` / `SetLastRunCanceled`；`ReplacePending` /
+  `RebuildContext` 提升为 public。
+- ctor 收敛为 `(IEditSession, IEditSessionWriter, IImagingService?)`（parser/executor/cleaner 迁 FlowRunner）。
+- 三文件合计 **484 行**（原 1168）；`ChatFlowRules` 323 / `FlowRunner.*` 92+174+198+116+53。
+
+### 迁移6.3 装配与调用
+
+- `MainWindow`：`new SessionViewModel(session, sessionWriter, _imaging)` → `new FlowRunner(_vm, session,
+  sessionWriter, commandParser, executor, _promptExpander, _llmPreflight, _store.DeleteNodeArtifacts)` →
+  `_vm.AttachFlowRunner(_flow)`。`Send`/`Rerun`/`Chat` 仍调 `_vm.*`（薄 wrapper）；`Generate` 改调
+  `_flow.GenerateAsync(...)` 并保留视图前后（input/附件条/busy/scroll）。
+- `AppContext`：域门面已暴露（session/writer/parser/executor/imaging/expander/preflight + store）；
+  VM/FlowRunner 在 `MainWindow` 装配（VM 本就在此创建）。
+- 无循环依赖：UI 仅依赖自身 `IEditFlowRunner`；App → UI（实现端口 + 持 VM）。
+
+### 迁移6.4 验收（无 GPU，Z29）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Release）：**448 通过 / 0 失败**（`SessionViewModelTests` 58 处构造机械改为 `FlowRunnerHarness.Create`，断言未动）。
+- 目标行数：VM 三文件 **484 < 700** 达成；各文件 < 600。
+- `grep "ZivAiEditor\.App|App\.Flows" src/ZivAiEditor.UI` → 仅既有注释 `UiPlaceholder.cs:4`（无代码引用）；
+  `UI.csproj` 未引用 App。
+- **未跑 GPU 端到端新增项**（Z29 / Z30）。
+
+### 迁移6.5 本步不做（范围）
+
+- 不动 execution 域（Executor 仍写会话）；不动 shell / project / imaging；不瘦 views/Avalonia 控件；
+  不改行为逻辑；`crop` / `mask` / `navigate` / `import` 流程留 VM；无新 NuGet。

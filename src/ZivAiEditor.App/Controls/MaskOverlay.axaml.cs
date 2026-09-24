@@ -5,6 +5,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.UI.Editing;
 using ZivAiEditor.UI.Imaging;
 
@@ -20,8 +21,8 @@ namespace ZivAiEditor.App.Controls;
 /// rebuilt from the buffer only when marked dirty, and disposed on state change / close (Z9).
 ///
 /// <para><b>Feather (Step 9C.7-B)</b> is display-only: the live <see cref="MaskState"/> buffer
-/// stays hard 0 / 255, and <see cref="MaskFeather.Apply"/> — the same pure function the
-/// exporter uses — blooms it into the alpha of the overlay bitmap. The cached bitmap is
+/// stays hard 0 / 255, and <see cref="IImagingService.FeatherMask"/> — the same pure function
+/// the exporter uses — blooms it into the alpha of the overlay bitmap. The cached bitmap is
 /// rebuilt when the mask is marked dirty (which the tool half also does on a feather change).</para>
 ///
 /// <para><b>Brush circle</b>: the current brush / eraser is outlined at the pointer position
@@ -39,6 +40,13 @@ public partial class MaskOverlay : UserControl
 
     private ImageViewModel? _model;
     private MaskState? _state;
+
+    /// <summary>
+    /// Imaging port for the display-only feather (module-boundary migration step 4). Set by
+    /// <see cref="ImagePreview"/> before the overlay is shown; <c>null</c> falls back to the
+    /// hard 0 / 255 buffer.
+    /// </summary>
+    public IImagingService? Imaging { get; set; }
     private WriteableBitmap? _bitmap;
     private bool _dirty = true;
 
@@ -181,7 +189,7 @@ public partial class MaskOverlay : UserControl
 
         // Display-only feather: the live buffer stays hard; the same pure function the
         // exporter uses blooms it into the alpha ramp (byte-identical on both surfaces).
-        var display = MaskFeather.Apply(pixels, width, height, state.FeatherPx);
+        var display = Imaging?.FeatherMask(pixels, width, height, state.FeatherPx) ?? pixels;
 
         var bitmap = new WriteableBitmap(
             new PixelSize(width, height),

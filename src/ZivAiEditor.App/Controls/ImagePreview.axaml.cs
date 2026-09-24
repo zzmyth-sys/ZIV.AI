@@ -9,6 +9,8 @@ using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using UVtools.AvaloniaControls;
+using ZivAiEditor.Contracts.Imaging;
+using ZivAiEditor.Imaging;
 using ZivAiEditor.UI.Editing;
 using ZivAiEditor.UI.Imaging;
 
@@ -39,17 +41,28 @@ public partial class ImagePreview : Window
     private TextBlock? _zoomText;
     private Border? _sizeBadge;
     private TextBlock? _sizeText;
-    private ChromeTitleBar? _chrome;
     private EditorToolbar? _toolbar;
     private TextBlock? _titleText;
     private Button? _resetView;
 
+    private readonly IImagingService _imaging;
     private Bitmap? _bitmap;
     private string? _path;
     private int _generation;
 
+    /// <summary>
+    /// Designer / runtime-loader only (Avalonia requires a public parameterless ctor for an
+    /// <c>x:Class</c> root). Production always uses the injected overload; this never reaches
+    /// the injected instance path.
+    /// </summary>
     public ImagePreview()
+        : this(new ImagingService())
     {
+    }
+
+    public ImagePreview(IImagingService imaging)
+    {
+        _imaging = imaging ?? throw new ArgumentNullException(nameof(imaging));
         InitializeComponent();
         Init();
     }
@@ -182,11 +195,8 @@ public partial class ImagePreview : Window
         _compareInfo = this.FindControl<Border>("PART_CompareInfo");
         _compareInfoText = this.FindControl<TextBlock>("PART_CompareInfoText");
 
-        _chrome = this.FindControl<ChromeTitleBar>("PART_Chrome");
-        if (_chrome is not null)
-        {
-            ChromeBehavior.Init(this, _chrome);
-        }
+        // Chrome behaviour is applied by the shell facade after construction
+        // (module-boundary migration step 5): MainWindow calls ShellService.ApplyChrome(preview).
 
         _toolbar = this.FindControl<EditorToolbar>("PART_Toolbar");
         if (_toolbar is not null)

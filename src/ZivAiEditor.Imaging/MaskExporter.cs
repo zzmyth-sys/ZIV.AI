@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using SkiaSharp;
 
-namespace ZivAiEditor.UI.Imaging;
+namespace ZivAiEditor.Imaging;
 
 /// <summary>
 /// Encodes / decodes the hand-drawn mask as an 8-bit grayscale PNG (Step 9C.7). The mask
@@ -20,7 +20,9 @@ namespace ZivAiEditor.UI.Imaging;
 /// under the program directory at <c>_cache/masks/{sessionId}/{nodeId}.png</c> — one file
 /// per node, overwritten on redraw (never accumulated), removed when the session closes /
 /// resets. Mirrors <see cref="ImageCropper"/>. Pure BCL + SkiaSharp, so it is unit-testable
-/// without a UI thread or GPU.</para>
+/// without a UI thread or GPU. Reached through <see cref="IImagingService"/> (module-boundary
+/// migration step 4); <c>ZivAiEditor.UI</c> / <c>ZivAiEditor.App</c> do not reference this
+/// type directly.</para>
 /// </summary>
 public static class MaskExporter
 {

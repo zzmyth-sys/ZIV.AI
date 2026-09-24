@@ -1,6 +1,6 @@
 using System;
 
-namespace ZivAiEditor.UI.Imaging;
+namespace ZivAiEditor.Imaging;
 
 /// <summary>
 /// Pure feathering for the hand-drawn mask (Step 9C.7-B). Turns the hard 0 / 255 buffer
@@ -20,8 +20,11 @@ namespace ZivAiEditor.UI.Imaging;
 /// <para><b>Z19 revised.</b> This is the only place the editor turns hard pixels into gray
 /// values; the live buffer stays 0 / 255 and no auto-dilation / smart-fill / morphing is
 /// performed.</para>
+///
+/// <para>Module-boundary migration step 4: the class is <b>internal</b> to the imaging domain;
+/// the UI reaches feathering only through <see cref="IImagingService.FeatherMask"/>.</para>
 /// </summary>
-public static class MaskFeather
+internal static class MaskFeather
 {
     /// <summary>Upper bound on the feather radius, in pixels (slider / setter clamp).</summary>
     public const int MaxRadiusPx = 25;

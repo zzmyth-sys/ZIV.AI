@@ -68,8 +68,12 @@ public partial class ImagePreview
         _mask = new MaskState();
 
         _maskOverlay = this.FindControl<MaskOverlay>("PART_MaskOverlay");
-        _maskOverlay?.Attach(_model);
-        _maskOverlay?.SetState(_mask);
+        if (_maskOverlay is not null)
+        {
+            _maskOverlay.Imaging = _imaging;
+            _maskOverlay.Attach(_model);
+            _maskOverlay.SetState(_mask);
+        }
 
         _maskToolbar = this.FindControl<MaskToolbar>("PART_MaskToolbar");
         if (_maskToolbar is not null)
@@ -246,7 +250,7 @@ public partial class ImagePreview
     private async Task LoadMaskAsync(string path, int width, int height)
     {
         var generation = ++_maskLoadGeneration;
-        var loaded = await MaskExporter.TryLoadAsync(path);
+        var loaded = await _imaging.LoadMaskAsync(path);
         if (generation != _maskLoadGeneration || _mask is null || loaded is not { } data)
         {
             return;
@@ -383,7 +387,7 @@ public partial class ImagePreview
         {
             spec = new MaskSpec
             {
-                MaskImagePath = MaskExporter.ResolveMaskPath(_maskSessionId, _maskNodeId),
+                MaskImagePath = _imaging.ResolveMaskPath(_maskSessionId, _maskNodeId),
                 Width = _mask.Width,
                 Height = _mask.Height,
                 IsBinary = true,
@@ -407,7 +411,7 @@ public partial class ImagePreview
         }
     }
 
-    private static async Task RunMaskExportAsync(
+    private async Task RunMaskExportAsync(
         Task previous,
         string sessionId,
         string nodeId,
@@ -427,7 +431,7 @@ public partial class ImagePreview
 
         try
         {
-            await MaskExporter.ExportAsync(sessionId, nodeId, pixels, width, height, featherPx).ConfigureAwait(false);
+            await _imaging.ExportMaskAsync(sessionId, nodeId, pixels, width, height, featherPx).ConfigureAwait(false);
         }
         catch (Exception)
         {

@@ -396,10 +396,10 @@ public partial class ImagePreview
         SetCropConfirmText("裁切中…");
         try
         {
-            // Crop + encode run off the UI thread inside ImageCropper (Z11). The rectangle
+            // Crop + encode run off the UI thread through the imaging port (Z11). The rectangle
             // is in the node's own image coordinates, so the source is the original —
             // never a previous crop. The temp file is overwritten per node.
-            var output = await ImageCropper.CropAsync(sessionId, nodeId, source, x, y, width, height);
+            var output = await _imaging.CropAsync(source, sessionId, nodeId, x, y, width, height);
 
             if (string.IsNullOrEmpty(output))
             {

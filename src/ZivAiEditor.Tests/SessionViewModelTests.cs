@@ -330,7 +330,7 @@ public class SessionViewModelTests
     {
         var session = new EditSession();
         var executor = new OomOnceExecutor(Output);
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), executor);
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         var ok = await vm.SubmitAsync("/去水印");
@@ -346,7 +346,7 @@ public class SessionViewModelTests
     public async Task Submit_Appends_Node_And_Refreshes_History()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         var ok = await vm.SubmitAsync("/去水印");
@@ -364,7 +364,7 @@ public class SessionViewModelTests
     {
         var session = new EditSession();
         var executor = new CapturingExecutor(Output);
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), executor);
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         var ok = await vm.SubmitAsync(
@@ -383,7 +383,7 @@ public class SessionViewModelTests
     {
         // Step 9C.10: the ordered pipeline images (main first) are stored on the node.
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         await vm.SubmitAsync(
@@ -399,7 +399,7 @@ public class SessionViewModelTests
     {
         var session = new EditSession();
         var executor = new CapturingExecutor(Output);
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), executor);
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         var ok = await vm.SubmitAsync(
@@ -420,7 +420,7 @@ public class SessionViewModelTests
     {
         var session = new EditSession();
         var executor = new CapturingExecutor(Output);
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), executor);
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         await vm.SubmitAsync("/去水印");
@@ -433,7 +433,7 @@ public class SessionViewModelTests
     public async Task Submit_Failure_Shows_Error_And_Adds_No_Node()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(null, success: false));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(null, success: false));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         var ok = await vm.SubmitAsync("把天空换成日落");
@@ -448,7 +448,7 @@ public class SessionViewModelTests
     public async Task Navigate_Switches_Current_And_Rebuilds_Chat()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
 
@@ -464,7 +464,7 @@ public class SessionViewModelTests
     public void Empty_Session_Starts_Without_Messages()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
 
         vm.Start(new LaunchOptions());
 
@@ -477,7 +477,7 @@ public class SessionViewModelTests
     {
         var session = new EditSession();
         var executor = new DeferredExecutor();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), executor);
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         var submit = vm.SubmitAsync("/去水印");
@@ -503,7 +503,7 @@ public class SessionViewModelTests
     public void GetParentImagePath_Is_Null_For_Root_Image()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         Assert.Null(vm.GetParentImagePath(Root));
@@ -516,7 +516,7 @@ public class SessionViewModelTests
     public async Task GetParentImagePath_Returns_Root_For_Direct_Child()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
 
@@ -528,7 +528,7 @@ public class SessionViewModelTests
     {
         const string second = @"C:\img\out2.png";
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
 
@@ -543,7 +543,7 @@ public class SessionViewModelTests
     public async Task SetRootImage_Resets_Session_And_Rebuilds_Chat()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
         Assert.Equal(2, vm.History.Count);
@@ -561,7 +561,7 @@ public class SessionViewModelTests
     public async Task Navigate_To_Root_Node_Switches_Current_To_Root()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
 
@@ -583,7 +583,7 @@ public class SessionViewModelTests
     public void SetRootImage_Blank_Is_NoOp()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         vm.SetRootImage((string?)null);
@@ -596,7 +596,7 @@ public class SessionViewModelTests
     public void SetRootImage_Pack_Promotes_All_And_Tracks_Count()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions());
 
         vm.SetRootImage(new[] { "a", "b", "c" });
@@ -611,7 +611,7 @@ public class SessionViewModelTests
     public void SetRootImage_Pack_Trims_To_Ten_And_Adds_Info()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions());
         var many = Enumerable.Range(0, 12).Select(i => $"img{i}").ToArray();
 
@@ -627,7 +627,7 @@ public class SessionViewModelTests
     public void CurrentImageCount_Is_Zero_When_No_Node()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions());
 
         Assert.Equal(0, vm.CurrentImageCount);
@@ -640,7 +640,7 @@ public class SessionViewModelTests
         // pack[0] and the extras become references (main first in UsedImagePaths).
         var session = new EditSession();
         var executor = new CapturingExecutor(Output);
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), executor);
         vm.SetRootImage(new[] { "a", "b", "c" });
 
         var ok = await vm.SubmitAsync("/去水印");
@@ -661,7 +661,7 @@ public class SessionViewModelTests
         // Pack extras (b,c,d) come before the attachments, and the combined refs cap at 3.
         var session = new EditSession();
         var executor = new CapturingExecutor(Output);
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), executor);
         vm.SetRootImage(new[] { "a", "b", "c", "d" });
 
         await vm.SubmitAsync("编辑", additionalImages: new[] { "r1", "r2" });
@@ -674,7 +674,7 @@ public class SessionViewModelTests
     public async Task Submit_Pure_T2I_Skips_The_Usage_Info_Line()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions());
 
         await vm.SubmitAsync("/生成 一只猫");
@@ -691,7 +691,7 @@ public class SessionViewModelTests
         // (Step 9C.10): no phantom refs, no usage info line, no used images on the node.
         var session = new EditSession();
         var executor = new CapturingExecutor(Output);
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), executor);
         vm.SetRootImage(new[] { "a", "b", "c" });
 
         await vm.SubmitAsync("/生成 一只猫");
@@ -710,7 +710,7 @@ public class SessionViewModelTests
     public void AddInfo_Appends_System_NonError_Message()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
 
         vm.AddInfo("本次使用 2 张图");
 
@@ -723,7 +723,7 @@ public class SessionViewModelTests
     public void RebuildContext_Starting_Bubble_Carries_The_Display_Pack()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.SetRootImage(new[] { "a", "b", "c" });
 
         var bubble = vm.Messages.Single(m => m.Role == ChatRole.System && m.Text == "起始图像");
@@ -735,7 +735,7 @@ public class SessionViewModelTests
     public void SetNodeCrop_Stores_Crop_Without_Adding_A_Node()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         var rootId = session.CurrentNodeId!;
@@ -753,7 +753,7 @@ public class SessionViewModelTests
     public void SetNodeCrop_Unknown_Node_Is_NoOp()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         vm.SetNodeCrop("missing", new CropSpec { Width = 10, Height = 10 });
@@ -766,7 +766,7 @@ public class SessionViewModelTests
     public void SetNodeCrop_Readjust_Does_Not_Add_A_Node()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         var rootId = session.CurrentNodeId!;
 
@@ -784,7 +784,7 @@ public class SessionViewModelTests
     {
         const string cropResult = @"C:\img\root_crop.png";
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         var rootId = session.CurrentNodeId!;
 
@@ -799,7 +799,7 @@ public class SessionViewModelTests
     public void GetParentPipelineImagePath_Is_Null_For_Root()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         Assert.Null(vm.GetParentPipelineImagePath(Root));
@@ -809,7 +809,7 @@ public class SessionViewModelTests
     public void PrepareAttachments_NoAttachments_NoRoot_NaturalLanguage_Allows_T2I()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions());
 
         Assert.Equal(AttachmentPreparation.Ready, vm.PrepareAttachments("一只猫", Array.Empty<string>()));
@@ -819,7 +819,7 @@ public class SessionViewModelTests
     public void PrepareAttachments_NoAttachments_NoRoot_SlashCommand_Needs_Image()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions());
 
         Assert.Equal(AttachmentPreparation.NoImage, vm.PrepareAttachments("/去水印", Array.Empty<string>()));
@@ -829,7 +829,7 @@ public class SessionViewModelTests
     public void PrepareAttachments_Attachments_NoRoot_Promotes_First_To_Root()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions());
 
         var result = vm.PrepareAttachments("编辑", new[] { @"C:\img\a.png", @"C:\img\b.png" });
@@ -844,7 +844,7 @@ public class SessionViewModelTests
     public void PrepareAttachments_Attachments_WithRoot_NeedsDecision_And_Keeps_Root()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         var result = vm.PrepareAttachments("编辑", new[] { @"C:\img\new.png" });
@@ -857,7 +857,7 @@ public class SessionViewModelTests
     public void PrepareAttachments_NoAttachments_WithRoot_Is_Ready()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         Assert.Equal(AttachmentPreparation.Ready, vm.PrepareAttachments("编辑", Array.Empty<string>()));
@@ -867,7 +867,7 @@ public class SessionViewModelTests
     public void StartNewSessionFrom_Resets_Root_To_First_Attachment()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         vm.StartNewSessionFrom(new[] { @"C:\img\new.png", @"C:\img\other.png" });
@@ -880,7 +880,7 @@ public class SessionViewModelTests
     public void CanSend_Validation_Matrix()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
 
         Assert.False(vm.CanSend("", 0));
         Assert.False(vm.CanSend("   ", 1));
@@ -900,7 +900,7 @@ public class SessionViewModelTests
     public void AddHint_Appends_System_Error_Message()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
 
         vm.AddHint("请先导入图片");
 
@@ -911,7 +911,7 @@ public class SessionViewModelTests
     public void SetNodeMask_Forwards_To_Session_Without_Adding_A_Node()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         var rootId = session.CurrentNodeId!;
         var mask = new MaskSpec { MaskImagePath = @"C:\img\mask.png", Width = 32, Height = 32 };
@@ -928,7 +928,7 @@ public class SessionViewModelTests
     public void SetNodeCrop_That_Clears_Mask_Adds_Hint()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         var rootId = session.CurrentNodeId!;
         vm.SetNodeMask(rootId, new MaskSpec { MaskImagePath = @"C:\img\mask.png", Width = 32, Height = 32 });
@@ -943,7 +943,7 @@ public class SessionViewModelTests
     public void SetNodeCrop_Without_Mask_Adds_No_Reset_Hint()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         var rootId = session.CurrentNodeId!;
 
@@ -956,7 +956,7 @@ public class SessionViewModelTests
     public async Task Submit_Stores_Rerun_Snapshot_On_Node()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         vm.Resolution = new ResolutionPolicy { Mode = ResolutionMode.Side, Side = 1024 };
 
@@ -972,7 +972,7 @@ public class SessionViewModelTests
     public async Task Submit_Without_Resolution_Or_Refs_Stores_No_Snapshot()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         await vm.SubmitAsync("/去水印");
@@ -985,7 +985,7 @@ public class SessionViewModelTests
     {
         const string rerunOutput = @"C:\img\rerun.png";
         var session = new EditSession();
-        var vm = new SessionViewModel(
+        var vm = FlowRunnerHarness.Create(
             session, session, ParserWithoutFile(), new SequenceExecutor(Output, rerunOutput));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
@@ -1005,7 +1005,7 @@ public class SessionViewModelTests
     {
         const string rerunOutput = @"C:\img\rerun.png";
         var session = new EditSession();
-        var vm = new SessionViewModel(
+        var vm = FlowRunnerHarness.Create(
             session, session, ParserWithoutFile(), new SequenceExecutor(Output, rerunOutput));
         vm.Start(new LaunchOptions { ImagePath = Root });
         vm.Resolution = new ResolutionPolicy { Mode = ResolutionMode.Side, Side = 2048 };
@@ -1023,7 +1023,7 @@ public class SessionViewModelTests
     {
         const string rerunOutput = @"C:\img\rerun.png";
         var session = new EditSession();
-        var vm = new SessionViewModel(
+        var vm = FlowRunnerHarness.Create(
             session, session, ParserWithoutFile(), new SequenceExecutor(Output, rerunOutput));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
@@ -1042,7 +1042,7 @@ public class SessionViewModelTests
     {
         const string rerunOutput = @"C:\img\rerun.png";
         var session = new EditSession();
-        var vm = new SessionViewModel(
+        var vm = FlowRunnerHarness.Create(
             session, session, ParserWithoutFile(), new SequenceExecutor(Output, rerunOutput));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
@@ -1068,7 +1068,7 @@ public class SessionViewModelTests
         try
         {
             var session = new EditSession();
-            var vm = new SessionViewModel(
+            var vm = FlowRunnerHarness.Create(
                 session, session, ParserWithoutFile(), new SequenceExecutor(oldOutput, rerunOutput));
             vm.Start(new LaunchOptions { ImagePath = Root });
             await vm.SubmitAsync("/去水印");
@@ -1092,7 +1092,7 @@ public class SessionViewModelTests
     public async Task RerunNode_Unknown_Node_Is_Rejected()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         Assert.False(await vm.RerunNodeAsync("missing"));
@@ -1103,7 +1103,7 @@ public class SessionViewModelTests
     public async Task RerunNode_Root_Is_Rejected_With_Hint()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         var rootId = session.CurrentNodeId!;
 
@@ -1115,7 +1115,7 @@ public class SessionViewModelTests
     public async Task Submit_Sets_NodeId_On_Assistant_Bubble()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         await vm.SubmitAsync("/去水印");
@@ -1129,7 +1129,7 @@ public class SessionViewModelTests
     {
         const string rerunOutput = @"C:\img\rerun.png";
         var session = new EditSession();
-        var vm = new SessionViewModel(
+        var vm = FlowRunnerHarness.Create(
             session, session, ParserWithoutFile(), new SequenceExecutor(Output, rerunOutput));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
@@ -1152,7 +1152,7 @@ public class SessionViewModelTests
     public async Task RerunNode_Failure_Shows_Error_On_Original_Bubble()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new RerunFailExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new RerunFailExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
         var nodeId = session.CurrentNodeId!;
@@ -1172,7 +1172,7 @@ public class SessionViewModelTests
     public async Task Submit_DisplayText_Shows_Original_But_Stores_Expanded()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         const string expanded = "/生成 一只发光的森林精灵";
 
@@ -1188,7 +1188,7 @@ public class SessionViewModelTests
     public void CancelCurrent_With_No_InFlight_Returns_False()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
 
         Assert.False(vm.CancelCurrent());
     }
@@ -1198,7 +1198,7 @@ public class SessionViewModelTests
     {
         var session = new EditSession();
         var executor = new BlockingExecutor(Output);
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), executor);
         vm.Start(new LaunchOptions { ImagePath = Root });
 
         var submit = vm.SubmitAsync("/去水印");
@@ -1223,7 +1223,7 @@ public class SessionViewModelTests
     public async Task CanRerun_True_For_Child_False_For_Root_And_Unknown()
     {
         var session = new EditSession();
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         var rootId = session.CurrentNodeId!;
 
@@ -1240,7 +1240,7 @@ public class SessionViewModelTests
     {
         var session = new EditSession();
         var executor = new BlockingRerunExecutor(Output);
-        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), executor);
         vm.Start(new LaunchOptions { ImagePath = Root });
         await vm.SubmitAsync("/去水印");
         var nodeId = session.CurrentNodeId!;

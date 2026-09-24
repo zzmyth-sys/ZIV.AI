@@ -32,7 +32,7 @@ public sealed partial class SessionStore
             return;
         }
 
-        var directory = GetProjectDirectory(sessionId);
+        var directory = GetDirectory(sessionId);
         if (!Directory.Exists(directory))
         {
             return;

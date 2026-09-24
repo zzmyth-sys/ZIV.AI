@@ -90,6 +90,21 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
     }
 
     /// <summary>
+    /// Resets this session to a brand-new empty session <b>in place</b> (module-boundary
+    /// migration step 2): drops every node, the root and the current selection, and adopts a
+    /// fresh <see cref="SessionId"/> / <see cref="CreatedAt"/>. Equivalent to the initial state
+    /// of a newly constructed <see cref="EditSession"/>.
+    /// </summary>
+    public void NewSession()
+    {
+        Nodes.Clear();
+        _rootNode = null;
+        CurrentNodeId = null;
+        SessionId = Guid.NewGuid().ToString("N");
+        CreatedAt = DateTimeOffset.Now;
+    }
+
+    /// <summary>
     /// Replaces this session's contents <b>in place</b> (Step 9C.6-E) from a persisted
     /// project: clears the DAG, rebuilds it from <paramref name="nodes"/>, re-points the
     /// root (the single node with no parent) and selects <paramref name="currentId"/>

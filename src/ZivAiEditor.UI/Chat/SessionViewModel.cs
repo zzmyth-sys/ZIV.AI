@@ -1,59 +1,62 @@
 using System.Collections.ObjectModel;
-using ZivAiEditor.Agent;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Planning;
 using ZivAiEditor.UI.Editing;
 using ZivAiEditor.UI.Imaging;
-using TaskStatus = ZivAiEditor.Contracts.Enums.TaskStatus;
 
 namespace ZivAiEditor.UI.Chat;
 
 /// <summary>
-/// Chat-session view model (Step 9A): it drives the in-memory session through the
-/// frozen Agent contracts only — <see cref="ICommandParser"/> to turn input into an
-/// <c>EditPlan</c> and <see cref="IExecutor"/> to run it. Step 9C.5: the session is
-/// held as the Contracts <see cref="IEditSession"/> / <see cref="IEditSessionWriter"/>,
-/// so no Agent implementation type crosses into the UI (V1). It never touches
-/// <c>IInferenceClient</c> (ARCHITECTURE.md §4: the UI talks to the Agent layer through
-/// contracts; inference is the tool's job).
+/// Chat-session <b>UI state</b> holder (Step 9A; module-boundary migration step 6). It keeps the
+/// observable chat / history / pending state and the user-facing gates, and forwards the
+/// cross-domain orchestration (<see cref="SubmitAsync"/> / <see cref="RerunNodeAsync"/> /
+/// <see cref="CancelCurrent"/>) to the injected <see cref="IEditFlowRunner"/> (the App's
+/// <c>FlowRunner</c>). The pure rules/projections live in <see cref="ChatFlowRules"/>, shared by
+/// both this view model and the flow runner so the two paths cannot diverge.
 ///
-/// The class has no Avalonia dependency so the chat flow is unit-testable; the App
-/// layer renders <see cref="Messages"/> / <see cref="History"/> into controls.
+/// <para>No Avalonia dependency, so the UI state is unit-testable; the App layer renders
+/// <see cref="Messages"/> / <see cref="History"/> into controls.</para>
 /// </summary>
 public sealed partial class SessionViewModel
 {
-    /// <summary>Delay before retrying a transient CUDA-OOM failure (Step 9C.6-D).</summary>
-    private const int OomRetryDelayMs = 2000;
-
-    /// <summary>At most 3 reference images (excluding the main) into the pipeline (Step 9C.5-D, D4).</summary>
-    private const int MaxAdditionalImages = 3;
-
     private readonly IEditSession _session;
     private readonly IEditSessionWriter _writer;
-    private readonly ICommandParser _parser;
-    private readonly IExecutor _executor;
 
     /// <summary>
-    /// Deletes a saved project's per-node artifacts (Step 9C.8-A2). Injected by the App so
-    /// the UI view model stays free of the concrete <c>SessionStore</c> (V1); <c>null</c>
-    /// in tests / when the project has never been saved.
+    /// Imaging-domain port (module-boundary migration step 4) for cleaning a session's crop /
+    /// mask temp files. Injected by the App; <c>null</c> in tests that do not exercise temp-file
+    /// cleanup, so no imaging-domain implementation type is referenced from the UI.
     /// </summary>
-    private readonly Action<string, IReadOnlyCollection<string>, bool>? _nodeArtifactsCleaner;
+    private readonly IImagingService? _imaging;
+
+    /// <summary>
+    /// The orchestration port (module-boundary migration step 6), attached by the App after both
+    /// this view model and the <c>FlowRunner</c> exist (two-phase wiring). Required before any
+    /// <see cref="SubmitAsync"/> / <see cref="RerunNodeAsync"/> / <see cref="CancelCurrent"/> call.
+    /// </summary>
+    private IEditFlowRunner? _flowRunner;
 
     public SessionViewModel(
         IEditSession session,
         IEditSessionWriter writer,
-        ICommandParser parser,
-        IExecutor executor,
-        Action<string, IReadOnlyCollection<string>, bool>? nodeArtifactsCleaner = null)
+        IImagingService? imaging = null)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
-        _parser = parser ?? throw new ArgumentNullException(nameof(parser));
-        _executor = executor ?? throw new ArgumentNullException(nameof(executor));
-        _nodeArtifactsCleaner = nodeArtifactsCleaner;
+        _imaging = imaging;
     }
+
+    /// <summary>
+    /// Attaches the App's flow runner (module-boundary migration step 6). Two-phase wiring: the
+    /// runner holds this view model, so it is constructed after it and attached here.
+    /// </summary>
+    public void AttachFlowRunner(IEditFlowRunner runner)
+        => _flowRunner = runner ?? throw new ArgumentNullException(nameof(runner));
+
+    private IEditFlowRunner Runner()
+        => _flowRunner ?? throw new InvalidOperationException(
+            "IEditFlowRunner is not attached; call AttachFlowRunner before submitting / re-running.");
 
     /// <summary>The underlying session, exposed read-only (Step 9C.5: no Agent type crosses).</summary>
     public IEditSession Session => _session;
@@ -63,6 +66,9 @@ public sealed partial class SessionViewModel
     public ObservableCollection<HistoryItem> History { get; } = new();
 
     public bool IsBusy { get; private set; }
+
+    /// <summary>Sets the busy flag (module-boundary migration step 6: written by the flow runner).</summary>
+    public void SetBusy(bool busy) => IsBusy = busy;
 
     /// <summary>
     /// Resolution selected in the UI; applied to a plan that does not carry its own
@@ -102,8 +108,7 @@ public sealed partial class SessionViewModel
         if (options.ImagePath is { Length: > 0 } image)
         {
             // Replacing the root drops the previous DAG, so its crop / mask temp files are orphans.
-            ImageCropper.CleanupSession(_session.SessionId);
-            MaskExporter.CleanupSession(_session.SessionId);
+            _imaging?.CleanupSession(_session.SessionId);
             _writer.SetRoot(image);
         }
 
@@ -112,161 +117,16 @@ public sealed partial class SessionViewModel
     }
 
     /// <summary>
-    /// Runs one user input end to end: parse → execute → append a session node →
-    /// refresh history. Returns <c>true</c> when an output node was produced.
+    /// Runs one user input end to end (delegates to the flow runner, module-boundary migration
+    /// step 6): parse → execute → append a session node → refresh history.
     /// </summary>
-    public async Task<bool> SubmitAsync(
+    public Task<bool> SubmitAsync(
         string input,
         IProgress<TaskProgress>? progress = null,
         CancellationToken ct = default,
         IReadOnlyList<string>? additionalImages = null,
         string? displayText = null)
-    {
-        var text = (input ?? "").Trim();
-        if (text.Length == 0 || IsBusy)
-        {
-            return false;
-        }
-
-        // Step 9C.8-B: arm the in-flight CTS before any await, so CancelCurrent() can
-        // interrupt the parse / execute and the token reaches the backend (Z11).
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _inFlightCts = cts;
-        _cancelRequested = false;
-        LastRunCanceled = false;
-        IsBusy = true;
-
-        // The pending bubble is replaced in place once the executor returns. It is tracked
-        // by identity (not index) so a context rebuild while generating cannot desync it.
-        var pending = new ChatMessage { Role = ChatRole.Assistant, Text = "生成中…", IsPending = true };
-        var parentId = _session.CurrentNodeId;
-
-        // End-to-end wall-clock: click-to-bubble-replacement (Step 9C.3 收尾 10). This is
-        // intentionally distinct from the backend's InferenceResultDetail.DurationMs
-        // (sampling + VAE decode only) and ToolResult.Duration (one IPC submit, incl.
-        // lazy load / queue) — the three are not interchangeable (Step 9C.3-R #2).
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-
-        try
-        {
-            Messages.Add(new ChatMessage { Role = ChatRole.User, Text = displayText ?? text });
-
-            // Step 9C.10: the pipeline consumes the current node's whole image pack. The main
-            // image is the (crop-aware) pipeline image; the pack's extra images are references
-            // and precede the attachment references (Step 9C.5-D). The combined extras cap at 3
-            // (max 4 pipeline images, D4) and an over-limit send is truncated, never refused.
-            // The parser interface stays untouched, so the plan is rebuilt (init-only).
-            var attachmentRefs = NormalizeAdditionalImages(additionalImages);
-
-            // R1: variant selection counts the whole current pack plus the attachments.
-            var imageCount = CurrentImageCount + attachmentRefs.Count;
-
-            // The image count drives single / multi template selection in the parser.
-            var parsed = await _parser.ParseAsync(text, _session, imageCount, Resolution, cts.Token);
-            if (!parsed.Success || parsed.Plan is null)
-            {
-                Messages.Add(new ChatMessage
-                {
-                    Role = ChatRole.Assistant,
-                    Text = parsed.ErrorMessage ?? "无法解析该输入，请输入斜杠命令或一句编辑指令。",
-                    IsError = true,
-                });
-                return false;
-            }
-
-            // References only apply to an image-consuming plan (a non-blank main image): a
-            // text-to-image plan (`/生成`, T2I) has no main and ignores references, so the pack
-            // must not pollute it (Step 9C.10).
-            var plan = parsed.Plan;
-            if (!string.IsNullOrWhiteSpace(plan.MainImagePath))
-            {
-                var refs = AssembleReferences(
-                    CurrentPackExtras(), attachmentRefs, MaxAdditionalImages, out var truncated);
-                if (refs.Count > 0)
-                {
-                    plan = WithAdditionalImages(plan, refs);
-                }
-
-                // R2: report the images actually entering the pipeline (main + refs, post-truncation).
-                AddInfo($"本次使用 {1 + refs.Count} 张图");
-
-                if (truncated)
-                {
-                    AddHint("最多支持 3 张参考图，多余的已忽略");
-                }
-            }
-
-            Messages.Add(pending);
-
-            var state = await RunWithOomRetryAsync(
-                () => _executor.ExecuteAsync(plan, progress, cts.Token), progress, cts.Token);
-
-            var elapsed = stopwatch.Elapsed;
-            if (IsSuccess(state))
-            {
-                var outputPath = state.OutputImagePath!;
-                var appended = _writer.AppendNode(parentId, outputPath, text);
-
-                // Step 9C.8-A: snapshot the two inputs the DAG cannot reconstruct, so the
-                // node can be re-run later (the prompt / tool / steps are re-parsed).
-                if (BuildRerunSpec(plan.Resolution, plan.AdditionalImages) is { } snapshot)
-                {
-                    _writer.SetNodeRerun(appended.NodeId, snapshot);
-                }
-
-                // Step 9C.10: record the ordered pipeline images this edit consumed (main
-                // first), so the @ / <imageN> mapping survives a reload.
-                _writer.SetNodeUsedImages(appended.NodeId, BuildUsedImages(plan));
-
-                ReplacePending(pending, new ChatMessage
-                {
-                    Role = ChatRole.Assistant,
-                    Text = $"{elapsed.TotalSeconds:F1}秒 完成",
-                    ImagePath = outputPath,
-                    ImagePaths = new[] { outputPath },
-                    NodeId = appended.NodeId,
-                });
-                RefreshHistory();
-                return true;
-            }
-
-            if (state.Status == TaskStatus.Canceled)
-            {
-                // Revert the chat to the pre-send state (no new node, no bubbles); the App
-                // puts the prompt / attachments back into the input (Step 9C.8-B follow-up).
-                LastRunCanceled = true;
-                RebuildContext();
-                return false;
-            }
-
-            ReplacePending(pending, new ChatMessage
-            {
-                Role = ChatRole.Assistant,
-                Text = BuildFailureMessage(state),
-                IsError = true,
-            });
-            return false;
-        }
-        catch (OperationCanceledException)
-        {
-            LastRunCanceled = true;
-            RebuildContext();
-            return false;
-        }
-        catch (Exception ex)
-        {
-            ReplacePending(pending, new ChatMessage { Role = ChatRole.Assistant, Text = ex.Message, IsError = true });
-            return false;
-        }
-        finally
-        {
-            IsBusy = false;
-            if (ReferenceEquals(_inFlightCts, cts))
-            {
-                _inFlightCts = null;
-            }
-        }
-    }
+        => Runner().SubmitAsync(input, progress, ct, additionalImages, displayText);
 
     /// <summary>
     /// Switches the working node and rebuilds the chat to that node's context
@@ -288,25 +148,11 @@ public sealed partial class SessionViewModel
     public bool HasRootImage => _session.RootImagePath is { Length: > 0 };
 
     /// <summary>
-    /// Whether the send button should be enabled (Step 9C.6-C). Blank text is never
-    /// sendable; with attachments the mode must match the count (Single &lt;= 1,
-    /// Multi &gt;= 2). With no attachments the mode does not gate the send, so
-    /// natural-language text-to-image stays available.
+    /// Whether the send button should be enabled (Step 9C.6-C). Delegates to the shared
+    /// <see cref="ChatFlowRules.CanSend"/> so the UI gate and the flow runner agree.
     /// </summary>
     public bool CanSend(string? input, int attachmentCount)
-    {
-        if (string.IsNullOrWhiteSpace(input))
-        {
-            return false;
-        }
-
-        if (attachmentCount == 0)
-        {
-            return true;
-        }
-
-        return Mode == ImageEditMode.Single ? attachmentCount <= 1 : attachmentCount >= 2;
-    }
+        => ChatFlowRules.CanSend(input, attachmentCount, Mode);
 
     /// <summary>
     /// Resolves the pending attachments for a submit (Step 9C.6-C). Mutates the session
@@ -453,7 +299,7 @@ public sealed partial class SessionViewModel
     /// bubble shows the node's <b>pipeline</b> image (Step 9C.6-B): its crop result when it
     /// has one, otherwise its output — so a crop is reflected in the chat stream.
     /// </summary>
-    private void RebuildContext()
+    public void RebuildContext()
     {
         Messages.Clear();
 
@@ -475,8 +321,8 @@ public sealed partial class SessionViewModel
         {
             Role = ChatRole.System,
             Text = "起始图像",
-            ImagePath = PipelinePath(path[0]),
-            ImagePaths = BuildDisplayPack(path[0]),
+            ImagePath = ChatFlowRules.PipelinePath(path[0]),
+            ImagePaths = ChatFlowRules.BuildDisplayPack(path[0]),
             NodeId = path[0].NodeId,
         });
 
@@ -487,8 +333,8 @@ public sealed partial class SessionViewModel
             {
                 Role = ChatRole.Assistant,
                 Text = "完成",
-                ImagePath = PipelinePath(node),
-                ImagePaths = new[] { PipelinePath(node) },
+                ImagePath = ChatFlowRules.PipelinePath(node),
+                ImagePaths = new[] { ChatFlowRules.PipelinePath(node) },
                 NodeId = node.NodeId,
             });
         }
@@ -497,9 +343,9 @@ public sealed partial class SessionViewModel
     /// <summary>
     /// Replaces the pending "生成中" bubble (tracked by identity) with the final message. If
     /// the context was rebuilt while generating and the bubble is gone, the final message is
-    /// appended instead of throwing on a stale index.
+    /// appended instead of throwing on a stale index. Called by the flow runner (step 6).
     /// </summary>
-    private void ReplacePending(ChatMessage pending, ChatMessage replacement)
+    public void ReplacePending(ChatMessage pending, ChatMessage replacement)
     {
         var index = Messages.IndexOf(pending);
         if (index >= 0)
@@ -511,8 +357,4 @@ public sealed partial class SessionViewModel
             Messages.Add(replacement);
         }
     }
-
-    /// <summary>The image a node shows in the chat: its crop result, else its output.</summary>
-    private static string PipelinePath(IEditNode node)
-        => node.Crop is { ResultImagePath.Length: > 0 } crop ? crop.ResultImagePath : node.ImagePath;
 }
