@@ -4894,3 +4894,29 @@ Q1 不拆程序集。
 - 位置变更登记见 `FROZEN.md`「Step 8-4 / 8-4 位置变更说明」；原冻结行不改。
 - verifier 说明：因工作树含 7-C / 8-1 / 8-2 / 8-3 等多步未提交改动，无法从 `HEAD` 机械隔离证明「纯 8-4」，
   但所有非 namespace/using 行均属先前步骤（带 Step 注释），8-4 本身仅位置 / 命名空间变化。
+
+---
+
+## [Z-006 收口] - 2026-09-25：IProjectMetadataStore 端口
+
+### 目标
+
+关闭 8-4 登记的 Z-006（`ProjectService` 持具体 `SessionStore`）。
+
+### 做了什么
+
+- 新增 `Contracts/Project/IProjectMetadataStore`（`RootDirectory` / `ReadMetadataAsync` /
+  `WriteMetadataNameAsync`，签名逐字；不含会话内容读写）。
+- `SessionStore : ISessionPersistence, IProjectMetadataStore`（签名零变化）。
+- `ProjectService` 构造注入具体 `SessionStore` → `IProjectMetadataStore`；去掉 `using ZivAiEditor.Agent.Session`
+  （XML cref 改 `<c>` 文本），使其对 session 域**零编译期依赖**。
+- `AppContext` 装配点不变（隐式转端口）；`ProjectServiceTests` 构造点不变（隐式转），新增 1 例接口一致性。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- 构建 0/0；非 GPU 全量 450 → **451**（+1）。
+
+### 备注
+
+- 纯端口化，零行为变化；未合并 `IProjectMetadataStore` 与 `ISessionPersistence`，未动会话读写 /
+  Executor 注入（D5）/ 其它 Z 项 / 遮罩 / outpaint / 7-H / GPU。

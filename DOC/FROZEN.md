@@ -3853,3 +3853,37 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 | 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
 |---|---|---|---|---|
 | Z-006 | `ProjectService` 仍注入具体 `SessionStore`（Project→Session 具体依赖） | 7-C 未实现 `IProjectMetadataStore`（元数据原语端口）；8-4 为纯搬迁不动注入 | 需要彻底解耦 project/session 域 | 后续域解耦步 |
+
+---
+
+## Z-006 收口：IProjectMetadataStore 端口（日期：2026-09-25）
+
+> **契约追加 + 纯端口化（零行为变化）**。关闭 8-4 妥协清单 Z-006（Project→Session 具体依赖残留）。
+
+### Z006.1 契约追加（`Contracts/Project/IProjectMetadataStore`）
+
+| 成员（逐字） | 说明 |
+|---|---|
+| `string RootDirectory { get; }` | 项目根目录 |
+| `Task<ProjectSummary?> ReadMetadataAsync(string directory, CancellationToken ct = default)` | 读项目列表元数据 |
+| `Task WriteMetadataNameAsync(string directory, string name, CancellationToken ct = default)` | 改写项目 `name`（仅元数据） |
+
+- 端口由 **project 域声明**（它需要），由 session 域 `SessionStore` 实现。
+- 刻意**不含**会话内容读写（load / save / export / 清理）→ 那些仍在 `ISessionPersistence`。
+
+### Z006.2 实现与注入
+
+- `SessionStore : ISessionPersistence, IProjectMetadataStore`（签名零变化）。
+- `ProjectService` 注入由具体 `SessionStore` 改为 `IProjectMetadataStore`；内部调用点不变。
+- `AppContext` 装配点不变（`SessionStore` 隐式转端口）；具体类仅在装配点保留。
+
+### Z006.3 验收（无 GPU，Z29 / Z30）
+
+- 构建 0/0；非 GPU 全量 **451 通过 / 0 失败**（+1 接口一致性用例）。
+- `ProjectService.cs` 无具体 `SessionStore` 代码依赖（仅 XML 注释提及）。
+
+### Z006.4 妥协/挂账清单 · 追加（Z-006 关闭）
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-006 | Project→Session 具体依赖残留 | —（已由本段收口） | — | **本轮关闭**（2026-09-25） |

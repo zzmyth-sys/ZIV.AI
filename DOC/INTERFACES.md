@@ -100,3 +100,13 @@
   - `ZivAiEditor.Agent.Project`（ProjectService / ProjectNaming）
   - `ZivAiEditor.Agent.Execution`（Executor / ExecutionQueue / CommandParser / LlmPlanner / FallbackPlanner / ResilientPlanner / PromptExpander；`Execution/Command` 与 `Execution/Planner` 子文件夹共享此命名空间）
 - 程序集名不变（Q1 / Q11）：`ZivAiEditor.Contracts` / `ZivAiEditor.Agent`。
+
+## 8. 追加端口（8-4 · Z-006 收口）
+
+> 本节为 **Z-006 收口追加**（只增不改）。
+
+- `ZivAiEditor.Contracts.Project.IProjectMetadataStore`（project 域声明；`SessionStore` 实现）：
+  - `string RootDirectory { get; }`
+  - `Task<ProjectSummary?> ReadMetadataAsync(string directory, CancellationToken ct = default)`
+  - `Task WriteMetadataNameAsync(string directory, string name, CancellationToken ct = default)`
+  - **不含**会话内容读写（见 `ISessionPersistence`）。

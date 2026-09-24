@@ -44,7 +44,7 @@ public sealed class ProjectCorruptException : Exception
 /// "save a copy elsewhere" capability for a later UI. Pure BCL file IO / JSON — no platform
 /// or GPU dependency — so it is unit-testable.</para>
 /// </summary>
-public sealed partial class SessionStore : ISessionPersistence
+public sealed partial class SessionStore : ISessionPersistence, IProjectMetadataStore
 {
     public const int FormatVersion = 2;
 

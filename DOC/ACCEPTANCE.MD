@@ -2724,3 +2724,29 @@ UI（D6 遗留）。
 ### Step 8-4 验收后动作
 
 1. 在「验收记录」追加“Step 8-4 通过，日期：____”（待签）
+
+---
+
+## Z-006 收口 验收：IProjectMetadataStore 端口
+
+**目标**：`ProjectService` 去具体 `SessionStore`；纯端口化（零行为变化）。**无 GPU**（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| Z006.1 | 构建 | Release 0 错误 0 警告 | ✅ |
+| Z006.2 | 契约追加 | `IProjectMetadataStore` 属 project 域；成员 = 3 个元数据原语；不含会话读写 | ✅ |
+| Z006.3 | 实现 | `SessionStore` 实现该端口（签名零变化） | ✅ |
+| Z006.4 | 注入 | `ProjectService` 持 `IProjectMetadataStore`；无具体 `SessionStore` 代码依赖 | ✅ |
+| Z006.5 | 接口一致性 | `SessionStore is IProjectMetadataStore`（新用例） | ✅ |
+| Z006.6 | 无 GPU 负载 | 未启动 Python / 未加载模型（Z29 / Z30） | ✅ |
+| Z006.7 | Z8 | 改动文件 < 600 | ✅ |
+
+### 通过标准
+
+- 非 GPU 全量 **451 通过 / 0 失败**；构建 0/0；`ProjectService` 无具体 session 域依赖。
+
+### 验收后动作
+
+1. 在「验收记录」追加“Z-006 收口 通过，日期：____”（待签）

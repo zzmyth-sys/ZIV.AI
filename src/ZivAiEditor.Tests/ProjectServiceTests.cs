@@ -1,5 +1,6 @@
 using ZivAiEditor.Agent.Project;
 using ZivAiEditor.Agent.Session;
+using ZivAiEditor.Contracts.Project;
 using Xunit;
 
 namespace ZivAiEditor.Tests;
@@ -19,6 +20,14 @@ public class ProjectServiceTests
         var path = Path.Combine(directory, name);
         File.WriteAllBytes(path, new byte[] { 1, 2, 3, 4 });
         return path;
+    }
+
+    [Fact]
+    public void SessionStore_Implements_ProjectMetadataPort()
+    {
+        // Z-006 closure: the session store satisfies the project-metadata port, so ProjectService
+        // depends on IProjectMetadataStore instead of the concrete SessionStore.
+        Assert.IsAssignableFrom<IProjectMetadataStore>(new SessionStore());
     }
 
     [Fact]

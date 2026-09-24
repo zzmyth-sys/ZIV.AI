@@ -7,29 +7,29 @@ using System.Threading;
 using System.Threading.Tasks;
 using ZivAiEditor.Contracts.Project;
 
-using ZivAiEditor.Agent.Session;
 namespace ZivAiEditor.Agent.Project;
 
 /// <summary>
 /// Project catalog (module-boundary migration step 3): owns the on-disk project listing —
 /// enumerate / delete / rename / locate projects and remember the last opened one. It is the
-/// project-domain counterpart of <see cref="SessionStore"/>: the store keeps the session
+/// project-domain counterpart of the session store: the store keeps the session
 /// <b>content</b> format (<c>session.json</c> + node images, save / load / export), while this
 /// service owns the <b>catalog</b> (the <c>sessions/</c> directory tree and
 /// <c>last_project.txt</c>).
 ///
-/// <para>Format-touching reads / writes stay in the store as primitives
-/// (<see cref="SessionStore.ReadMetadataAsync"/> / <see cref="SessionStore.WriteMetadataNameAsync"/>),
-/// so the session JSON schema has a single owner; this service only orchestrates the directory
-/// scan. Pure BCL file IO — no platform / GPU dependency — so it is unit-testable.</para>
+/// <para>Format-touching metadata reads / writes stay in the store as primitives
+/// (<c>SessionStore.ReadMetadataAsync</c> / <c>SessionStore.WriteMetadataNameAsync</c>), exposed
+/// to this service through the <see cref="IProjectMetadataStore"/> port so the session JSON schema
+/// has a single owner; this service only orchestrates the directory scan. Pure BCL file IO — no
+/// platform / GPU dependency — so it is unit-testable.</para>
 /// </summary>
 public sealed class ProjectService : IProjectService
 {
     private const string LastProjectFileName = "last_project.txt";
 
-    private readonly SessionStore _store;
+    private readonly IProjectMetadataStore _store;
 
-    public ProjectService(SessionStore store)
+    public ProjectService(IProjectMetadataStore store)
         => _store = store ?? throw new ArgumentNullException(nameof(store));
 
     /// <summary>The directory holding every project.</summary>
