@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using ZivAiEditor.Contracts.Imaging;
 
 namespace ZivAiEditor.Contracts.Planning;
@@ -13,6 +14,15 @@ public interface IEditSessionWriter
 {
     /// <summary>Sets the session root image (does not create a node).</summary>
     void SetRoot(string imagePath);
+
+    /// <summary>
+    /// Sets the session root image <b>pack</b> (Step 9C.10): the root node's
+    /// <see cref="IEditNode.ImagePaths"/> becomes <paramref name="imagePaths"/> (blank entries
+    /// dropped, order kept) and its <see cref="IEditNode.ImagePath"/> is <c>imagePaths[0]</c>.
+    /// As with <see cref="SetRoot(string)"/> the existing DAG is reset; an empty / all-blank
+    /// list is a no-op.
+    /// </summary>
+    void SetRoot(IReadOnlyList<string> imagePaths);
 
     /// <summary>
     /// Replaces the starting image and <b>resets the session</b>: every node and the
@@ -50,6 +60,15 @@ public interface IEditSessionWriter
     /// image / crop / mask are preserved. A no-op when <paramref name="nodeId"/> is unknown.
     /// </summary>
     void SetNodeRerun(string nodeId, RerunSpec? rerun);
+
+    /// <summary>
+    /// Sets the ordered pipeline images a node's edit consumed (Step 9C.10) —
+    /// <c>image1</c>, <c>image2</c>, … with the main image first. Like the crop / mask /
+    /// rerun it is a node property: the node is rebuilt in place with the same identity /
+    /// parent / image(s) / command / timestamp / crop / mask / rerun, so no node is added.
+    /// Blank entries are dropped. A no-op when <paramref name="nodeId"/> is unknown.
+    /// </summary>
+    void SetNodeUsedImages(string nodeId, IReadOnlyList<string> imagePaths);
 
     /// <summary>
     /// Replaces a node's output image <b>in place</b> (Step 9C.8-A2): the node is rebuilt

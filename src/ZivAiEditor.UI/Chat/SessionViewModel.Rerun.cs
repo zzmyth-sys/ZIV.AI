@@ -336,6 +336,30 @@ public sealed partial class SessionViewModel
             : state.ErrorMessage ?? $"执行未成功（{state.Status}）。";
 
     /// <summary>
+    /// The ordered pipeline images an edit consumed (Step 9C.10): the main image (when
+    /// present) followed by the reference images, mirroring the pipeline's
+    /// <c>image1</c>..<c>imageN</c>. Blanks are dropped.
+    /// </summary>
+    private static IReadOnlyList<string> BuildUsedImages(EditPlan plan)
+    {
+        var images = new List<string>();
+        if (!string.IsNullOrWhiteSpace(plan.MainImagePath))
+        {
+            images.Add(plan.MainImagePath);
+        }
+
+        foreach (var path in plan.AdditionalImages)
+        {
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                images.Add(path);
+            }
+        }
+
+        return images;
+    }
+
+    /// <summary>
     /// Drops blank entries from the UI-supplied reference images and keeps their order
     /// (Step 9C.5-D). A <c>null</c> / empty list yields an empty list.
     /// </summary>

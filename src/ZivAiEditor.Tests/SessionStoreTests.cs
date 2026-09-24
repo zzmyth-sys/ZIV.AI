@@ -162,7 +162,7 @@ public class SessionStoreTests
 
             var json = await File.ReadAllTextAsync(
                 Path.Combine(store.GetProjectDirectory(session.SessionId), "session.json"));
-            Assert.Contains("\"version\": 1", json);
+            Assert.Contains("\"version\": 2", json);
             Assert.Contains(rootNode.NodeId + ".png", json);
             Assert.DoesNotContain(source.Replace("\\", "\\\\"), json);
         }
@@ -237,6 +237,90 @@ public class SessionStoreTests
             var json = await File.ReadAllTextAsync(
                 Path.Combine(store.GetProjectDirectory(session.SessionId), "session.json"));
             Assert.DoesNotContain("additional_images", json);
+        }
+        finally
+        {
+            Cleanup(root);
+            Cleanup(source);
+        }
+    }
+
+    [Fact]
+    public async Task Save_Then_Load_RoundTrips_Image_Pack_And_Used_Images()
+    {
+        // Step 9C.10: the node pack persists as image_paths (v2); the ordered used images
+        // persist as used_image_paths. An already-copied file (the root pack) is reused;
+        // an otherwise-uncopied source lands under used/.
+        var root = NewRoot();
+        var source = NewRoot();
+
+        try
+        {
+            var store = new SessionStore(root);
+            var session = new EditSession();
+            session.SetRoot(WriteFile(source, "root.png"));
+            var rootId = session.CurrentNodeId!;
+            var node = session.AppendNode(rootId, WriteFile(source, "out.png"), "/去水印");
+            session.SetNodeUsedImages(node.NodeId, new[]
+            {
+                session.Nodes[rootId].ImagePath,
+                WriteFile(source, "ref.png"),
+            });
+
+            await store.SaveAsync(session, "图包项目");
+            var loaded = await store.LoadAsync(session.SessionId);
+
+            Assert.Empty(loaded.Warnings);
+            var loadedRoot = loaded.Session.GetHistory().Single(n => n.NodeId == rootId);
+            Assert.Single(loadedRoot.ImagePaths);
+            Assert.EndsWith(rootId + ".png", loadedRoot.ImagePaths[0], StringComparison.Ordinal);
+
+            var loadedNode = loaded.Session.GetHistory().Single(n => n.NodeId == node.NodeId);
+            Assert.Single(loadedNode.ImagePaths);
+            Assert.EndsWith(node.NodeId + ".png", loadedNode.ImagePaths[0], StringComparison.Ordinal);
+            Assert.Equal(2, loadedNode.UsedImagePaths.Count);
+            Assert.All(loadedNode.UsedImagePaths, path => Assert.True(File.Exists(path)));
+            Assert.EndsWith(rootId + ".png", loadedNode.UsedImagePaths[0], StringComparison.Ordinal);
+            Assert.EndsWith(node.NodeId + "_2.png", loadedNode.UsedImagePaths[1], StringComparison.Ordinal);
+            Assert.Contains("used", loadedNode.UsedImagePaths[1], StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Cleanup(root);
+            Cleanup(source);
+        }
+    }
+
+    [Fact]
+    public async Task Save_Then_Load_RoundTrips_Multi_Image_Root_Pack()
+    {
+        // Step 9C.10-P2: a multi-image root persists its whole pack ({id}.png, {id}_2.png, …)
+        // and restores the same count / order.
+        var root = NewRoot();
+        var source = NewRoot();
+
+        try
+        {
+            var store = new SessionStore(root);
+            var session = new EditSession();
+            session.SetRoot(new[]
+            {
+                WriteFile(source, "a.png"),
+                WriteFile(source, "b.png"),
+                WriteFile(source, "c.png"),
+            });
+            var rootId = session.CurrentNodeId!;
+
+            await store.SaveAsync(session, "多图原图");
+            var loaded = await store.LoadAsync(session.SessionId);
+
+            Assert.Empty(loaded.Warnings);
+            var loadedRoot = loaded.Session.GetHistory().Single(n => n.NodeId == rootId);
+            Assert.Equal(3, loadedRoot.ImagePaths.Count);
+            Assert.All(loadedRoot.ImagePaths, path => Assert.True(File.Exists(path)));
+            Assert.EndsWith(rootId + ".png", loadedRoot.ImagePaths[0], StringComparison.Ordinal);
+            Assert.EndsWith(rootId + "_2.png", loadedRoot.ImagePaths[1], StringComparison.Ordinal);
+            Assert.EndsWith(rootId + "_3.png", loadedRoot.ImagePaths[2], StringComparison.Ordinal);
         }
         finally
         {

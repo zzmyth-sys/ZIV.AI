@@ -151,21 +151,17 @@ public sealed partial class SessionViewModel
         {
             Messages.Add(new ChatMessage { Role = ChatRole.User, Text = displayText ?? text });
 
-            // Step 9C.5-D: the UI passes the reference images (main excluded). Cap at 3 extras
-            // (max 4 pipeline images, D4) and surface an over-limit hint right after the user
-            // message; the send is never refused. The parser interface stays untouched, so the
-            // plan is rebuilt (init-only) mirroring CommandParser.ApplyResolution.
-            var extras = NormalizeAdditionalImages(additionalImages);
-            if (extras.Count > MaxAdditionalImages)
-            {
-                AddHint("最多支持 3 张参考图，多余的已忽略");
-                extras = extras.Take(MaxAdditionalImages).ToArray();
-            }
+            // Step 9C.10: the pipeline consumes the current node's whole image pack. The main
+            // image is the (crop-aware) pipeline image; the pack's extra images are references
+            // and precede the attachment references (Step 9C.5-D). The combined extras cap at 3
+            // (max 4 pipeline images, D4) and an over-limit send is truncated, never refused.
+            // The parser interface stays untouched, so the plan is rebuilt (init-only).
+            var attachmentRefs = NormalizeAdditionalImages(additionalImages);
 
-            // The image count drives single / multi template selection in the parser: the
-            // current pipeline image (if any) plus the references that will be attached.
-            var imageCount = (string.IsNullOrWhiteSpace(_session.GetCurrentPipelineImagePath()) ? 0 : 1)
-                + extras.Count;
+            // R1: variant selection counts the whole current pack plus the attachments.
+            var imageCount = CurrentImageCount + attachmentRefs.Count;
+
+            // The image count drives single / multi template selection in the parser.
             var parsed = await _parser.ParseAsync(text, _session, imageCount, Resolution, cts.Token);
             if (!parsed.Success || parsed.Plan is null)
             {
@@ -178,10 +174,26 @@ public sealed partial class SessionViewModel
                 return false;
             }
 
+            // References only apply to an image-consuming plan (a non-blank main image): a
+            // text-to-image plan (`/生成`, T2I) has no main and ignores references, so the pack
+            // must not pollute it (Step 9C.10).
             var plan = parsed.Plan;
-            if (extras.Count > 0)
+            if (!string.IsNullOrWhiteSpace(plan.MainImagePath))
             {
-                plan = WithAdditionalImages(plan, extras);
+                var refs = AssembleReferences(
+                    CurrentPackExtras(), attachmentRefs, MaxAdditionalImages, out var truncated);
+                if (refs.Count > 0)
+                {
+                    plan = WithAdditionalImages(plan, refs);
+                }
+
+                // R2: report the images actually entering the pipeline (main + refs, post-truncation).
+                AddInfo($"本次使用 {1 + refs.Count} 张图");
+
+                if (truncated)
+                {
+                    AddHint("最多支持 3 张参考图，多余的已忽略");
+                }
             }
 
             Messages.Add(pending);
@@ -202,11 +214,16 @@ public sealed partial class SessionViewModel
                     _writer.SetNodeRerun(appended.NodeId, snapshot);
                 }
 
+                // Step 9C.10: record the ordered pipeline images this edit consumed (main
+                // first), so the @ / <imageN> mapping survives a reload.
+                _writer.SetNodeUsedImages(appended.NodeId, BuildUsedImages(plan));
+
                 ReplacePending(pending, new ChatMessage
                 {
                     Role = ChatRole.Assistant,
                     Text = $"{elapsed.TotalSeconds:F1}秒 完成",
                     ImagePath = outputPath,
+                    ImagePaths = new[] { outputPath },
                     NodeId = appended.NodeId,
                 });
                 RefreshHistory();
@@ -265,28 +282,6 @@ public sealed partial class SessionViewModel
         RefreshHistory();
         RebuildContext();
         return true;
-    }
-
-    /// <summary>
-    /// Sets the starting image from an import and resets the session (Step 9C.3):
-    /// changing the root invalidates the existing node DAG, so nodes / current node are
-    /// cleared and the chat is rebuilt. A blank path is a no-op. Unlike
-    /// <see cref="ApplyRequest"/> this is an explicit in-session import, not a startup /
-    /// second-instance handoff.
-    /// </summary>
-    public void SetRootImage(string? imagePath)
-    {
-        if (string.IsNullOrWhiteSpace(imagePath))
-        {
-            return;
-        }
-
-        // Resetting the root drops the existing DAG, so its crop / mask temp files are orphans.
-        ImageCropper.CleanupSession(_session.SessionId);
-        MaskExporter.CleanupSession(_session.SessionId);
-        _writer.ResetToRoot(imagePath);
-        RefreshHistory();
-        RebuildContext();
     }
 
     /// <summary>Whether the session has a root node (and thus a current image).</summary>
@@ -474,12 +469,14 @@ public sealed partial class SessionViewModel
             return;
         }
 
-        // The first node is the root ("原图"), already rendered as the "起始图像" bubble.
+        // The first node is the root ("原图"), already rendered as the "起始图像" bubble. A
+        // multi-image root carries its whole pack so the App renders the thumbnail row (Q4).
         Messages.Add(new ChatMessage
         {
             Role = ChatRole.System,
             Text = "起始图像",
             ImagePath = PipelinePath(path[0]),
+            ImagePaths = BuildDisplayPack(path[0]),
             NodeId = path[0].NodeId,
         });
 
@@ -491,6 +488,7 @@ public sealed partial class SessionViewModel
                 Role = ChatRole.Assistant,
                 Text = "完成",
                 ImagePath = PipelinePath(node),
+                ImagePaths = new[] { PipelinePath(node) },
                 NodeId = node.NodeId,
             });
         }

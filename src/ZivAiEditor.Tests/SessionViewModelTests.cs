@@ -379,6 +379,22 @@ public class SessionViewModelTests
     }
 
     [Fact]
+    public async Task Submit_Records_UsedImages_Main_Then_References()
+    {
+        // Step 9C.10: the ordered pipeline images (main first) are stored on the node.
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        await vm.SubmitAsync(
+            "用 <image2> 的风格",
+            additionalImages: new[] { @"C:\img\r1.png", @"C:\img\r2.png" });
+
+        var node = session.GetHistory().Single(n => !string.IsNullOrEmpty(n.ParentNodeId));
+        Assert.Equal(new[] { Root, @"C:\img\r1.png", @"C:\img\r2.png" }, node.UsedImagePaths);
+    }
+
+    [Fact]
     public async Task Submit_Truncates_To_Three_References_And_Hints_After_User_Message()
     {
         var session = new EditSession();
@@ -570,10 +586,149 @@ public class SessionViewModelTests
         var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
 
-        vm.SetRootImage(null);
+        vm.SetRootImage((string?)null);
         vm.SetRootImage("   ");
 
         Assert.Equal(Root, session.RootImagePath);
+    }
+
+    [Fact]
+    public void SetRootImage_Pack_Promotes_All_And_Tracks_Count()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions());
+
+        vm.SetRootImage(new[] { "a", "b", "c" });
+
+        Assert.Equal("a", session.RootImagePath);
+        Assert.Equal(new[] { "a", "b", "c" }, session.GetHistory()[0].ImagePaths);
+        Assert.Equal(3, vm.CurrentImageCount);
+        Assert.Single(vm.History);
+    }
+
+    [Fact]
+    public void SetRootImage_Pack_Trims_To_Ten_And_Adds_Info()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions());
+        var many = Enumerable.Range(0, 12).Select(i => $"img{i}").ToArray();
+
+        vm.SetRootImage(many);
+
+        Assert.Equal(10, session.GetHistory()[0].ImagePaths.Count);
+        Assert.Equal(10, vm.CurrentImageCount);
+        Assert.Equal("img0", session.RootImagePath);
+        Assert.Contains(vm.Messages, m => m.Role == ChatRole.System && !m.IsError);
+    }
+
+    [Fact]
+    public void CurrentImageCount_Is_Zero_When_No_Node()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions());
+
+        Assert.Equal(0, vm.CurrentImageCount);
+    }
+
+    [Fact]
+    public async Task Submit_With_Multi_Image_Root_Feeds_Pack_As_References()
+    {
+        // Step 9C.10-P2 (Q1=A): a multi-image root's whole pack is the pipeline; the main is
+        // pack[0] and the extras become references (main first in UsedImagePaths).
+        var session = new EditSession();
+        var executor = new CapturingExecutor(Output);
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        vm.SetRootImage(new[] { "a", "b", "c" });
+
+        var ok = await vm.SubmitAsync("/去水印");
+
+        Assert.True(ok);
+        Assert.Equal("a", executor.LastPlan!.MainImagePath);
+        Assert.Equal(new[] { "b", "c" }, executor.LastPlan.AdditionalImages);
+        var node = session.GetHistory().Single(n => !string.IsNullOrEmpty(n.ParentNodeId));
+        Assert.Equal(new[] { "a", "b", "c" }, node.UsedImagePaths);
+        Assert.Contains(
+            vm.Messages,
+            m => m.Role == ChatRole.System && !m.IsError && m.Text == "本次使用 3 张图");
+    }
+
+    [Fact]
+    public async Task Submit_Truncates_Pack_Plus_Attachments_To_Three_Refs()
+    {
+        // Pack extras (b,c,d) come before the attachments, and the combined refs cap at 3.
+        var session = new EditSession();
+        var executor = new CapturingExecutor(Output);
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        vm.SetRootImage(new[] { "a", "b", "c", "d" });
+
+        await vm.SubmitAsync("编辑", additionalImages: new[] { "r1", "r2" });
+
+        Assert.Equal(new[] { "b", "c", "d" }, executor.LastPlan!.AdditionalImages);
+        Assert.Contains(vm.Messages, m => m.Role == ChatRole.System && m.IsError);
+    }
+
+    [Fact]
+    public async Task Submit_Pure_T2I_Skips_The_Usage_Info_Line()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions());
+
+        await vm.SubmitAsync("/生成 一只猫");
+
+        Assert.DoesNotContain(
+            vm.Messages,
+            m => m.Role == ChatRole.System && m.Text.StartsWith("本次使用", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Submit_T2I_With_MultiImage_Root_Does_Not_Use_The_Pack()
+    {
+        // A T2I plan has no main image, so the root pack must not be attached as references
+        // (Step 9C.10): no phantom refs, no usage info line, no used images on the node.
+        var session = new EditSession();
+        var executor = new CapturingExecutor(Output);
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        vm.SetRootImage(new[] { "a", "b", "c" });
+
+        await vm.SubmitAsync("/生成 一只猫");
+
+        Assert.NotNull(executor.LastPlan);
+        Assert.True(string.IsNullOrWhiteSpace(executor.LastPlan!.MainImagePath));
+        Assert.Empty(executor.LastPlan.AdditionalImages);
+        var node = session.GetHistory().Single(n => !string.IsNullOrEmpty(n.ParentNodeId));
+        Assert.Empty(node.UsedImagePaths);
+        Assert.DoesNotContain(
+            vm.Messages,
+            m => m.Role == ChatRole.System && m.Text.StartsWith("本次使用", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AddInfo_Appends_System_NonError_Message()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+
+        vm.AddInfo("本次使用 2 张图");
+
+        Assert.Contains(
+            vm.Messages,
+            m => m.Role == ChatRole.System && !m.IsError && m.Text == "本次使用 2 张图");
+    }
+
+    [Fact]
+    public void RebuildContext_Starting_Bubble_Carries_The_Display_Pack()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.SetRootImage(new[] { "a", "b", "c" });
+
+        var bubble = vm.Messages.Single(m => m.Role == ChatRole.System && m.Text == "起始图像");
+        Assert.Equal("a", bubble.ImagePath);
+        Assert.Equal(new[] { "a", "b", "c" }, bubble.ImagePaths);
     }
 
     [Fact]

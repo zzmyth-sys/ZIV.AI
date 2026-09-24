@@ -20,12 +20,12 @@ public class CommandRequirementsTests
         var commands = Commands();
 
         Assert.True(CommandRequirements.RequiresMoreImages(
-            commands, "/合照 两个人", hasRootImage: false, attachmentCount: 0, out var hint));
+            commands, "/合照 两个人", currentImageCount: 0, attachmentCount: 0, out var hint));
         Assert.Contains("2 张图", hint);
         Assert.True(CommandRequirements.RequiresMoreImages(
-            commands, "/合照 两个人", hasRootImage: false, attachmentCount: 1, out _));
+            commands, "/合照 两个人", currentImageCount: 0, attachmentCount: 1, out _));
         Assert.True(CommandRequirements.RequiresMoreImages(
-            commands, "/合照 两个人", hasRootImage: true, attachmentCount: 0, out _));
+            commands, "/合照 两个人", currentImageCount: 1, attachmentCount: 0, out _));
     }
 
     [Fact]
@@ -33,10 +33,14 @@ public class CommandRequirementsTests
     {
         var commands = Commands();
 
+        // A single-image root (currentImageCount 1) + one attachment → effective 2.
         Assert.False(CommandRequirements.RequiresMoreImages(
-            commands, "/合照 两个人", hasRootImage: false, attachmentCount: 2, out _));
+            commands, "/合照 两个人", currentImageCount: 0, attachmentCount: 2, out _));
         Assert.False(CommandRequirements.RequiresMoreImages(
-            commands, "/合照 两个人", hasRootImage: true, attachmentCount: 1, out _));
+            commands, "/合照 两个人", currentImageCount: 1, attachmentCount: 1, out _));
+        // A multi-image root alone (currentImageCount 2) → effective 2 (Step 9C.10-P2, R4).
+        Assert.False(CommandRequirements.RequiresMoreImages(
+            commands, "/合照 两个人", currentImageCount: 2, attachmentCount: 0, out _));
     }
 
     [Fact]
@@ -46,15 +50,15 @@ public class CommandRequirementsTests
 
         // /换背景 has a single variant → never blocked.
         Assert.False(CommandRequirements.RequiresMoreImages(
-            commands, "/换背景 森林", hasRootImage: true, attachmentCount: 0, out _));
+            commands, "/换背景 森林", currentImageCount: 1, attachmentCount: 0, out _));
         // flat-template commands.
         Assert.False(CommandRequirements.RequiresMoreImages(
-            commands, "/去水印", hasRootImage: true, attachmentCount: 0, out _));
+            commands, "/去水印", currentImageCount: 1, attachmentCount: 0, out _));
         // T2I command ignores images.
         Assert.False(CommandRequirements.RequiresMoreImages(
-            commands, "/生成 森林精灵", hasRootImage: false, attachmentCount: 0, out _));
+            commands, "/生成 森林精灵", currentImageCount: 0, attachmentCount: 0, out _));
         // natural language.
         Assert.False(CommandRequirements.RequiresMoreImages(
-            commands, "把天空换成日落", hasRootImage: true, attachmentCount: 0, out _));
+            commands, "把天空换成日落", currentImageCount: 1, attachmentCount: 0, out _));
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -124,6 +125,101 @@ public partial class MainWindow
         catch (Exception ex)
         {
             panel.Children.Add(new TextBlock
+            {
+                Text = $"[预览失败] {ex.Message}",
+                Foreground = ErrorBrush,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+    }
+
+    /// <summary>
+    /// Renders a message's image(s) (Step 9C.10): a multi-image bubble (an image-pack root)
+    /// shows a horizontal thumbnail row, otherwise the existing single preview is used.
+    /// </summary>
+    private void AddMessageImages(Panel panel, ChatMessage message)
+    {
+        if (message.ImagePaths.Count > 1)
+        {
+            AddPreviewPack(panel, message.ImagePaths);
+        }
+        else if (message.ImagePath is { Length: > 0 } path)
+        {
+            AddPreview(panel, path);
+        }
+    }
+
+    /// <summary>Chat image-pack thumbnail size (Step 9C.10, Q4).</summary>
+    private const double PackThumbSize = 72;
+
+    /// <summary>
+    /// Renders the image-pack bubble (Step 9C.10, Q4): up to four 72px thumbnails in a
+    /// horizontal row plus a "+N" label when the pack is larger. Each thumbnail reuses the
+    /// tracked bitmap path (Z9) and the click-to-preview / rerun-menu behavior.
+    /// </summary>
+    private void AddPreviewPack(Panel panel, IReadOnlyList<string> paths)
+    {
+        const int maxThumbs = 4;
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 4,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+
+        var shown = Math.Min(paths.Count, maxThumbs);
+        for (var i = 0; i < shown; i++)
+        {
+            AddPackThumb(row, paths[i]);
+        }
+
+        if (paths.Count > shown)
+        {
+            row.Children.Add(new TextBlock
+            {
+                Text = $"+{paths.Count - shown}",
+                Foreground = SecondaryTextBrush,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(4, 0, 0, 0),
+            });
+        }
+
+        panel.Children.Add(row);
+    }
+
+    private void AddPackThumb(Panel row, string path)
+    {
+        try
+        {
+            var bitmap = new Bitmap(path);
+            _bitmaps.Add(bitmap);
+
+            var image = new Image
+            {
+                Source = bitmap,
+                Width = PackThumbSize,
+                Height = PackThumbSize,
+                Stretch = Stretch.Uniform,
+                Cursor = new Cursor(StandardCursorType.Hand),
+            };
+            image.PointerPressed += (_, e) =>
+            {
+                if (!e.GetCurrentPoint(image).Properties.IsLeftButtonPressed)
+                {
+                    return;
+                }
+
+                e.Handled = true;
+                OpenImagePreview(path);
+            };
+            AttachRerunMenuToImage(image, path);
+            ToolTip.SetTip(image, "左键查看大图 / 右键重跑");
+
+            row.Children.Add(image);
+        }
+        catch (Exception ex)
+        {
+            row.Children.Add(new TextBlock
             {
                 Text = $"[预览失败] {ex.Message}",
                 Foreground = ErrorBrush,

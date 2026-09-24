@@ -13,12 +13,12 @@ internal static class CommandRequirements
     /// <summary>
     /// Returns <c>true</c> (with a user-facing <paramref name="hint"/>) when <paramref name="text"/>
     /// names a multi-only command (its variants lack a "single" template, e.g. <c>/合照</c>) but the
-    /// effective image count (root + attachments) is below two.
+    /// effective image count (<paramref name="currentImageCount"/> + attachments) is below two.
     /// </summary>
     public static bool RequiresMoreImages(
         IReadOnlyList<CommandDefinition> commands,
         string? text,
-        bool hasRootImage,
+        int currentImageCount,
         int attachmentCount,
         out string? hint)
     {
@@ -50,9 +50,9 @@ internal static class CommandRequirements
             return false;
         }
 
-        // Mirrors the parser's effective count: the current root (if any) plus the attachments
-        // (the first attachment becomes the root when there is none).
-        var effective = hasRootImage ? 1 + attachmentCount : attachmentCount;
+        // Mirrors the parser's effective count: the current node's image pack (its size, so a
+        // multi-image root counts as N) plus the attachments.
+        var effective = currentImageCount + attachmentCount;
         if (effective >= 2)
         {
             return false;

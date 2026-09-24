@@ -2415,3 +2415,62 @@ UI（D6 遗留）。
 
 1. 追加 `DEVLOG.md` 的 9C.9-A1-fix 记录（本步已完成）
 2. 在「验收记录」追加“Step 9C.9-A1-fix 通过，日期：____”（待签）
+
+---
+
+## Step 9C.10-P2 验收：空会话拖入即 root（含 N 图）+ 多图 UI
+
+**目标**：空会话拖入 N 张 → 整批立即成为多图 root（`ImagePaths` 含 N 张）；聊天流 / 历史列表显示多图；
+管线消费 root 图包（Q1=A）。**授权修订 9C.6-C.4**（仅空会话部分回退）；契约仅追加 `SetRoot(IReadOnlyList<string>)`。
+**不含**：`@` 机制（P3）、附件默认进管线语义（P3）、重跑 / 删除适配（P4）、批量（P5）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build ZivAiEditor.UI -c Release` 0 错误 0 警告；`ZivAiEditor.App` Debug 0/0 | ✅ |
+| G2 | 依赖方向没破 | App→UI→Agent/Tools/Backend→Contracts；UI 只经契约 | ✅ |
+| G3 | 契约与 FROZEN 一致 | 仅追加 `IEditSessionWriter.SetRoot(IReadOnlyList<string>)`；既有成员零改 | ✅ |
+| G4 | 未授权修改检查 | 未改冻结行既有成员；9C.6-C.4 修订已登记授权 | ✅ |
+| G5 | 文档已更新 | `FROZEN` / `DEVLOG` / `INTERACTION` §12 / `ACCEPTANCE` 追加 9C.10-P2 | ✅ |
+| G6 | 便携性未破 | 无文件系统 / 注册表改动（仅项目目录内图片拷贝，沿用既有语义） | ✅ |
+| G7 | AI 推理进程隔离未破 | 无后端 / Python / IPC 改动 | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.10P2.1 | `SetRoot(list)` | `EditSessionTests` | 多图 root `ImagePaths.Count == N`、`UsedImagePaths` 空、single `SetRoot` 不变 | ✅ |
+| 9C.10P2.2 | 空会话 0→N 提升 | `ImageImportPromotionTests` + `SessionViewModelTests` | `ShouldPromote` 规则；VM `SetRootImage(list)` 建多图 root | ✅ |
+| 9C.10P2.3 | 图包上限 | `SessionViewModelTests` | 拖入 >10 → 截断为 10 + 提示 | ✅ |
+| 9C.10P2.4 | 管线消费图包（Q1） | `SessionViewModelTests` | 多图 root 无附件 → `plan.MainImagePath=pack[0]`、`AdditionalImages=pack[1..]`、`UsedImagePaths=[main]+refs` | ✅ |
+| 9C.10P2.5 | 截断 | `SessionViewModelTests` | 图包 extras 先 + 附件后，合并截断到 3 + 提示 | ✅ |
+| 9C.10P2.6 | T2I 不使用图包 | `SessionViewModelTests` | `/生成` + 多图 root → 无参考、无「本次使用」行、`UsedImagePaths` 空 | ✅ |
+| 9C.10P2.7 | R1 变体选择 | `CommandRequirementsTests` | `effective = currentImageCount + attachmentCount`；`/合照` 1 图阻断、多图 root 放行 | ✅ |
+| 9C.10P2.8 | 多图 root 持久化 | `SessionStoreTests` | save→load 保留 `ImagePaths` 数量与路径 | ✅ |
+| 9C.10P2.9 | v1 兼容 | `SessionLoaderTests` | v1 单图 root → `ImagePaths=[image_path]` | ✅ |
+| 9C.10P2.10 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0 错误；受影响类 **165 通过**；**全量 448 通过** | ✅ |
+| 9C.10P2.11 | Z8 | 查改动文件 | 源文件均 < 600 | ✅ |
+| 9C.10P2.12 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.10P2.13 | 手动：空会话拖入 3 张 | 用户真机 | 立即成 root（3 图）+ 聊天流 3 缩略图 | ⏳ 待用户确认 |
+| 9C.10P2.14 | 手动：历史列表 | 用户真机 | root 显示「原图（3 张）」 | ⏳ 待用户确认 |
+| 9C.10P2.15 | 手动：发送编辑 | 用户真机 | 管线输入符合 Q1（全 N 张，`<image1>`=第 1 张）+「本次使用 N 张图」 | ⏳ 待用户确认 |
+| 9C.10P2.16 | 手动：已有 root 拖入 | 用户真机 | 只进附件条（9C.6-C 行为不变） | ⏳ 待用户确认 |
+
+### Step 9C.10-P2 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.10P2.1–9C.10P2.12 全过；9C.10P2.13–9C.10P2.16 由用户真机确认。
+
+### Step 9C.10-P2 遗留说明（非阻断）
+
+- **P3**：`@` 引用机制；`MultiImagePromptDialog` 废弃；`ImageEditMode` 语义调整。
+- **P4**：重跑 / 删除适配（图包 extras 从 `RerunSpec` 迁到 `UsedImagePaths`）；**P5**：批量。
+- **观察项**：图包上限仅在 VM；`used/` 跨节点别名待 P3/P4 复核。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### Step 9C.10-P2 验收后动作
+
+1. 追加 `DEVLOG.md` / `FROZEN.md` / `INTERACTION.md` / `ACCEPTANCE.MD` 的 9C.10-P2 记录（本步已完成）
+2. 在「验收记录」追加“Step 9C.10-P2 通过，日期：____”（待签）

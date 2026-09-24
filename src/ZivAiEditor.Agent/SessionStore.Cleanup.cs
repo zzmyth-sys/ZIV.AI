@@ -49,10 +49,38 @@ public sealed partial class SessionStore
             DeleteFileSafe(Path.Combine(directory, nodeId + "_crop.png"));
             DeleteFileSafe(Path.Combine(directory, nodeId + "_mask.png"));
 
+            // Step 9C.10: extra pack images ({nodeId}_{n}.png, n >= 2) and any used/ copies.
+            DeleteByPattern(directory, nodeId + "_*.png");
+            DeleteByPattern(Path.Combine(directory, "used"), nodeId + "_*");
+
             if (includeReferences)
             {
                 DeleteReferences(directory, nodeId);
             }
+        }
+    }
+
+    /// <summary>
+    /// Deletes every file matching <paramref name="pattern"/> in <paramref name="directory"/>
+    /// (Step 9C.10). A missing directory is a no-op and each delete is guarded.
+    /// </summary>
+    private static void DeleteByPattern(string directory, string pattern)
+    {
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(directory, pattern))
+            {
+                DeleteFileSafe(file);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[session] pattern cleanup failed '{pattern}': {ex.Message}");
         }
     }
 

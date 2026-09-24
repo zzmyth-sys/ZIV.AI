@@ -3059,3 +3059,148 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **命令列表 UI 补全（`/` 自动补全）** → 后置。
 - **`/生成` 气泡在会话重载后显示 `node.Command`（扩写文本）**，与实时气泡（原始输入）不一致 → 后置。
 - **WD14 打标（9C.9-B）/ VLM 反推（9C.9-C）/ `@图引用` UI** → 后置。
+
+---
+
+## Step 9C.10-P1（日期：2026-09-24）
+
+> **修订说明（Step 9C.10-P1 · 节点图包数据模型：`ImagePaths` / `UsedImagePaths` + `session.json` v2）**
+>
+> 本段为 Step 9C.10 分阶段重构的 **P1**。目标：把「单图节点」升级为「图包节点」的数据底座——
+> `EditNode` 增加 `ImagePaths`（图包）/ `UsedImagePaths`（本次管线输入），`session.json` 升 v2
+> （`image_paths` / `used_image_paths`）并**兼容读 v1**。**不改动 Step 0–9C.9-A1 已冻结行的既有成员**
+> （契约**仅追加**）；本段为**纯追加**（文件尾部）。**P1 行为不变**（root = 单图、编辑 = 单图）；
+> 多图行为在 **P2** 启用（需授权修订 9C.6-C.4）。
+
+### 9C.10-P1.1 契约新增（冻结 · 追加 → 非破坏）
+
+| 成员 | 文件 | 说明 |
+|---|---|---|
+| `IEditNode.ImagePaths`（`IReadOnlyList<string>`） | `Contracts/Planning/IEditNode.cs` | 节点图包（非空）：root = `[导入图]`，编辑节点 = `[输出]`；`ImagePath == ImagePaths[0]` |
+| `IEditNode.UsedImagePaths`（`IReadOnlyList<string>`） | 同上 | 本次编辑消费的**有序**管线图（`image1..imageN`，主图在前）；root 恒空 |
+| `IEditSessionWriter.SetNodeUsedImages(string nodeId, IReadOnlyList<string> imagePaths)` | `Contracts/Planning/IEditSessionWriter.cs` | 原地设置节点 `UsedImagePaths`；同 crop / mask / rerun，**不新增节点**；空白项丢弃；未知 nodeId → no-op |
+
+- **既有成员零修改**：`IEditNode.ImagePath` 保留为「主图 = `ImagePaths[0]`」的兼容字段。
+
+### 9C.10-P1.2 `EditNode` 新增字段与写入（冻结 · Agent 层）
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `IReadOnlyList<string> ImagePaths` | 空 | `EditSession` 插入时**归一化为非空** |
+| `IReadOnlyList<string> UsedImagePaths` | 空 | 编辑节点提交时写入；root 恒空 |
+
+- `ResetToRoot` / `AppendNode`：`ImagePaths = [imagePath]`；`Restore`：`ImagePaths` 为空则回退 `[ImagePath]`。
+- `SetNodeCrop` / `SetNodeMask` / `SetNodeRerun` 与 `ReplaceNodeImage` 均**保留**两字段；`ReplaceNodeImage`
+  置 `ImagePaths = [newImagePath]`、**保留** `UsedImagePaths`。
+- `SetNodeUsedImages` + 私有 `NormalizeImages` 落在 **`Agent/EditSession.Images.cs`**（Z8 拆分；`EditSession` 已 `partial`）。
+
+### 9C.10-P1.3 `session.json` 格式 v2（冻结）
+
+- `SessionStore.FormatVersion` **1 → 2**。
+- `SessionFileNode` 新增：`image_paths`（图包相对名；首图 `{NodeId}.png`，其余 `{NodeId}_{n}.png`，n ≥ 2）、
+  `used_image_paths`（有序，主图在前）。
+- 旧 `image_path` 改为**只读兼容字段**（`JsonIgnore(WhenWritingNull)`；v2 不再写出）。
+- **v1 兼容读**：`image_path` → `ImagePaths = [image_path]`；`SessionLoader` 接受 `version ∈ [1, 2]`；
+  `TryReadInfoAsync` 列出 v1..v2（旧项目不从项目列表消失）。
+- **缺图语义**：图包中缺失的图逐个忽略 + 警告；**全部缺失才跳过节点**（v1 单图缺失 → 原「跳过」行为不变）。
+- **文件布局（追加）**：`refs/`（重跑参考，9C.8-A）之外新增 `used/{nodeId}_{n}{ext}`（管线输入副本）；
+  同源文件已被拷贝则**复用**（相对名映射），不重复。
+- `SessionStore.Cleanup.DeleteNodeArtifacts` 追加删除 `{nodeId}_*.png` 与 `used/{nodeId}_*`。
+- **拆分**：拷贝 / 映射助手（`CopyReferenceImages` / `CopyNodeImage` / `CopyUsedImages` / `Remember` /
+  `TryRemembered`）落在 **`Agent/SessionStore.Images.cs`**（Z8 拆分；`SessionStore` 已 `partial`）。
+
+### 9C.10-P1.4 UI 写入（冻结 · 非契约）
+
+- `SessionViewModel.SubmitAsync` 成功后：`_writer.SetNodeUsedImages(appended.NodeId, BuildUsedImages(plan))`；
+  `BuildUsedImages = [plan.MainImagePath] + plan.AdditionalImages`（去空白，主图在前），见 `SessionViewModel.Rerun.cs`。
+- 对 `SessionLoader` 的 `dto.Nodes` / `rerun.additional_images` 补 **null 兜底**（源生成在缺键时该 `List` 为 `null`）。
+
+### 9C.10-P1.5 测试结果（冻结）
+
+- `dotnet build ZivAiEditor.UI -c Release`（含 Contracts / Agent / Backend / Tools）→ **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：`EditSessionTests` / `SessionStoreTests` / `SessionLoaderTests` /
+  `SessionViewModelTests` / `ContractsSmokeTests` → **134 通过 / 0 失败**。
+- **Z8**：`EditSession.cs` 559 / `EditSession.Images.cs` 73 / `SessionStore.cs` 556 /
+  `SessionStore.Images.cs` 140，均 < 600。
+- **未跑 GPU 端到端**（Z29 / Z30）；P1 行为不变。
+
+### 9C.10-P1.6 遗留项（冻结）
+
+- **P2**：空会话拖入即 root（含 N 图）+ 多图 UI（**授权修订 9C.6-C.4**）。
+- **P3**：`@` 引用机制（UI 层；不改 `ICommandParser` 签名）。
+- **P4**：重跑 / 删除适配（`RerunSpec` 瘦身为仅 `Resolution`）。
+- **P5**：批量（独立按钮）。
+- **已知观察项（P3 复核）**：`session.json` 拷贝复用映射（`copied`）在「`UsedImagePaths` 与
+  `Rerun.AdditionalImages` 不一致」时需确认不会跨节点别名。
+
+---
+
+## Step 9C.10-P2（日期：2026-09-24）
+
+> **修订说明（Step 9C.10-P2 · 空会话拖入即 root（含 N 图）+ 多图 UI）**
+>
+> 本段为 Step 9C.10 的 **P2**。启用「图包节点」行为：空会话拖入 N 张 → **整批立即成为 root 节点**
+> （`ImagePaths` 含 N 张）；聊天流「起始图像」气泡与历史列表显示多图；管线消费 root 图包（Q1=A）。
+> **授权修订 Step 9C.6-C.4**（仅空会话场景的**部分回退**：0→N 即时提升为 root、附件条清空）。
+> **契约仅追加**（`IEditSessionWriter.SetRoot(IReadOnlyList<string>)`）；本段为**纯追加**（文件尾部）。
+> 用户裁决：Q1=A / Q2=B / Q3=B / Q4=A / Q5=B / Q6=A（见 `INTERACTION.md` §12）。
+
+### 9C.10-P2.1 契约新增（冻结 · 追加 → 非破坏）
+
+| 成员 | 文件 | 说明 |
+|---|---|---|
+| `IEditSessionWriter.SetRoot(IReadOnlyList<string> imagePaths)` | `Contracts/Planning/IEditSessionWriter.cs` | 多图 root：清 DAG → 建 root（`ParentNodeId=null`、`ImagePath=imagePaths[0]`、`ImagePaths=imagePaths`、`UsedImagePaths` 空、`Command="原图"`）→ `CurrentNodeId=root`；空列表 no-op。既有 `SetRoot(string)` / `ResetToRoot(string)` 不变 |
+
+- **无新增读契约**：当前图包由 UI 从 `IEditSession.GetPathToCurrent()` 末节点派生（不扩契约面）。
+
+### 9C.10-P2.2 行为变更（冻结 · 授权修订 9C.6-C.4）
+
+- **空会话 0→N 即时提升为 root**（R5）：`MainWindow.Import.OnImagesChanged` 在
+  `CountBefore==0 && CountAfter>0 && !HasRootImage` 时把**整批**提升为多图 root，随后清空附件条；
+  清空的再入事件（`CountBefore>0, CountAfter==0`）不重复提升（无循环）。纯判定抽为
+  `ImageImportPromotion.ShouldPromote`。
+- **已有 root 拖入仍只进附件条**（9C.6-C 行为不变）；`MultiImagePromptDialog` **保留**（Q3=B，P3 再议）；
+  `ImageEditMode` **保留**（Q6=A，发送门控语义不变）。
+- **上限**（Q2=B）：root 图包 ≤ **10**（`SessionViewModel.MaxRootImages`，超出截断 + 提示）；
+  送管线 ≤ **4**（主图 + ≤3 参考；超限截断尾部 + 提示）。
+
+### 9C.10-P2.3 管线输入语义（冻结 · 非契约）
+
+- **Q1=A**：无 `@` 时管线消费**当前节点的整个图包**——`<image1>` = pipeline 主图
+  （`GetCurrentPipelineImagePath()`，crop 优先），`<image2>..` = `ImagePaths[1..]`，其后为附件参考图。
+- **R1**：parser 变体选择 `imageCount = CurrentImageCount + 附件数`。
+- **R4**：`CommandRequirements.RequiresMoreImages` 的 `bool hasRootImage` 参数改为 `int currentImageCount`；
+  `effective = currentImageCount + attachmentCount`（App 层内部签名，非契约）。
+- **R2**：图片消费型提交（`plan.MainImagePath` 非空）在聊天流插入**非错误**系统行「本次使用 N 张图」
+  （N = 主图 + 参考，截断后实际进管线数）。**T2I（`/生成`，`MainImagePath` 为空）不挂参考图、不发该行**（修复复审 P1）。
+
+### 9C.10-P2.4 UI（冻结 · 非契约）
+
+- 聊天流「起始图像」气泡：`ChatMessage` 追加 `IReadOnlyList<string> ImagePaths`（**保留** `ImagePath`）；
+  >1 张时横排 72px 缩略图（>4 显示 "+N"），缩略图经既有 `_bitmaps` 跟踪并在聊天流重建 / 关闭时释放（Z9）。
+- 历史列表：`ImagePaths.Count > 1` 时标签为「{命令}（N 张）」（Q5=B）。
+- 新增纯逻辑 `ImageImportPromotion.ShouldPromote(countBefore, countAfter, hasRootImage)`（`UI/Editing`，可测）。
+
+### 9C.10-P2.5 拆分（Z8）
+
+- `SessionViewModel.Images.cs`（新 partial）：`SetRootImage(list)` / `CurrentImageCount` / `AddInfo` /
+  图包组装助手（`CurrentPackExtras` / `AssembleReferences` / `BuildDisplayPack` / `NormalizeRootImages`）。
+- `EditSession.SetRoot(list)` 落在既有 `EditSession.Images.cs`。
+
+### 9C.10-P2.6 测试结果（冻结）
+
+- `dotnet build src\ZivAiEditor.UI -c Release`（含 Contracts/Agent/Backend/Tools）→ **0 错误 0 警告**；
+  `ZivAiEditor.App` Debug 构建 0/0（Release 输出被运行中实例锁，非编译错误，无 `error CS`）。
+- `dotnet test`（Z29，**无 GPU**）：受影响类 **165 通过 / 0 失败**；**全量 448 通过 / 0 失败**。
+- **Z8**：改动源文件均 < 600（`SessionViewModel.cs` 518 / `SessionViewModel.Images.cs` 176 /
+  `EditSession.Images.cs` 101 / `MainWindow.axaml.cs` 491 等）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 9C.10-P2.7 遗留项（冻结）
+
+- **P3**：`@` 引用机制（UI 层）；`MultiImagePromptDialog` 废弃；`ImageEditMode` 语义调整。
+- **P4**：重跑 / 删除适配；root 图包 extras 现随 `plan.AdditionalImages` 存进 `RerunSpec.AdditionalImages`
+  （P2 行为一致，P4 迁到 `UsedImagePaths`）。
+- **P5**：批量。
+- **观察项**：图包上限仅在 VM（`SessionViewModel`），手改 v2 JSON 可载入 >10；`used/` 跨节点别名待 P3/P4 复核。
+- **未跑 GPU 端到端**（Z29 / Z30）。

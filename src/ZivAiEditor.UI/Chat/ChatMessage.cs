@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using ZivAiEditor.Contracts.Planning;
 
 namespace ZivAiEditor.UI.Chat;
@@ -19,6 +21,13 @@ public sealed class ChatMessage
 
     /// <summary>Optional preview image (a user input or an edit output — Z24 new file).</summary>
     public string? ImagePath { get; init; }
+
+    /// <summary>
+    /// The full display pack for an image bubble (Step 9C.10): the "起始图像" bubble carries
+    /// the root's whole pack (pipeline main first); an edit bubble carries its single output.
+    /// Empty when the bubble has no image; the App falls back to <see cref="ImagePath"/>.
+    /// </summary>
+    public IReadOnlyList<string> ImagePaths { get; init; } = Array.Empty<string>();
 
     public bool IsError { get; init; }
 

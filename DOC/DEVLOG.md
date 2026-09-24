@@ -4188,3 +4188,139 @@ D4=状态恢复。
 ### 备注
 
 - **不改任何命令定义 / 行为**；`FROZEN` 无变化（无契约变化）。
+
+---
+
+## [Step 9C.10-P1] - 2026-09-24：节点图包数据模型（`ImagePaths` / `UsedImagePaths` + `session.json` v2）
+
+### 目标
+
+9C.10 节点模型重构（节点 = 图包）的 **P1（纯追加、零行为变化）**：为「图包节点」立数据底座——
+`EditNode` 增加 `ImagePaths`（图包）/ `UsedImagePaths`（本次管线输入），`session.json` 升 v2 并兼容读 v1。
+多图**行为**在 P2 启用。用户裁决：Q1=不存额外快照、Q2=`RerunSpec` 瘦身（P4）、Q3=UI 层解析 `@`（P3）、
+Q8=方案 X（升 v2 + 兼容读）。
+
+### 做了什么
+
+- **契约（追加）**：`IEditNode.ImagePaths` / `IEditNode.UsedImagePaths`；
+  `IEditSessionWriter.SetNodeUsedImages(nodeId, imagePaths)`。既有成员零修改。
+- **Agent**：`EditNode` 加两字段；`ResetToRoot` / `AppendNode` 写 `ImagePaths=[image]`；`Restore` 归一化；
+  `SetNodeCrop/Mask/Rerun` 与 `ReplaceNodeImage` 保留；`ReplaceNodeImage` 置 `ImagePaths=[new]`。
+  新增 **`EditSession.Images.cs`**：`SetNodeUsedImages` + `NormalizeImages`（Z8 拆分，`EditSession` 改 `partial`）。
+- **持久化**：`FormatVersion 1→2`；`SessionFileNode` 加 `image_paths` / `used_image_paths`，旧 `image_path`
+  只读兼容；`SessionLoader` 接受 v1..v2、`image_path`→单元素包、部分缺图保留节点；`TryReadInfoAsync` 列 v1..v2。
+  新增 **`SessionStore.Images.cs`**：拷贝 / 复用映射助手；`DeleteNodeArtifacts` 追加清 `{nodeId}_*.png` 与 `used/{nodeId}_*`。
+- **UI 写入**：`SubmitAsync` 成功后 `SetNodeUsedImages(appended, [main]+AdditionalImages)`（`SessionViewModel.Rerun.cs`）。
+- **测试**：版本断言 1→2、v2 用例 3→2；新增 9 例（图包 / UsedImages 往返、v1 兼容、部分缺图、VM 记录）。
+
+### 涉及文件
+
+- 契约：`Contracts/Planning/IEditNode.cs`、`Contracts/Planning/IEditSessionWriter.cs`。
+- Agent：`Agent/EditSession.cs`、`Agent/EditSession.Images.cs`（新）、`Agent/SessionStore.cs`、
+  `Agent/SessionStore.Images.cs`（新）、`Agent/SessionStore.Cleanup.cs`、`Agent/SessionLoader.cs`。
+- UI：`UI/Chat/SessionViewModel.cs`、`UI/Chat/SessionViewModel.Rerun.cs`。
+- 契约注释：`Contracts/Imaging/MaskSpec.cs`（过期版本说明）。
+- 测试：`EditSessionTests` / `SessionStoreTests` / `SessionLoaderTests` / `SessionViewModelTests`。
+
+### 实测
+
+- `dotnet build ZivAiEditor.UI -c Release`（含 Contracts / Agent / Backend / Tools）→ **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：受影响类 **134 通过 / 0 失败**。
+- **Z8**：`EditSession.cs` 559 / `EditSession.Images.cs` 73 / `SessionStore.cs` 556 / `SessionStore.Images.cs` 140。
+- 独立只读复审（子代理）：无 Blocker；1 项 Should-fix（refs 复用别名）经核对 **P1 不成立**，登记为 P3 观察项。
+- **未跑 GPU 端到端**（Z29 / Z30）；P1 行为不变。
+
+### 遇到的问题与解决
+
+1. **源生成反序列化缺键时 `List<string>` 属性为 `null`**（`= new()` 默认被忽略）：v1 文件无 `image_paths`
+   → `dtoNode.ImagePaths` 为 null → `SessionLoader` NRE（15 例测试全红）。解决：读取处一律 `is { Count: > 0 }`
+   判空；`ResolveList` 接受可空；顺带给 `dto.Nodes` / `rerun.additional_images` 补 null 兜底。
+2. **`name` 局部变量冲突**（CS0136）：新循环 `var name` 与 `WriteProjectAsync` 参数 / `LoadFromJson` 末尾
+   `var name` 冲突 → 改名 `imageName`。
+3. **Z8 超标**：`EditSession.cs` 620 / `SessionStore.cs` 679（> 600）→ 拆出 `EditSession.Images.cs` /
+   `SessionStore.Images.cs` 两个 partial，回落到 559 / 556。
+4. **Release 全量构建被运行中的 App 锁**（MSB3021/3027，非编译错误）：本机有 `ZivAiEditor.App`(PID 9148)
+   运行占用 `bin/Release`。改用 `ZivAiEditor.UI` Release 构建与 Debug 测试验证 0 错误 0 警告。
+
+### 遗留项
+
+- **P2**：空会话拖入即 root（含 N 图）+ 多图 UI（授权修订 9C.6-C.4）。
+- **P3**：`@` 引用机制；**P4**：重跑 / 删除适配（`RerunSpec` 瘦身）；**P5**：批量。
+- **P3 观察项**：拷贝复用映射在 `UsedImagePaths != Rerun.AdditionalImages` 时的跨节点别名需复核。
+
+### 备注
+
+- 未改 `Contracts` 既有成员 / `python/server/*` / `ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；无新 NuGet；
+  未改 chrome / 项目列表 / 分辨率选择器 / 遮罩 / 裁切 / 重跑 / 取消。
+- 契约新增见 `FROZEN.md` Step 9C.10-P1。
+
+---
+
+## [Step 9C.10-P2] - 2026-09-24：空会话拖入即 root（含 N 图）+ 多图 UI
+
+### 目标
+
+启用「图包节点」行为（9C.10 分阶段重构的 P2）：空会话拖入 N 张 → **整批立即成为 root 节点**（`ImagePaths` 含 N 张）；
+聊天流「起始图像」气泡横排缩略图、历史列表「（N 张）」；管线消费 root 图包（Q1=A）。
+按用户裁决：Q1=A / Q2=B / Q3=B / Q4=A / Q5=B / Q6=A；附加 R1–R5。**授权修订 9C.6-C.4**（仅空会话部分回退）。
+
+### 做了什么
+
+- **契约（追加）**：`IEditSessionWriter.SetRoot(IReadOnlyList<string>)`（既有单图 `SetRoot` / `ResetToRoot` 不变）。
+- **Agent**：`EditSession.SetRoot(list)` 落 `EditSession.Images.cs`（清 DAG → 多图 root → current）。
+- **UI VM**：新增 `SessionViewModel.Images.cs`：`SetRootImage(list)`（去空白、上限 10 + 提示、清 crop/mask 临时目录）、
+  `CurrentImageCount`、`AddInfo`、`CurrentPackExtras` / `AssembleReferences` / `BuildDisplayPack`。
+  `SubmitAsync`：参考图 = 图包 extras（主图后）**先**、附件参考**后**，合并截断到 3；`imageCount = CurrentImageCount + 附件数`（R1）；
+  图片消费型提交插入非错误行「本次使用 N 张图」（R2）；**T2I 不挂参考、不发该行**（复审 P1 修复）。
+  `ChatMessage` 追加 `ImagePaths`（保留 `ImagePath`）；`RebuildContext` 起始气泡带显示图包。
+- **App**：`OnImagesChanged` 空会话 0→N 整批提升为 root（R5）再清空附件条；新增纯判定
+  `ImageImportPromotion.ShouldPromote`；`CommandRequirements` 改收 `currentImageCount`（R4）；`MainWindow.Send` 传
+  `_vm.CurrentImageCount`；`MainWindow.Chat.AddPreviewPack`（≤4 × 72px + "+N"，走 `_bitmaps`）；历史标签「（N 张）」。
+- **测试**：新增 `ImageImportPromotionTests`；补 `EditSessionTests`（多图 SetRoot）/ `SessionViewModelTests`
+  （多图 root、参考组装、截断、T2I 不使用图包、显示图包）/ `CommandRequirementsTests`（计数式）/ `SessionStoreTests`（多图 root 往返）。
+
+### 涉及文件
+
+- 契约：`Contracts/Planning/IEditSessionWriter.cs`。
+- Agent：`Agent/EditSession.Images.cs`。
+- UI：`UI/Chat/SessionViewModel.cs`、`UI/Chat/SessionViewModel.Images.cs`（新）、`UI/Chat/ChatMessage.cs`、
+  `UI/Editing/ImageImportPromotion.cs`（新）。
+- App：`App/MainWindow.Import.cs`、`App/MainWindow.Chat.cs`、`App/MainWindow.axaml.cs`、`App/MainWindow.Send.cs`、
+  `App/CommandRequirements.cs`。
+- 测试：`ImageImportPromotionTests`（新）、`EditSessionTests`、`SessionViewModelTests`、`CommandRequirementsTests`、`SessionStoreTests`。
+
+### 实测
+
+- `dotnet build src\ZivAiEditor.UI -c Release`（含 Contracts/Agent/Backend/Tools）→ **0 错误 0 警告**；
+  `ZivAiEditor.App` Debug 构建 **0/0**（Release 输出被运行中实例锁，非编译错误）。
+- `dotnet test`（Z29，**无 GPU**）：受影响类 **165 通过 / 0 失败**；**全量 448 通过 / 0 失败**。
+- **Z8**：改动源文件均 < 600。
+- light-rip（Large）：planner → 计划复审（发现 P0/P1，修订计划）→ implementer → 独立 verifier（Verified）→
+  后置 review（发现 P1：T2I 误用图包）→ 修复 + 短复审（Approved）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 遇到的问题与解决
+
+1. **计划复审 P0：R5 提升位置自相矛盾 + 再入未定义**。原计划同时在「发送时 `PrepareAttachments`」与「拖入时
+   `OnImagesChanged`」提升。改为**仅拖入时**：`CountBefore==0 && CountAfter>0 && !HasRootImage` → 先 mutate 再 `Clear()`；
+   `Clear` 的再入事件不满足条件 → 无循环。
+2. **计划复审 P1：多余读契约**。原计划新增 `IEditSession.GetCurrentPipelineImagePaths()`。改为 UI 从
+   `GetPathToCurrent()` 末节点派生图包，**不扩契约面**（仅保留 R3 授权的 `SetRoot(list)`）。
+3. **后置 review P1：`/生成`（T2I）误用图包**。原实现无条件把图包 extras 作为参考图挂到 plan 并输出「本次使用 N 张图」，
+   生成**幽灵参考**并污染 `UsedImagePaths` / `RerunSpec`。修复：参考组装与信息行**改到 parse 之后**，仅当
+   `plan.MainImagePath` 非空（图片消费型）才执行；T2I（`MainImagePath==""`）跳过。新增测试覆盖。
+4. **R1 与 R2 计数口径**。R1（变体选择）用 `CurrentImageCount + 附件数`（原始）；R2（提示）用实际进管线数
+   （主图 + 截断后参考）。两者在 >4 张时不同，均按用户 R1/R2 字面实现。
+
+### 遗留项
+
+- **P3**：`@` 引用机制；`MultiImagePromptDialog` 废弃；`ImageEditMode` 语义调整。
+- **P4**：重跑 / 删除适配（图包 extras 从 `RerunSpec` 迁到 `UsedImagePaths`）；**P5**：批量。
+- **观察项**：图包上限仅在 VM；`used/` 跨节点别名待 P3/P4 复核。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 备注
+
+- 未改 `Contracts` 既有成员（仅追加 `SetRoot(list)`）/ `python/server/*` / `ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；
+  无新 NuGet；未改 chrome / 项目列表 / 分辨率选择器 / 遮罩 / 裁切 / 重跑 / 取消。
+- 契约与行为变更见 `FROZEN.md` Step 9C.10-P2；交互模型见 `INTERACTION.md` §12。

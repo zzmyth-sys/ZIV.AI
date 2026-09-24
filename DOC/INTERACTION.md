@@ -228,3 +228,26 @@
 > `PromptExpander`（Agent）、`LlmPreflight` / `PromptConfirmDialog` / `CommandRequirements`（App）、
 > `MainWindow.Generate.cs`、`SessionViewModel.SubmitAsync(displayText)` 已落地。契约与冻结记录见
 > `FROZEN.md` Step 9C.9-A1。批量、命令列表 UI 补全、`@图引用` 仍后置。
+
+## 12. 图片流入模型（部分回退 · Step 9C.10-P2）
+
+> 本节为 **Step 9C.10-P2 追加**（只增不改）。§8/§10 的「附件条一次性输入、发送才消费」在
+> **空会话场景部分回退**：空会话拖入 N 张 → **整批立即成为多图 root**（`ImagePaths` 含 N 张），
+> 附件条随即清空。**已有 root 拖入**仍走 §8 的「只进附件条、发送时消费」。授权依据见
+> `FROZEN.md` Step 9C.10-P2（授权修订 9C.6-C.4）。
+
+- **节点 = 图包**：root 节点可含多图（并排缩略图）；编辑节点输出单结果图，成为下一节点的基础。
+- **上限**：root 图包 ≤ **10**（超出截断 + 提示）；送管线 ≤ **4**（主图 + ≤3 参考，超出截断尾部）。
+- **无 `@` 时的管线输入（Q1=A）**：消费**当前节点整个图包**——`<image1>` = pipeline 主图（crop 优先），
+  `<image2>..` = `ImagePaths[1..]`，其后为附件参考图。变体选择按 `imageCount = 当前图包数 + 附件数`（R1）。
+- **提示（R2）**：图片消费型提交在聊天流插入**非错误**系统行「本次使用 N 张图」（N = 实际进管线数，截断后）；
+  文生图（`/生成`）不挂参考、不发该行。
+- **未变**：`MultiImagePromptDialog`（三选一）**保留**（P3 再议废弃）；`ImageEditMode` **保留**（发送门控语义不变）；
+  `AdditionalImages` / `<imageN>` 契约（§10）不变；参考图仍不写入 `session.json`（改由节点 `ImagePaths` /
+  `UsedImagePaths` 持久化，见 `FROZEN.md` Step 9C.10-P1/P2）。
+
+> **实现状态（Step 9C.10-P2）**：`IEditSessionWriter.SetRoot(IReadOnlyList<string>)`、
+> `EditSession.SetRoot(list)`（`EditSession.Images.cs`）、`SessionViewModel.Images.cs`、
+> `ChatMessage.ImagePaths`、`ImageImportPromotion`、`CommandRequirements`（计数式）、
+> `MainWindow.Import/Chat/axaml` 已落地。`@` 机制、附件默认进管线语义、重跑 / 删除适配、批量仍后置
+> （P3–P5）。契约与冻结记录见 `FROZEN.md` Step 9C.10-P2。

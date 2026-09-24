@@ -64,9 +64,19 @@ public partial class MainWindow
 
     private void OnImagesChanged(object? sender, ImageImportChangedEventArgs e)
     {
-        // Step 9C.6-C: the strip is a one-shot input. A drag/paste only fills the strip;
-        // it must NOT become the session root here. Reaching two attachments auto-selects
-        // multi-image mode; the user may override it manually.
+        // Step 9C.10-P2 (R5): an import that fills an empty strip on a session with no root
+        // promotes the whole batch to the multi-image "原图" pack (mutating the session first)
+        // and clears the strip. The clear re-enters with CountBefore=N / CountAfter=0 and must
+        // not promote again (the helper requires countBefore == 0).
+        if (ImageImportPromotion.ShouldPromote(e.CountBefore, e.CountAfter, _vm.HasRootImage)
+            && _importBar is { } bar)
+        {
+            _vm.SetRootImage(bar.Paths.ToArray());
+            bar.Clear();
+        }
+
+        // Step 9C.6-C: reaching two attachments auto-selects multi-image mode; the user may
+        // override it manually.
         if (_importBar is { Count: >= 2 } && _vm.Mode == ImageEditMode.Single)
         {
             _vm.Mode = ImageEditMode.Multi;

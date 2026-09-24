@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using ZivAiEditor.Contracts.Imaging;
 
 namespace ZivAiEditor.Contracts.Planning;
@@ -20,6 +21,21 @@ public interface IEditNode
 
     /// <summary>The output image produced by this node (always a new file — Z24).</summary>
     string ImagePath { get; }
+
+    /// <summary>
+    /// The node's image pack (Step 9C.10, non-empty): the root node carries the imported
+    /// image(s), an edit node carries its single output. <see cref="ImagePath"/> stays the
+    /// primary / pipeline image (<c>ImagePaths[0]</c>) for compatibility; a node loaded
+    /// from a v1 project normalizes this to <c>[ImagePath]</c>.
+    /// </summary>
+    IReadOnlyList<string> ImagePaths { get; }
+
+    /// <summary>
+    /// The ordered pipeline images this edit consumed — <c>image1</c>, <c>image2</c>, … —
+    /// with the main image first (Step 9C.10). Empty for the root node (no edit). Persisted
+    /// so a re-run can reproduce the <c>&lt;imageN&gt;</c> mapping.
+    /// </summary>
+    IReadOnlyList<string> UsedImagePaths { get; }
 
     /// <summary>The user input that produced this node (shown in the history list).</summary>
     string Command { get; }

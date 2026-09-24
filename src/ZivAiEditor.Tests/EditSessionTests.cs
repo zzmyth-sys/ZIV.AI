@@ -25,6 +25,115 @@ public class EditSessionTests
     }
 
     [Fact]
+    public void Root_Node_Has_A_Single_Image_Pack_And_No_Used_Images()
+    {
+        // Step 9C.10: the root's pack is the imported image; nothing was edited yet.
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+
+        var root = session.GetHistory()[0];
+
+        Assert.Equal(new[] { @"C:\img\root.png" }, root.ImagePaths);
+        Assert.Empty(root.UsedImagePaths);
+    }
+
+    [Fact]
+    public void SetRoot_Pack_Normalizes_And_Resets_The_Session()
+    {
+        // Step 9C.10-P2: a multi-image root sets the whole pack (blanks dropped), the primary
+        // ImagePath is the first kept image, and any pre-existing DAG is dropped (R3).
+        var session = new EditSession();
+        session.AppendNode(null, @"C:\img\old.png", "cmd");
+
+        session.SetRoot(new[] { @"C:\img\a.png", "  ", @"C:\img\b.png" });
+
+        Assert.Single(session.Nodes);
+        var root = session.GetHistory()[0];
+        Assert.Equal(new[] { @"C:\img\a.png", @"C:\img\b.png" }, root.ImagePaths);
+        Assert.Equal(@"C:\img\a.png", root.ImagePath);
+        Assert.Empty(root.UsedImagePaths);
+        Assert.Null(root.ParentNodeId);
+        Assert.Equal("原图", root.Command);
+        Assert.Equal(root.NodeId, session.CurrentNodeId);
+    }
+
+    [Fact]
+    public void SetRoot_Pack_Empty_Is_NoOp()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+
+        session.SetRoot(Array.Empty<string>());
+        session.SetRoot(new[] { "  ", "" });
+
+        Assert.Single(session.Nodes);
+        Assert.Equal(rootId, session.CurrentNodeId);
+        Assert.Equal(@"C:\img\root.png", session.RootImagePath);
+    }
+
+    [Fact]
+    public void SetRoot_Single_Still_Works()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+
+        var root = session.GetHistory()[0];
+        Assert.Equal(new[] { @"C:\img\root.png" }, root.ImagePaths);
+        Assert.Empty(root.UsedImagePaths);
+        Assert.Equal(@"C:\img\root.png", session.RootImagePath);
+    }
+
+    [Fact]
+    public void AppendNode_Pack_Is_The_Output_And_UsedImages_Start_Empty()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+
+        var node = session.AppendNode(null, @"C:\img\out1.png", "cmd1");
+
+        Assert.Equal(new[] { @"C:\img\out1.png" }, node.ImagePaths);
+        Assert.Empty(node.UsedImagePaths);
+    }
+
+    [Fact]
+    public void SetNodeUsedImages_Records_Order_And_Preserves_Node_Properties()
+    {
+        // Step 9C.10: blank entries are dropped, order (main first) is kept, and the node's
+        // identity / pack / command / crop are preserved.
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var node = session.AppendNode(null, @"C:\img\out1.png", "cmd1");
+        session.SetNodeCrop(node.NodeId, new CropSpec
+        {
+            X = 1, Y = 2, Width = 3, Height = 4, ResultImagePath = @"C:\img\c.png",
+        });
+
+        session.SetNodeUsedImages(node.NodeId, new[] { @"C:\img\root.png", "   ", @"C:\img\ref.png" });
+
+        var updated = session.Nodes[node.NodeId];
+        Assert.Equal(new[] { @"C:\img\root.png", @"C:\img\ref.png" }, updated.UsedImagePaths);
+        Assert.Equal(new[] { @"C:\img\out1.png" }, updated.ImagePaths);
+        Assert.Equal("cmd1", updated.Command);
+        Assert.NotNull(updated.Crop);
+    }
+
+    [Fact]
+    public void SetNodeMask_Preserves_Pack_And_UsedImages()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var node = session.AppendNode(null, @"C:\img\out1.png", "cmd1");
+        session.SetNodeUsedImages(node.NodeId, new[] { @"C:\img\root.png" });
+
+        session.SetNodeMask(node.NodeId, new MaskSpec { MaskImagePath = @"C:\img\m.png", Width = 4, Height = 4 });
+
+        var updated = session.Nodes[node.NodeId];
+        Assert.Equal(new[] { @"C:\img\out1.png" }, updated.ImagePaths);
+        Assert.Equal(new[] { @"C:\img\root.png" }, updated.UsedImagePaths);
+    }
+
+    [Fact]
     public void NavigateTo_Updates_CurrentNode()
     {
         var session = new EditSession();

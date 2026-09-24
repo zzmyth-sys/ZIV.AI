@@ -99,7 +99,7 @@ public partial class MainWindow
     private (bool Blocked, string? Hint) CheckCommandImageRequirement(string? text, int attachmentCount)
     {
         var blocked = CommandRequirements.RequiresMoreImages(
-            _commands, text, _vm.HasRootImage, attachmentCount, out var hint);
+            _commands, text, _vm.CurrentImageCount, attachmentCount, out var hint);
         return (blocked, hint);
     }
 

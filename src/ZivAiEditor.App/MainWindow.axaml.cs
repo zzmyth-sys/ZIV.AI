@@ -282,20 +282,14 @@ public partial class MainWindow : Window
                 panel.Children.Add(textBlock);
             }
 
-            if (message.ImagePath is { Length: > 0 } stillPath)
-            {
-                AddPreview(panel, stillPath);
-            }
+            AddMessageImages(panel, message);
 
             return BuildBubbleBorder(message, panel);
         }
 
         // Image(s) first, then one row with the status text and the action button
         // (Step 9C.8-B2 follow-up: the info text moves down next to the ×/regenerate button).
-        if (message.ImagePath is { Length: > 0 } path)
-        {
-            AddPreview(panel, path);
-        }
+        AddMessageImages(panel, message);
 
         if (message.IsPending)
         {
@@ -345,6 +339,12 @@ public partial class MainWindow : Window
         var label = string.IsNullOrWhiteSpace(item.Node.Command)
             ? item.Node.NodeId[..Math.Min(8, item.Node.NodeId.Length)]
             : item.Node.Command;
+
+        // Step 9C.10-P2 (Q5=B): a multi-image root is labelled "原图（N 张）" as plain text.
+        if (item.Node.ImagePaths.Count > 1)
+        {
+            label = $"{label}（{item.Node.ImagePaths.Count} 张）";
+        }
 
         var listItem = new ListBoxItem
         {

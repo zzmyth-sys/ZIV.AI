@@ -9,6 +9,7 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using ZivAiEditor.Contracts.Imaging;
+using ZivAiEditor.Contracts.Planning;
 
 namespace ZivAiEditor.Agent;
 
@@ -34,9 +35,11 @@ public sealed class ProjectCorruptException : Exception
 /// <summary>
 /// Persistence for edit sessions as self-contained <b>projects</b> (Step 9C.6-E). A project
 /// lives under the program directory (Z14) at <c>sessions/{sessionId}/</c> and holds
-/// <c>session.json</c> plus every node image as <c>{NodeId}.png</c> and its crop as
-/// <c>{NodeId}_crop.png</c>. The JSON stores <b>relative</b> image names so the project is
-/// portable; the loader resolves them against the project directory.
+/// <c>session.json</c> plus every node image as <c>{NodeId}.png</c> (and <c>{NodeId}_{n}.png</c>
+/// for the extra images of a node pack), its crop as <c>{NodeId}_crop.png</c>, its mask as
+/// <c>{NodeId}_mask.png</c>, re-run references under <c>refs/</c>, and re-run pipeline inputs
+/// under <c>used/</c> (Step 9C.10). The JSON stores <b>relative</b> image names so the project
+/// is portable; the loader resolves them against the project directory.
 ///
 /// <para>Replaces the Step 8 <c>SessionExporter</c>; <see cref="ExportToAsync"/> keeps the
 /// "save a copy elsewhere" capability for a later UI. Pure BCL file IO / JSON — no platform
@@ -44,7 +47,7 @@ public sealed class ProjectCorruptException : Exception
 /// </summary>
 public sealed partial class SessionStore
 {
-    public const int FormatVersion = 1;
+    public const int FormatVersion = 2;
 
     private const string SessionFileName = "session.json";
     private const string LastProjectFileName = "last_project.txt";
@@ -265,18 +268,25 @@ public sealed partial class SessionStore
         Directory.CreateDirectory(directory);
 
         var nodes = new List<SessionFileNode>();
+        var copied = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var node in session.GetHistory())
         {
             ct.ThrowIfCancellationRequested();
 
-            var imageName = node.NodeId + ".png";
-            CopyIfNeeded(node.ImagePath, Path.Combine(directory, imageName));
+            var pack = node.ImagePaths.Count > 0 ? node.ImagePaths : new[] { node.ImagePath };
+            var imageNames = new List<string>(pack.Count);
+            for (var index = 0; index < pack.Count; index++)
+            {
+                var imageName = index == 0 ? node.NodeId + ".png" : $"{node.NodeId}_{index + 1}.png";
+                CopyNodeImage(directory, copied, pack[index], imageName);
+                imageNames.Add(imageName);
+            }
 
             SessionFileCrop? crop = null;
             if (node.Crop is { } spec)
             {
                 var cropName = node.NodeId + "_crop.png";
-                CopyIfNeeded(spec.ResultImagePath, Path.Combine(directory, cropName));
+                CopyNodeImage(directory, copied, spec.ResultImagePath, cropName);
                 crop = new SessionFileCrop
                 {
                     X = spec.X,
@@ -294,7 +304,7 @@ public sealed partial class SessionStore
                 rerun = new SessionFileRerun
                 {
                     Resolution = ToDto(rerunSpec.Resolution),
-                    AdditionalImages = CopyReferenceImages(directory, node.NodeId, rerunSpec.AdditionalImages),
+                    AdditionalImages = CopyReferenceImages(directory, copied, node.NodeId, rerunSpec.AdditionalImages),
                 };
             }
 
@@ -302,7 +312,7 @@ public sealed partial class SessionStore
             if (node.Mask is { } maskSpec && !string.IsNullOrWhiteSpace(maskSpec.MaskImagePath))
             {
                 var maskName = node.NodeId + "_mask.png";
-                CopyIfNeeded(maskSpec.MaskImagePath, Path.Combine(directory, maskName));
+                CopyNodeImage(directory, copied, maskSpec.MaskImagePath, maskName);
                 mask = new SessionFileMask
                 {
                     ImagePath = maskName,
@@ -318,7 +328,8 @@ public sealed partial class SessionStore
             {
                 NodeId = node.NodeId,
                 ParentNodeId = node.ParentNodeId,
-                ImagePath = imageName,
+                ImagePaths = imageNames,
+                UsedImagePaths = CopyUsedImages(directory, copied, node),
                 Command = node.Command,
                 Crop = crop,
                 Mask = mask,
@@ -339,41 +350,6 @@ public sealed partial class SessionStore
 
         var json = JsonSerializer.Serialize(dto, Json.SessionFileDto);
         await File.WriteAllTextAsync(Path.Combine(directory, SessionFileName), json, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Copies a node's reference images into the project's <c>refs/</c> folder as
-    /// <c>{nodeId}_ref{n}{ext}</c> and returns their <b>relative</b> names (Step 9C.8-A).
-    /// Missing sources are skipped. The destination folder is created on demand.
-    /// </summary>
-    private static List<string> CopyReferenceImages(
-        string directory,
-        string nodeId,
-        IReadOnlyList<string> sources)
-    {
-        var names = new List<string>(sources.Count);
-        for (var index = 0; index < sources.Count; index++)
-        {
-            var source = sources[index];
-            if (string.IsNullOrWhiteSpace(source) || !File.Exists(source))
-            {
-                continue;
-            }
-
-            var extension = Path.GetExtension(source);
-            if (string.IsNullOrEmpty(extension))
-            {
-                extension = ".png";
-            }
-
-            var relative = $"refs/{nodeId}_ref{index + 1}{extension}";
-            var destination = Path.Combine(directory, "refs", $"{nodeId}_ref{index + 1}{extension}");
-            Directory.CreateDirectory(Path.Combine(directory, "refs"));
-            CopyIfNeeded(source, destination);
-            names.Add(relative);
-        }
-
-        return names;
     }
 
     private static SessionFileResolution? ToDto(ResolutionPolicy? policy)
@@ -426,11 +402,12 @@ public sealed partial class SessionStore
             using var document = JsonDocument.Parse(json);
             var root = document.RootElement;
 
-            // Only the current format is listed; a missing / different version is skipped
-            // (so an old-format project does not appear and then fail to open).
+            // Formats 1..current are listed: v1 (single image_path) still opens after the
+            // v2 image-pack upgrade; a missing / future version is skipped.
             if (!root.TryGetProperty("version", out var versionElement)
                 || !versionElement.TryGetInt32(out var version)
-                || version != FormatVersion)
+                || version < 1
+                || version > FormatVersion)
             {
                 return null;
             }
@@ -485,9 +462,28 @@ internal sealed class SessionFileNode
     [JsonPropertyName("parent_node_id")]
     public string? ParentNodeId { get; init; }
 
-    /// <summary>Relative image name (<c>{NodeId}.png</c>), resolved against the project dir.</summary>
+    /// <summary>
+    /// Relative image names of the node's pack (format v2, Step 9C.10): <c>{NodeId}.png</c>
+    /// for the first image and <c>{NodeId}_{n}.png</c> for the rest, resolved against the
+    /// project dir.
+    /// </summary>
+    [JsonPropertyName("image_paths")]
+    public List<string> ImagePaths { get; init; } = new();
+
+    /// <summary>
+    /// Relative names of the ordered pipeline images the edit consumed (format v2,
+    /// Step 9C.10), main first; empty for the root node.
+    /// </summary>
+    [JsonPropertyName("used_image_paths")]
+    public List<string> UsedImagePaths { get; init; } = new();
+
+    /// <summary>
+    /// Legacy single image name (format v1); read-only — never written in v2 (the
+    /// <see cref="JsonIgnoreCondition.WhenWritingNull"/> keeps a fresh file clean).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("image_path")]
-    public string ImagePath { get; init; } = "";
+    public string? LegacyImagePath { get; init; }
 
     [JsonPropertyName("command")]
     public string Command { get; init; } = "";

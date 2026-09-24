@@ -46,7 +46,7 @@ public static class SessionLoader
             throw new ProjectCorruptException("项目文件为空。");
         }
 
-        if (dto.Version != SessionStore.FormatVersion)
+        if (dto.Version < 1 || dto.Version > SessionStore.FormatVersion)
         {
             throw new ProjectFormatException(
                 dto.Version > SessionStore.FormatVersion ? "项目版本不受支持。" : "项目格式过旧。");
@@ -54,13 +54,40 @@ public static class SessionLoader
 
         var warnings = new List<string>();
         var nodes = new List<EditNode>();
-        foreach (var dtoNode in dto.Nodes)
+        foreach (var dtoNode in dto.Nodes ?? new List<SessionFileNode>())
         {
-            var imagePath = Resolve(projectDirectory, dtoNode.ImagePath);
-            if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+            // Format v2 stores the node's pack in `image_paths`; a v1 project has the legacy
+            // single `image_path`, normalized to a one-element pack (Step 9C.10).
+            var dtoImages = dtoNode.ImagePaths is { Count: > 0 }
+                ? dtoNode.ImagePaths
+                : string.IsNullOrWhiteSpace(dtoNode.LegacyImagePath)
+                    ? new List<string>()
+                    : new List<string> { dtoNode.LegacyImagePath! };
+
+            var imagePaths = new List<string>(dtoImages.Count);
+            var missing = 0;
+            foreach (var imageName in dtoImages)
+            {
+                var resolved = Resolve(projectDirectory, imageName);
+                if (!string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved))
+                {
+                    imagePaths.Add(resolved);
+                }
+                else
+                {
+                    missing++;
+                }
+            }
+
+            if (imagePaths.Count == 0)
             {
                 warnings.Add($"节点 {ShortId(dtoNode.NodeId)} 的图片缺失，已跳过。");
                 continue;
+            }
+
+            if (missing > 0)
+            {
+                warnings.Add($"节点 {ShortId(dtoNode.NodeId)} 有 {missing} 张图片缺失，已忽略。");
             }
 
             CropSpec? crop = null;
@@ -110,7 +137,7 @@ public static class SessionLoader
             if (dtoNode.Rerun is { } dtoRerun)
             {
                 var references = new List<string>();
-                foreach (var referenceName in dtoRerun.AdditionalImages)
+                foreach (var referenceName in dtoRerun.AdditionalImages ?? new List<string>())
                 {
                     var referencePath = Resolve(projectDirectory, referenceName);
                     if (!string.IsNullOrWhiteSpace(referencePath) && File.Exists(referencePath))
@@ -134,7 +161,9 @@ public static class SessionLoader
             {
                 NodeId = dtoNode.NodeId,
                 ParentNodeId = dtoNode.ParentNodeId,
-                ImagePath = imagePath,
+                ImagePath = imagePaths[0],
+                ImagePaths = imagePaths,
+                UsedImagePaths = ResolveList(projectDirectory, dtoNode.UsedImagePaths, dtoNode.NodeId, warnings),
                 Command = dtoNode.Command,
                 Crop = crop,
                 Mask = mask,
@@ -195,12 +224,46 @@ public static class SessionLoader
         NodeId = node.NodeId,
         ParentNodeId = parentId,
         ImagePath = node.ImagePath,
+        ImagePaths = node.ImagePaths,
+        UsedImagePaths = node.UsedImagePaths,
         Command = node.Command,
         Crop = node.Crop,
         Mask = node.Mask,
         Rerun = node.Rerun,
         CreatedAt = node.CreatedAt,
     };
+
+    /// <summary>
+    /// Resolves a list of relative image names against the project directory (Step 9C.10);
+    /// a name whose file is missing is dropped with a warning.
+    /// </summary>
+    private static IReadOnlyList<string> ResolveList(
+        string projectDirectory,
+        List<string>? names,
+        string nodeId,
+        List<string> warnings)
+    {
+        var result = new List<string>();
+        if (names is null)
+        {
+            return result;
+        }
+
+        foreach (var name in names)
+        {
+            var path = Resolve(projectDirectory, name);
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            {
+                result.Add(path);
+            }
+            else
+            {
+                warnings.Add($"节点 {ShortId(nodeId)} 的输入图缺失，已忽略。");
+            }
+        }
+
+        return result;
+    }
 
     private static ResolutionPolicy? FromDto(SessionFileResolution? dto)
     {

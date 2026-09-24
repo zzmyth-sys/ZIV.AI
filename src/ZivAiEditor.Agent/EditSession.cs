@@ -81,6 +81,7 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
         {
             ParentNodeId = null,
             ImagePath = imagePath,
+            ImagePaths = new[] { imagePath },
             Command = RootCommand,
         };
 
@@ -111,6 +112,8 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
                 NodeId = node.NodeId,
                 ParentNodeId = node.ParentNodeId,
                 ImagePath = node.ImagePath,
+                ImagePaths = NormalizeImages(node.ImagePaths, node.ImagePath),
+                UsedImagePaths = NormalizeImages(node.UsedImagePaths, null),
                 Command = node.Command,
                 Crop = node.Crop,
                 Mask = node.Mask,
@@ -144,6 +147,7 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
         {
             ParentNodeId = parentId,
             ImagePath = imagePath,
+            ImagePaths = new[] { imagePath },
             Command = command,
         };
 
@@ -189,6 +193,8 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
             NodeId = node.NodeId,
             ParentNodeId = node.ParentNodeId,
             ImagePath = node.ImagePath,
+            ImagePaths = node.ImagePaths,
+            UsedImagePaths = node.UsedImagePaths,
             Command = node.Command,
             CreatedAt = node.CreatedAt,
             Crop = crop,
@@ -221,6 +227,8 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
             NodeId = node.NodeId,
             ParentNodeId = node.ParentNodeId,
             ImagePath = node.ImagePath,
+            ImagePaths = node.ImagePaths,
+            UsedImagePaths = node.UsedImagePaths,
             Command = node.Command,
             CreatedAt = node.CreatedAt,
             Crop = node.Crop,
@@ -253,6 +261,8 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
             NodeId = node.NodeId,
             ParentNodeId = node.ParentNodeId,
             ImagePath = node.ImagePath,
+            ImagePaths = node.ImagePaths,
+            UsedImagePaths = node.UsedImagePaths,
             Command = node.Command,
             CreatedAt = node.CreatedAt,
             Crop = node.Crop,
@@ -285,6 +295,8 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
             NodeId = node.NodeId,
             ParentNodeId = node.ParentNodeId,
             ImagePath = newImagePath,
+            ImagePaths = new[] { newImagePath },
+            UsedImagePaths = node.UsedImagePaths,
             Command = node.Command,
             CreatedAt = node.CreatedAt,
             Crop = node.Crop,
@@ -507,6 +519,20 @@ public sealed class EditNode : IEditNode
 
     /// <summary>The output image produced by this node (always a new file — Z24).</summary>
     public string ImagePath { get; init; } = "";
+
+    /// <summary>
+    /// The node's image pack (Step 9C.10, non-empty for a valid node): the root node carries
+    /// the imported image(s), an edit node carries its single output (<see cref="ImagePath"/>
+    /// is always <c>ImagePaths[0]</c>). Normalized by <c>EditSession</c> at insertion.
+    /// </summary>
+    public IReadOnlyList<string> ImagePaths { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// The ordered pipeline images this edit consumed — <c>image1</c>, <c>image2</c>, … with
+    /// the main image first (Step 9C.10); empty for the root node. Persisted so a re-run can
+    /// reproduce the <c>&lt;imageN&gt;</c> mapping.
+    /// </summary>
+    public IReadOnlyList<string> UsedImagePaths { get; init; } = Array.Empty<string>();
 
     /// <summary>The user input that produced this node (shown in the history list).</summary>
     public string Command { get; init; } = "";
