@@ -84,6 +84,7 @@ public class SessionStoreTests
                 Height = 48,
                 IsBinary = true,
                 Invert = false,
+                FeatherPx = 9,
             });
 
             await store.SaveAsync(session, "遮罩项目");
@@ -96,6 +97,7 @@ public class SessionStoreTests
             Assert.Equal(48, loadedRoot.Mask.Height);
             Assert.True(loadedRoot.Mask.IsBinary);
             Assert.False(loadedRoot.Mask.Invert);
+            Assert.Equal(9, loadedRoot.Mask.FeatherPx);
             Assert.True(File.Exists(loadedRoot.Mask.MaskImagePath));
             Assert.EndsWith(rootNode.NodeId + "_mask.png", loadedRoot.Mask.MaskImagePath, StringComparison.Ordinal);
         }

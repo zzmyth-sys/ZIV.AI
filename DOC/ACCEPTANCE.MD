@@ -2033,3 +2033,58 @@ UI（D6 遗留）。
 - **遮罩脏标记用文件 mtime+长度**代理（非内容哈希）。
 - **App 层 UI 接线无自动化测试**（私有 + 依赖窗口）。
 - **未跑 GPU 端到端**（Z29 / Z30）。
+
+---
+
+## Step 9C.7-B 验收：遮罩增强（笔刷圆 / 浮动条 / 中键平移 / 灰度羽化）
+
+**目标**：A 笔刷圆光标；B 浮动工具条（大小 / 羽化 + 提示）；C 中键平移；D 灰度羽化（方案 B）。
+范围外：笔刷硬度 / 压感 / 预设；羽化实时与后端一致性校验；脏标记改 hash；画笔大小持久化到设置；GPU 端到端。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ 0 错误 0 警告 |
+| G2 | 依赖方向没破 | 仅追加 `MaskSpec.FeatherPx`；无新项目引用 / 反向 / 循环依赖 | ✅ |
+| G3 | 接口与 FROZEN 一致 | `MaskSpec.FeatherPx` 追加式；既有成员零变化；Z19 修订尾部追加 | ✅ |
+| G4 | 未授权修改检查 | 无既有冻结签名被改；追加已在 FROZEN 9C.7-B 记录 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` / `FROZEN` / `ipc-protocol` 追加 9C.7-B | ✅ |
+| G6 | 便携性未破 | 落盘位置不变（`_cache/masks/...`）；`session.json` 追加 `feather_px`（v1 兼容） | ✅ |
+| G7 | AI 推理进程隔离未破 | 仅传 PNG 路径；无 C# → GPU 直连 | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.7B.1 | 笔刷大小可变 / 钳制 | `MaskStateTests` | 设置生效；越界钳制 5–200 | ✅ |
+| 9C.7B.2 | 羽化参数 | `MaskStateTests` | 设置 / 钳制 0–25 | ✅ |
+| 9C.7B.3 | box blur 纯函数 | `MaskFeatherTests` | radius 0 → 0/255；>0 → 含中间值 | ✅ |
+| 9C.7B.4 | 显示 = 导出同函数 | 查调用点 | `MaskOverlay` 与 `MaskExporter` 均调 `MaskFeather.Apply` | ✅ |
+| 9C.7B.5 | 导出二值 / 灰度 | `MaskExporterTests` | `FeatherPx=0` → 只 0/255；>0 → 含中间值 | ✅ |
+| 9C.7B.6 | 重开阈值回硬边 | `MaskExporterTests` | 羽化 PNG 经 `TryLoadAsync` → 硬 0/255 | ✅ |
+| 9C.7B.7 | R1 中键 / 左键 | `PointerArbiterTests` | 先按者胜；释放只结束自己 | ✅ |
+| 9C.7B.8 | 持久化羽化 | `SessionStoreTests` / `SessionLoaderTests` | `feather_px` 往返；缺省 0 | ✅ |
+| 9C.7B.9 | Python 单入口 | 查 `pipeline.py` / `handlers.py` | `_load_mask_tensor` 单点；仅 handlers 传 `mask_binary=False` | ✅ |
+| 9C.7B.10 | Python 灰度读取 | `python/server/test_mask_feather.py` | `binary=False` 保留灰度；`True` 阈值化 | ✅ |
+| 9C.7B.11 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；受影响类 98 通过；Python 3 通过 | ✅ |
+| 9C.7B.12 | Z8 行数 | 查改动文件 | 均 < 600（`ImagePreview.axaml.cs` 601→359） | ✅ |
+| 9C.7B.13 | 无 GPU 负载 | 构建 / 测试 | 未启动 Python 推理、未加载模型（Z29 / Z30） | ✅ |
+| 9C.7B.14 | 手动：笔刷圆 / 浮条 / 中键 / 软边 | 用户 | 圆跟随；滑条生效；中键平移；羽化 >0 屏幕软边 | ⏳ 待用户确认 |
+| 9C.7B.15 | 手动：导出 PNG | 用户 | 羽化 0 二值；>0 灰度 | ⏳ 待用户确认 |
+| 9C.7B.16 | GPU：软边融合 | 用户（GPU） | 发送编辑后软边自然 | ⏳ 待用户确认 |
+
+### Step 9C.7-B 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.7B.1–9C.7B.13 全过；9C.7B.14–9C.7B.16 由用户真机确认。
+
+### Step 9C.7-B 遗留说明（非阻断）
+
+- **遮罩脏标记改内容哈希**（9C.7 遗留）。
+- **羽化视觉与后端一致性 GPU 验证**（待用户确认 GPU 空闲 + 明确同意）。
+- **App 层指针路由无自动化测试**（`PointerArbiter` 已单测）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+- 备注：`IpcIdleUnloadTests` 等 GPU 测试在 GPU 非空闲（用户进程 `group_webui.py` 占用）时会失败，
+  不属本步影响面（Z29 / Z30）。

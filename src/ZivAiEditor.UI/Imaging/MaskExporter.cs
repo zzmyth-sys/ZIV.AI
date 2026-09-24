@@ -10,8 +10,11 @@ namespace ZivAiEditor.UI.Imaging;
 /// <summary>
 /// Encodes / decodes the hand-drawn mask as an 8-bit grayscale PNG (Step 9C.7). The mask
 /// buffer itself is pure <c>byte[]</c> (0 or 255, D3); Skia is used only here for file IO.
-/// The exported PNG therefore contains only 0 / 255 per channel (R2), which the backend
-/// reads with <c>Image.open(path).convert("L")</c> and thresholds at <c>&gt;= 0.5</c>.
+/// With <c>featherPx = 0</c> the exported PNG therefore contains only 0 / 255 per channel
+/// (R2); with a positive feather (revised Z19) <see cref="MaskFeather"/> blooms the buffer
+/// into a soft grayscale ramp <b>in the same pure function</b> the overlay uses. The backend
+/// reads it with <c>Image.open(path).convert("L")</c>; user masks are read as grayscale
+/// (<c>binary=False</c>) while the loader thresholds back to the hard contour on reload.
 ///
 /// <para><b>Temporary area</b> (Z14): masks are intermediate products, so they are written
 /// under the program directory at <c>_cache/masks/{sessionId}/{nodeId}.png</c> — one file
@@ -42,9 +45,11 @@ public static class MaskExporter
     /// <summary>
     /// Encodes <paramref name="pixels"/> (row-major, <paramref name="width"/>×<paramref name="height"/>)
     /// as an 8-bit grayscale PNG and writes (overwriting)
-    /// <c>_cache/masks/{sessionId}/{nodeId}.png</c>. Returns the output path, or <c>null</c>
-    /// on any failure (blank ids, bad dimensions, short buffer, encode failure). The whole
-    /// operation runs off the caller's thread (Z11).
+    /// <c>_cache/masks/{sessionId}/{nodeId}.png</c>. When <paramref name="featherPx"/> is
+    /// positive the buffer is first run through <see cref="MaskFeather.Apply"/> (off-thread,
+    /// same function as the display), else it stays hard 0 / 255. Returns the output path,
+    /// or <c>null</c> on any failure (blank ids, bad dimensions, short buffer, encode
+    /// failure). The whole operation runs off the caller's thread (Z11).
     /// </summary>
     public static Task<string?> ExportAsync(
         string sessionId,
@@ -52,6 +57,7 @@ public static class MaskExporter
         byte[] pixels,
         int width,
         int height,
+        int featherPx = 0,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(nodeId)
@@ -65,6 +71,9 @@ public static class MaskExporter
 
         return Task.Run(() =>
         {
+            // Feather off-thread (Z11) with the shared pure function; radius 0 is a clone.
+            var encoded = MaskFeather.Apply(pixels, width, height, featherPx);
+
             var info = new SKImageInfo(width, height, SKColorType.Gray8, SKAlphaType.Opaque);
             using var bitmap = new SKBitmap(info);
             var span = bitmap.GetPixelSpan();
@@ -72,7 +81,7 @@ public static class MaskExporter
             for (var y = 0; y < height; y++)
             {
                 // Respect RowBytes: the row may be padded beyond width bytes.
-                pixels.AsSpan(y * width, width).CopyTo(span.Slice(y * rowBytes, width));
+                encoded.AsSpan(y * width, width).CopyTo(span.Slice(y * rowBytes, width));
             }
 
             using var image = SKImage.FromBitmap(bitmap);
@@ -97,6 +106,8 @@ public static class MaskExporter
 
     /// <summary>
     /// Decodes a mask PNG and thresholds each pixel (<c>&gt;= 128 → 255</c>, else <c>0</c>).
+    /// A feathered PNG is therefore recovered as its hard 50%-contour (≈ the original
+    /// boundary); the persisted <c>FeatherPx</c> is re-applied from the <c>MaskSpec</c>.
     /// Returns the buffer with its dimensions, or <c>null</c> on any failure (missing file,
     /// decode failure). Runs off the caller's thread (Z11).
     /// </summary>

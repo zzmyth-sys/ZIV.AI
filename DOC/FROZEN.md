@@ -2522,3 +2522,65 @@ Agent 编排，应下沉至 Agent；涉及 `IExecutor` 设计变更，单独立�
 - **画笔大小 UI 滑块**（D6 固定 40px）。
 - **`MaskSpec.Width/Height` 注释**仍为「主图原始像素」，与 D2 实际（pipeline 图坐标）不符，仅登记不改。
 - **遮罩脏标记用文件 mtime+长度**代理（非内容哈希）。
+
+---
+
+## Step 9C.7-B — 遮罩增强（笔刷圆 / 浮动条 / 中键平移 / 灰度羽化）
+
+> 追加式冻结 + Z19 授权修订：既有契约成员**只加不改**；Z19 原文保留，本段为**尾部授权说明**。
+
+### 9C.7B.1 Z19 修订（冻结 · 授权说明，不改原文）
+
+> **修订说明（2026-09-24 · Z19 灰度授权）**
+>
+> 用户授权：C# 可**忠实表达用户显式指定的软边（羽化）**，导出灰度 PNG；后端以 `mask_binary=False` 读取。
+> Z19 原文「遮罩 PNG 只含 0 / 255」的**核心精神不变**：C# 禁止做后端算法会做的**预处理**
+> （自动膨胀、智能补边、形态学操作）。本修订仅放开「用户显式羽化」——羽化值由 UI 滑块决定，
+> 非 C# 推断；屏幕显示 = 导出 PNG = 后端处理，三处一致。
+> 依据：`_test_step2/mask_feather_result.md`（GPU 实测确认模型接受灰度）。
+
+- **保持**：`FeatherPx = 0` 时导出 PNG **仍只含 0 / 255**（二值），与 Z19 原文一致。
+- **禁止未变**：C# 仍禁止自动膨胀 / 智能补边 / 形态学等预处理。
+
+### 9C.7B.2 契约（冻结 · 追加 → 非破坏）
+
+| 类型 | 文件 | 追加成员 |
+|---|---|---|
+| `MaskSpec` | `ZivAiEditor.Contracts/Imaging/MaskSpec.cs` | `int FeatherPx { get; init; }`（默认 0，范围 0–25） |
+
+- `MaskSpec` 既有成员（`MaskImagePath` / `Width` / `Height` / `IsBinary` / `Invert`）**零变化**。
+- `FeatherPx` **不**进入 IPC payload（后端读的是已羽化的 PNG 文件）；仅 C# 侧节点属性 / 持久化用。
+
+### 9C.7B.3 持久化（冻结 · 追加字段，向后兼容）
+
+- `session.json` 的 `mask` 对象追加可选 `feather_px`（int，缺省 0）。`FormatVersion` **仍为 1**。
+
+### 9C.7B.4 IPC 语义（冻结 · 语义澄清，`ipc_version` 不变 0.8）
+
+- `submit.payload.mask_path` 语义由「二值 PNG」修订为「**灰度 PNG（0–255；0=不编辑，255=完全编辑）**」；
+  消息结构未变，故 `ipc_version` 不变。详见 `contracts/ipc-protocol.md` §3.4。
+
+### 9C.7B.5 行为（冻结 · 非契约）
+
+- 笔刷大小 5–200（默认 40，可调）；羽化 0–25（默认 0）；浮动工具条顶部居中，仅 `MaskBrush` / `Eraser` 激活时可见。
+- 中键平移（R1）：左键先按（描边 / 左平移）→ 中键忽略至左键释放；中键先按（平移）→ 左键忽略至中键释放；
+  每次释放只结束自己的模式。
+- 模糊：3 趟可分离 box blur（高斯近似），**显示与导出共用同一纯函数** `MaskFeather.Apply`。
+- 遮罩缓冲始终为硬边 0/255；羽化为显示 / 导出时的派生处理；重开时 `TryLoadAsync` 阈值回硬边，
+  `FeatherPx` 由持久化恢复后重新应用。
+
+### 9C.7B.6 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 受影响类（MaskState / MaskFeather / PointerArbiter / MaskExporter / SessionStore / SessionLoader /
+  CommandParser / Executor / IpcSubmitMapper）→ **98 通过 / 0 失败**。
+- `python -m py_compile python/server/{handlers,pipeline}.py` OK；
+  `python -m unittest discover -p test_mask_feather.py`（cwd `python/server`）→ **3 通过**。
+- **未跑 GPU 端到端**（Z29 / Z30）；羽化软边融合由用户真机确认。
+
+### 9C.7B.7 遗留项（冻结）
+
+- **遮罩脏标记改内容哈希**（9C.7 遗留，仍用文件 mtime+长度代理）。
+- **羽化视觉与后端一致性 GPU 验证**（待用户确认 GPU 空闲 + 明确同意）。
+- **App 层指针路由（中键 / 悬停）无自动化测试**：`PointerArbiter` 已单测，`OnPressed/Moved/Released`
+  路由为 App 层薄封装，由真机 / 无头探针覆盖。

@@ -186,7 +186,10 @@
   - `inpaint`：有 `mask_path` 时局部编辑；无 mask 时参考条件编辑。
   - `outpaint`：`image_path` 必填，按 `anchor` 扩展画布，`mask_path` 由后端生成。
 - `image_path` 为可选（Step 7）：`t2i` 时为 `null`；其余 op 必填。
-- `mask_path` 为二值 PNG（只含 0 / 255，Z19）；缺省表示整图。
+- `mask_path` 为**灰度 PNG（0–255；0 = 不编辑，255 = 完全编辑）**；缺省表示整图。
+  后端以 `mask_binary=False` 读取，**保留用户显式羽化**（Step 9C.7-B 修订 Z19：C# 可导出
+  用户显式指定的软边灰度遮罩；仍禁止 C# 自动膨胀 / 智能补边等预处理）。`ipc_version` 不变
+  （消息结构未变，仅语义澄清）。
 - 模型路径由**后端配置**提供（绝对路径直传），**不**在 payload 内（见 §6）。
 
 **可选字段（Step 4 / ipc_version 0.5）**

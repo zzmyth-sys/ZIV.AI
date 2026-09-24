@@ -68,6 +68,15 @@
         <!-- Mask overlay (Step 9C.7): semi-transparent red where painted. -->
         <c:MaskOverlay x:Name="PART_MaskOverlay" IsVisible="False" />
 
+        <!-- Floating mask toolbar (Step 9C.7-B): brush size + feather, top-center above the
+             image. Hit-test-visible; the image box owns the pointer handlers so clicks here
+             never pan / zoom the image. -->
+        <c:MaskToolbar x:Name="PART_MaskToolbar"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Top"
+                       Margin="0,8,0,0"
+                       IsVisible="False" />
+
         <Border x:Name="PART_CropActions"
                 Margin="8"
                 Padding="6"

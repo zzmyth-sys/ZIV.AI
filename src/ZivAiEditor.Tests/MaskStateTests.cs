@@ -220,4 +220,67 @@ public class MaskStateTests
 
         Assert.True(count >= 5);
     }
+
+    [Fact]
+    public void BrushDiameter_Defaults_And_Clamps()
+    {
+        var mask = new MaskState();
+        Assert.Equal(40, mask.BrushDiameter);
+
+        mask.BrushDiameter = 1;
+        Assert.Equal(MaskState.MinBrushDiameter, mask.BrushDiameter);
+
+        mask.BrushDiameter = 9999;
+        Assert.Equal(MaskState.MaxBrushDiameter, mask.BrushDiameter);
+
+        mask.BrushDiameter = 77;
+        Assert.Equal(77, mask.BrushDiameter);
+    }
+
+    [Fact]
+    public void Larger_Brush_Paints_A_Wider_Stamp()
+    {
+        var small = Canvas(120, 40);
+        small.BrushDiameter = 10;
+        small.BeginStroke(60, 20, erase: false);
+        small.EndStroke();
+
+        var large = Canvas(120, 40);
+        large.BrushDiameter = 40;
+        large.BeginStroke(60, 20, erase: false);
+        large.EndStroke();
+
+        // A pixel 15 px from the center is inside the 40 px stamp but outside the 10 px one.
+        Assert.Equal(MaskState.Off, At(small, 75, 20));
+        Assert.Equal(MaskState.On, At(large, 75, 20));
+    }
+
+    [Fact]
+    public void FeatherPx_Defaults_And_Clamps()
+    {
+        var mask = new MaskState();
+        Assert.Equal(0, mask.FeatherPx);
+
+        mask.FeatherPx = -3;
+        Assert.Equal(0, mask.FeatherPx);
+
+        mask.FeatherPx = 100;
+        Assert.Equal(MaskState.MaxFeatherPx, mask.FeatherPx);
+
+        mask.FeatherPx = 7;
+        Assert.Equal(7, mask.FeatherPx);
+    }
+
+    [Fact]
+    public void IsStrokeActive_Tracks_The_Stroke_Lifetime()
+    {
+        var mask = Canvas(40, 40);
+        Assert.False(mask.IsStrokeActive);
+
+        mask.BeginStroke(20, 20, erase: false);
+        Assert.True(mask.IsStrokeActive);
+
+        mask.EndStroke();
+        Assert.False(mask.IsStrokeActive);
+    }
 }

@@ -97,6 +97,7 @@ public static class SessionLoader
                         Height = dtoMask.Height,
                         IsBinary = dtoMask.IsBinary,
                         Invert = dtoMask.Invert,
+                        FeatherPx = dtoMask.FeatherPx,
                     };
                 }
                 else

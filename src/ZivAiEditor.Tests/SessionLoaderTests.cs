@@ -257,8 +257,35 @@ public class SessionLoaderTests
             Assert.Equal(48, loaded.Mask.Height);
             Assert.True(loaded.Mask.IsBinary);
             Assert.False(loaded.Mask.Invert);
+            Assert.Equal(0, loaded.Mask.FeatherPx);
             Assert.True(File.Exists(loaded.Mask.MaskImagePath));
             Assert.Empty(result.Warnings);
+        }
+        finally
+        {
+            Cleanup(dir);
+        }
+    }
+
+    [Fact]
+    public void Loads_Mask_FeatherPx_When_Present()
+    {
+        var dir = NewDir();
+        try
+        {
+            WriteImage(dir, "a.png");
+            WriteImage(dir, "a_mask.png");
+            var node = "{\"node_id\": \"a\", \"parent_node_id\": null, \"image_path\": \"a.png\", "
+                       + "\"command\": \"c\", \"created_at\": \"2026-01-01T00:00:00+00:00\", "
+                       + "\"mask\": {\"image_path\": \"a_mask.png\", \"width\": 64, \"height\": 48, "
+                       + "\"is_binary\": true, \"invert\": false, \"feather_px\": 12}}";
+            var json = MakeFile("p", "a", node);
+
+            var result = SessionLoader.LoadFromJson(json, dir);
+
+            var loaded = Assert.Single(result.Session.GetHistory());
+            Assert.NotNull(loaded.Mask);
+            Assert.Equal(12, loaded.Mask!.FeatherPx);
         }
         finally
         {

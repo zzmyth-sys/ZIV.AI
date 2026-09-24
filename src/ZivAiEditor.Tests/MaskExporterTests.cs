@@ -179,4 +179,107 @@ public class MaskExporterTests
             MaskExporter.CleanupSession(sessionB);
         }
     }
+
+    [Fact]
+    public async Task Export_Feather_Zero_Stays_Binary()
+    {
+        var session = NewSessionId();
+        try
+        {
+            var path = await MaskExporter.ExportAsync(session, "n1", Pattern(8, 6), 8, 6, featherPx: 0);
+            Assert.NotNull(path);
+
+            using var decoded = SKBitmap.Decode(path);
+            Assert.NotNull(decoded);
+            for (var y = 0; y < decoded!.Height; y++)
+            {
+                for (var x = 0; x < decoded.Width; x++)
+                {
+                    Assert.True(decoded.GetPixel(x, y).Red is 0 or 255);
+                }
+            }
+        }
+        finally
+        {
+            MaskExporter.CleanupSession(session);
+        }
+    }
+
+    [Fact]
+    public async Task Export_Feather_Positive_Produces_Gray_Values()
+    {
+        var session = NewSessionId();
+        try
+        {
+            // A solid block in the middle so the blur has an edge to soften.
+            var width = 32;
+            var height = 32;
+            var pixels = new byte[width * height];
+            for (var y = 12; y < 20; y++)
+            {
+                for (var x = 12; x < 20; x++)
+                {
+                    pixels[y * width + x] = 255;
+                }
+            }
+
+            var path = await MaskExporter.ExportAsync(session, "n1", pixels, width, height, featherPx: 5);
+            Assert.NotNull(path);
+
+            using var decoded = SKBitmap.Decode(path);
+            Assert.NotNull(decoded);
+            var hasMid = false;
+            for (var y = 0; y < decoded!.Height; y++)
+            {
+                for (var x = 0; x < decoded.Width; x++)
+                {
+                    var red = decoded.GetPixel(x, y).Red;
+                    if (red is > 0 and < 255)
+                    {
+                        hasMid = true;
+                    }
+                }
+            }
+
+            Assert.True(hasMid);
+        }
+        finally
+        {
+            MaskExporter.CleanupSession(session);
+        }
+    }
+
+    [Fact]
+    public async Task TryLoad_Of_Feathered_Png_Recovers_Hard_Contour()
+    {
+        var session = NewSessionId();
+        try
+        {
+            var width = 32;
+            var height = 32;
+            var pixels = new byte[width * height];
+            for (var y = 12; y < 20; y++)
+            {
+                for (var x = 12; x < 20; x++)
+                {
+                    pixels[y * width + x] = 255;
+                }
+            }
+
+            var path = await MaskExporter.ExportAsync(session, "n1", pixels, width, height, featherPx: 5);
+            Assert.NotNull(path);
+
+            var loaded = await MaskExporter.TryLoadAsync(path);
+            Assert.NotNull(loaded);
+
+            // The reload thresholds back to the hard 50%-contour: only 0 / 255.
+            Assert.All(loaded!.Value.Pixels, value => Assert.True(value is 0 or 255));
+            // The original block center is still painted.
+            Assert.Equal(255, loaded.Value.Pixels[16 * width + 16]);
+        }
+        finally
+        {
+            MaskExporter.CleanupSession(session);
+        }
+    }
 }

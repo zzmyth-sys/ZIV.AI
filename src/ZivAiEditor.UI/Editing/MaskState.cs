@@ -15,8 +15,14 @@ namespace ZivAiEditor.UI.Editing;
 /// </summary>
 public sealed class MaskState
 {
-    /// <summary>Fixed brush / eraser diameter, in image pixels (D6). No size-slider UI.</summary>
-    public const int BrushDiameter = 40;
+    /// <summary>Lowest brush / eraser diameter, in image pixels (slider clamp).</summary>
+    public const int MinBrushDiameter = 5;
+
+    /// <summary>Highest brush / eraser diameter, in image pixels (slider clamp).</summary>
+    public const int MaxBrushDiameter = 200;
+
+    /// <summary>Highest feather radius, in image pixels (slider clamp).</summary>
+    public const int MaxFeatherPx = 25;
 
     /// <summary>Maximum number of undo snapshots kept (D4/R4).</summary>
     public const int MaxUndo = 20;
@@ -31,6 +37,8 @@ public sealed class MaskState
     private int _width;
     private int _height;
     private bool _hasContent;
+    private int _brushDiameter = 40;
+    private int _featherPx;
 
     private readonly List<byte[]> _undo = new();
 
@@ -61,6 +69,30 @@ public sealed class MaskState
 
     /// <summary>True when a mask exists and can be cleared.</summary>
     public bool CanClear => _hasContent;
+
+    /// <summary>
+    /// Brush / eraser diameter in image pixels. Clamped to
+    /// <c>[<see cref="MinBrushDiameter"/>, <see cref="MaxBrushDiameter"/>]</c> so a stray
+    /// slider value can never degenerate the stamp.
+    /// </summary>
+    public int BrushDiameter
+    {
+        get => _brushDiameter;
+        set => _brushDiameter = Math.Clamp(value, MinBrushDiameter, MaxBrushDiameter);
+    }
+
+    /// <summary>
+    /// Feather radius in image pixels applied only for display / export (the live buffer
+    /// stays 0 / 255). Clamped to <c>[0, <see cref="MaxFeatherPx"/>]</c>.
+    /// </summary>
+    public int FeatherPx
+    {
+        get => _featherPx;
+        set => _featherPx = Math.Clamp(value, 0, MaxFeatherPx);
+    }
+
+    /// <summary>True while a stroke is in progress (between begin and end).</summary>
+    public bool IsStrokeActive => _strokeActive;
 
     /// <summary>
     /// (Re)allocates the canvas, clearing the buffer and the undo stack. A zero / negative
@@ -267,7 +299,7 @@ public sealed class MaskState
             return false;
         }
 
-        const double radius = BrushDiameter / 2.0;
+        var radius = BrushDiameter / 2.0;
         var r2 = radius * radius;
         var minX = Math.Max(0, (int)Math.Floor(cx - radius));
         var maxX = Math.Min(_width - 1, (int)Math.Ceiling(cx + radius));

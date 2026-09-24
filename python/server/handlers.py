@@ -200,7 +200,13 @@ def _run_submit(frame_io, task_id, payload, op="inpaint"):
 
 
 def _dispatch_op(model, clip, vae, payload, op, frame_io, task_id):
-    """Route ``submit.op`` to the matching pipeline entry (Step 7 Phase 2)."""
+    """Route ``submit.op`` to the matching pipeline entry (Step 7 Phase 2).
+
+    User / C# masks are read as **grayscale** (0-255) per the revised Z19, so the
+    soft feathered ramp the editor may export reaches the sampler unchanged
+    (``mask_binary=False``). Only the ``outpaint`` path builds its own backend
+    mask (already passed as soft through ``run_outpaint``).
+    """
     callbacks = {
         "on_progress": _make_sampling_progress(frame_io, task_id),
         "on_preview": _make_preview(frame_io, task_id),
@@ -209,9 +215,9 @@ def _dispatch_op(model, clip, vae, payload, op, frame_io, task_id):
     if op == "outpaint":
         return pipeline.run_outpaint(model, clip, vae, payload, **callbacks)
     if op in ("", "inpaint", "t2i"):
-        return pipeline.run(model, clip, vae, payload, **callbacks)
+        return pipeline.run(model, clip, vae, payload, mask_binary=False, **callbacks)
     _LOG.warning("unknown op %r; falling back to inpaint", op)
-    return pipeline.run(model, clip, vae, payload, **callbacks)
+    return pipeline.run(model, clip, vae, payload, mask_binary=False, **callbacks)
 
 
 def _configure_pre_sampling_hooks(payload):

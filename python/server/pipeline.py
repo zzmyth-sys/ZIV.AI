@@ -2,9 +2,11 @@
 
 Qwen-Image-2.1 text encoding -> ModelSamplingAuraFlow(shift=3.1) ->
 ``comfy.sample.sample`` (euler / simple / cfg=1.0) -> VAE decode -> PNG.
-An optional binary mask (Z19) is applied as the sampler noise mask and
-reference latents inject the source image for image editing. Output is always
-a new file (Z24); the source is never written.
+An optional mask (Z19, revised) is applied as the sampler noise mask and
+reference latents inject the source image for image editing. User / C# masks
+are read as grayscale (0-255) by the handlers; the backend-generated outpaint
+mask is soft too. Output is always a new file (Z24); the source is never
+written.
 
 OOM fallback (Step 4): the request is retried at MAX_RESOLUTION, then down the
 RESOLUTION_FALLBACK list, freeing caches between attempts.
@@ -46,8 +48,11 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
     the sampler callback (same thread). ``poll_cancel`` is drained once per step
     so a `cancel` frame can raise the interrupt flag mid-sampling (Step 2.4).
 
-    ``mask_binary`` keeps the Z19 rule for user/C# masks (0 / 255); the outpaint
-    path passes ``False`` so its backend-generated feathered mask stays soft.
+    ``mask_binary`` thresholds a mask to 0 / 1 when ``True``. It defaults to
+    ``True`` for the legacy contract, but the handlers now pass ``False`` for
+    user / C# masks (revised Z19: user-explicit feather is exported as
+    grayscale and must reach the sampler). The outpaint path also passes
+    ``False`` so its backend-generated feathered mask stays soft.
 
     Retries at lower resolutions on CUDA OOM (Step 4).
     """
@@ -225,7 +230,9 @@ def encode_prompt(clip, vae, prompt, image_path, mask_path, resolution=None, mod
 
     ``spec`` (Step 6.5) is a normalized resolution dict; when omitted the legacy
     ``resolution`` / ``mode`` arguments are used (backward compatible).
-    ``mask_binary`` is passed through to ``_encode`` (outpaint uses a soft mask).
+    ``mask_binary`` is passed through to ``_encode``: ``True`` thresholds the
+    mask to 0 / 1; ``False`` (handlers for user / C# masks, outpaint) keeps the
+    soft 0..1 ramp.
     ``additional_images`` (Step 9C.5-D) are the ordered reference images after the main.
     """
     return _encode(
@@ -427,8 +434,8 @@ def _load_mask_tensor(path, binary=True):
     image = Image.open(path).convert("L")
     array = np.asarray(image).astype(np.float32) / 255.0
     if binary:
-        array = (array >= 0.5).astype(np.float32)  # Z19: user/C# masks are binary 0 / 1
-    # binary=False keeps the soft 0..1 ramp of a backend-generated outpaint mask.
+        array = (array >= 0.5).astype(np.float32)  # legacy: threshold a binary mask to 0 / 1
+    # binary=False keeps the soft 0..1 ramp (user feather OR backend outpaint mask).
     return torch.from_numpy(array)[None, ...]  # [1,H,W]
 
 

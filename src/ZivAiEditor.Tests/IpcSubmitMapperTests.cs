@@ -93,4 +93,24 @@ public class IpcSubmitMapperTests
         Assert.NotNull(request.Payload.AdditionalImages);
         Assert.Empty(request.Payload.AdditionalImages);
     }
+
+    [Fact]
+    public void Inpaint_Maps_MaskPath()
+    {
+        // Step 9C.7-B: the mask PNG path still maps to the IPC payload; FeatherPx is a
+        // C#-only MaskSpec field and is intentionally not an IPC field.
+        var request = IpcSubmitMapper.BuildSubmitRequest(
+            "r",
+            "t",
+            new EditRequest
+            {
+                Op = EditOps.Inpaint,
+                ImagePath = "in.png",
+                MaskPath = "mask.png",
+                Prompt = "fix",
+            });
+
+        Assert.Equal("inpaint", request.Op);
+        Assert.Equal("mask.png", request.Payload.MaskPath);
+    }
 }

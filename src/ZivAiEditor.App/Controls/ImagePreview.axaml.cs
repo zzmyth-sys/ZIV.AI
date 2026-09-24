@@ -5,7 +5,6 @@ using Avalonia.Controls;
 using Avalonia.Controls.Chrome;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
-using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -48,12 +47,6 @@ public partial class ImagePreview : Window
     private Bitmap? _bitmap;
     private string? _path;
     private int _generation;
-
-    private bool _pressed;
-    private bool _dragged;
-    private Point _pressPoint;
-    private Point _lastPanPoint;
-    private DateTime _lastClickAt = DateTime.MinValue;
 
     public ImagePreview()
     {
@@ -203,6 +196,7 @@ public partial class ImagePreview : Window
 
         InitCrop();
         InitMask();
+        InitPointerHandlers();
 
         // Right-slot title-bar buttons (reset view / compare). Marked "User" so the OS
         // treats them as client content inside the caption area.
@@ -237,10 +231,6 @@ public partial class ImagePreview : Window
 
         if (_box is not null)
         {
-            _box.AddHandler(PointerWheelChangedEvent, OnWheel, RoutingStrategies.Bubble, handledEventsToo: true);
-            _box.AddHandler(PointerPressedEvent, OnPressed, RoutingStrategies.Bubble, handledEventsToo: true);
-            _box.AddHandler(PointerMovedEvent, OnMoved, RoutingStrategies.Bubble, handledEventsToo: true);
-            _box.AddHandler(PointerReleasedEvent, OnReleased, RoutingStrategies.Bubble, handledEventsToo: true);
             ((AvaloniaObject)_box).PropertyChanged += OnBoxPropertyChanged;
         }
 
@@ -379,163 +369,6 @@ public partial class ImagePreview : Window
         _box.Cursor = new Cursor(type);
     }
 
-    private void OnWheel(object? sender, PointerWheelEventArgs e)
-    {
-        if (_box is null || !_model.HasImage || e.Delta.Y == 0)
-        {
-            return;
-        }
-
-        var point = e.GetPosition(_box);
-        _model.SetViewport(ViewportWidth(), ViewportHeight());
-        _model.ZoomBy(e.Delta.Y > 0 ? WheelStep : 1.0 / WheelStep, point.X, point.Y);
-        ApplyModel();
-        e.Handled = true;
-    }
-
-    private void OnPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (_box is null || !_model.HasImage)
-        {
-            return;
-        }
-
-        if (!e.GetCurrentPoint(_box).Properties.IsLeftButtonPressed)
-        {
-            return;
-        }
-
-        _pressPoint = e.GetPosition(_box);
-        _lastPanPoint = _pressPoint;
-
-        // Crop mode owns the pointer: build / move / resize the selection (no pan).
-        if (IsCropActive)
-        {
-            CropOnPressed(_pressPoint, e);
-            return;
-        }
-
-        // Mask mode owns the pointer: stamp the brush / eraser (no pan).
-        if (IsMaskActive)
-        {
-            MaskOnPressed(_pressPoint, e);
-            return;
-        }
-
-        // In compare mode a press near the divider starts a divider drag instead of a pan.
-        if (_compareState.IsCompareMode && IsNearDivider(_pressPoint.X))
-        {
-            _draggingDivider = true;
-            _pressed = true;
-            _dragged = false;
-            e.Pointer.Capture(_box);
-            return;
-        }
-
-        _pressed = true;
-        _dragged = false;
-        e.Pointer.Capture(_box);
-    }
-
-    private void OnMoved(object? sender, PointerEventArgs e)
-    {
-        if (_box is null)
-        {
-            return;
-        }
-
-        var point = e.GetPosition(_box);
-
-        if (IsCropActive)
-        {
-            CropOnMoved(point);
-            return;
-        }
-
-        if (IsMaskActive)
-        {
-            MaskOnMoved(point);
-            return;
-        }
-
-        if (!_pressed)
-        {
-            return;
-        }
-
-        if (_draggingDivider)
-        {
-            SetDividerFromViewport(point.X);
-            return;
-        }
-
-        if (!_dragged && Distance(point, _pressPoint) > DragThreshold)
-        {
-            _dragged = true;
-        }
-
-        if (!_dragged)
-        {
-            return;
-        }
-
-        _model.PanBy(point.X - _lastPanPoint.X, point.Y - _lastPanPoint.Y);
-        _lastPanPoint = point;
-        ApplyModel();
-    }
-
-    private void OnReleased(object? sender, PointerReleasedEventArgs e)
-    {
-        if (_box is null)
-        {
-            return;
-        }
-
-        if (IsCropActive)
-        {
-            CropOnReleased(e);
-            return;
-        }
-
-        if (IsMaskActive)
-        {
-            MaskOnReleased(e);
-            return;
-        }
-
-        if (!_pressed)
-        {
-            return;
-        }
-
-        _pressed = false;
-        e.Pointer.Capture(null);
-
-        if (_draggingDivider)
-        {
-            _draggingDivider = false;
-            return;
-        }
-
-        // A drag is a pan; a double click (no drag) toggles fit / 100%.
-        if (_dragged)
-        {
-            return;
-        }
-
-        var now = DateTime.UtcNow;
-        if (now - _lastClickAt < DoubleClickWindow)
-        {
-            _lastClickAt = DateTime.MinValue;
-            _model.ToggleFitActual();
-            ApplyModel();
-        }
-        else
-        {
-            _lastClickAt = now;
-        }
-    }
-
     private void ShowEmpty(string message)
     {
         _model.ClearImage();
@@ -590,12 +423,5 @@ public partial class ImagePreview : Window
         DisposeBitmap();
         DisposeParentBitmap();
         ResetMask();
-    }
-
-    private static double Distance(Point a, Point b)
-    {
-        var dx = a.X - b.X;
-        var dy = a.Y - b.Y;
-        return Math.Sqrt(dx * dx + dy * dy);
     }
 }

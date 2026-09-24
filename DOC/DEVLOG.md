@@ -3736,3 +3736,78 @@ light-rip（Large，含前置 / 后置复审）。
 - 未改 `python/server/*` / `contracts/ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；无新 NuGet；
   未改 chrome / 项目列表 / 分辨率选择器 / 图片导入 / 多图管线。
 - `FROZEN.md` 尾部追加 9C.7（追加式契约 + 持久化字段 + 语义）；`ACCEPTANCE.MD` 追加 Step 9C.7。
+
+---
+
+## [Step 9C.7-B] - 2026-09-24：遮罩增强（笔刷圆 / 浮动条 / 中键平移 / 灰度羽化）
+
+### 目标
+
+在 9C.7 遮罩绘制之上加 4 项：A 笔刷圆光标、B 浮动工具条、C 中键平移、D 灰度羽化（方案 B，
+经 GPU 实测确认模型接受灰度）。流程：只读调查（8 项）→ 用户裁决 → light-rip（Large，含前置 / 后置复审 + 独立验证）。
+
+### 用户裁决
+
+- light-rip Large；模糊 = 3 趟可分离 box blur；显示 / 导出共用同一纯函数。
+- D2 通道 = 8-bit 灰度 L（`FeatherPx=0` 时仍只含 0/255）。
+- Z19 授权修订（尾部追加，不改原文）：C# 可导出用户显式羽化的灰度 PNG；仍禁止自动膨胀 / 智能补边。
+- 笔刷 5–200（默认 40）；羽化 0–25（默认 0）+ 提示「羽化过大会削弱编辑强度」；中键平移与左键一致；浮条顶部居中。
+- R1：同时按键行为——先左后中 → 中键忽略至左释放；先中后左 → 左键忽略至中释放；每次释放只结束自己的模式。
+
+### 前置只读调查（8 项，节选）
+
+- `MaskState.BrushDiameter` 为 `const`（需改属性）；无羽化字段。
+- `MaskOverlay` 无笔刷圆 / 无指针位置；`Render` 在 `!HasContent` 时提前返回（圆需在其外绘制）。
+- `ImagePreview` 指针事件仅认左键，中键未处理；`ImagePreview.axaml.cs` 已 **601 行**（Z8 超标）。
+- Python `_load_mask_tensor` 唯一定义 :422、唯一调用 :345；`handlers._dispatch_op` 的 `pipeline.run` 未传
+  `mask_binary` → 走默认 True（阈值化）。
+- `contracts/ipc-protocol.md` `mask_path` 语义为「二值 PNG」；IPC payload 仅 `mask_path`（无 feather）。
+
+### 做了什么
+
+- **纯逻辑**：`MaskState` `BrushDiameter` const→属性（钳制 5–200）+ `FeatherPx`（0–25）+ `IsStrokeActive`；
+  新增 `PointerArbiter`（R1 单属主）；新增 `MaskFeather.Apply`（3 趟可分离 box blur，radius 0 → 克隆）。
+- **App**：`MaskOverlay` 增笔刷圆（视口坐标，半径 = 直径×zoom/2，空遮罩也画）+ 羽化显示（与导出同函数，缓存）；
+  `MaskToolbar.axaml(.cs)`（顶部居中浮条，滑块 + 提示）；`ImagePreview.Pointer.cs`（从主文件拆出指针处理，
+  主文件 601→359 行；中键平移 + R1 + 悬停圆 + PointerExited）；`ImagePreview.Mask.cs` 接线浮条 / 恢复羽化 / 导出传羽化。
+- **Contracts**：`MaskSpec.FeatherPx`（追加）。
+- **Agent**：`SessionStore`/`SessionLoader` 持久化 `feather_px`（追加，v1 兼容）。
+- **Python**：`handlers._dispatch_op` 两处 `pipeline.run` 改 `mask_binary=False`；`pipeline.py` 仅注释 / 文档更新。
+- **测试**：`MaskStateTests` / `MaskFeatherTests` / `PointerArbiterTests` / `MaskExporterTests` /
+  `SessionStoreTests` / `SessionLoaderTests` / `IpcSubmitMapperTests` 更新 / 新增；`python/server/test_mask_feather.py`（纯 CPU）。
+
+### 关键决策
+
+1. **缓冲保持硬边**：羽化为显示 / 导出派生；重开时阈值回硬边 + `FeatherPx` 恢复后重应用（三处一致）。
+2. **box blur**：O(n) 与半径无关 → 描边 / 滑条实时重算不卡；真高斯 σ=25 约 0.3s 会卡。
+3. **R1 单属主 `PointerArbiter`**：可单测；中键平移在所有模式（含遮罩）生效。
+4. **Z8 修复**：顺带把指针处理拆到 `ImagePreview.Pointer.cs`，主文件回到 359 行。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 受影响类（MaskState / MaskFeather / PointerArbiter / MaskExporter / SessionStore / SessionLoader /
+  CommandParser / Executor / IpcSubmitMapper）→ **98 通过 / 0 失败**。
+- `python -m py_compile python/server/{handlers,pipeline}.py` OK；
+  `python -m unittest discover -p test_mask_feather.py`（cwd `python/server`）→ **3 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）；GPU 验收待用户确认空闲 + 同意。
+
+### 复审修订（2026-09-24）
+
+- **P1（中键平移失效）**：后置复审发现 `OnMoved` 在 `IsMaskActive` 分支提前 return，遮罩模式下中键
+  平移不生效；已将 `_panMiddleDown` 分支前移到 crop / mask 分支之前。复审 re-review 通过。
+- **P0（前置复审）**：确认「缓冲硬边 + 羽化派生」设计并显式文档化；补 `mask_path` 语义 / FROZEN Z19 修订。
+
+### 遗留项
+
+- **遮罩脏标记改内容哈希**（9C.7 遗留）。
+- **羽化视觉与后端一致性 GPU 验证**（待用户确认 GPU 空闲 + 明确同意）。
+- **App 层指针路由无自动化测试**（`PointerArbiter` 已单测）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 备注
+
+- 改 `python/server/*`（仅 `mask_binary=False` 路径 + 注释）+ `contracts/ipc-protocol.md`（语义）；
+  未改 `C:\AI\ComfyUI_PIC`；无新 NuGet / Python 依赖；未改 chrome / 项目列表 / 分辨率选择器 / 图片导入 / 多图 / 裁切。
+- 环境备注：本机有用户进程 `group_webui.py` 占用约 6.8 GB 显存，GPU 非空闲；`IpcIdleUnloadTests` 等
+  GPU 测试在此环境下失败，**不属本步影响面**（Z29 / Z30）。

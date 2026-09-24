@@ -298,6 +298,7 @@ public sealed class SessionStore
                     Height = maskSpec.Height,
                     IsBinary = maskSpec.IsBinary,
                     Invert = maskSpec.Invert,
+                    FeatherPx = maskSpec.FeatherPx,
                 };
             }
 
@@ -474,6 +475,13 @@ internal sealed class SessionFileMask
 
     [JsonPropertyName("invert")]
     public bool Invert { get; init; }
+
+    /// <summary>
+    /// User-explicit feather radius in image pixels (Step 9C.7-B), appended at format
+    /// version 1. Absent in older files → default <c>0</c> (hard mask).
+    /// </summary>
+    [JsonPropertyName("feather_px")]
+    public int FeatherPx { get; init; }
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]

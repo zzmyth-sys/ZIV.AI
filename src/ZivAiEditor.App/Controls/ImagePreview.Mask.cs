@@ -41,6 +41,7 @@ public partial class ImagePreview
 {
     private MaskState? _mask;
     private MaskOverlay? _maskOverlay;
+    private MaskToolbar? _maskToolbar;
     private string? _maskSessionId;
     private string? _maskNodeId;
     private MaskSpec? _nodeMask;
@@ -70,6 +71,13 @@ public partial class ImagePreview
         _maskOverlay?.Attach(_model);
         _maskOverlay?.SetState(_mask);
 
+        _maskToolbar = this.FindControl<MaskToolbar>("PART_MaskToolbar");
+        if (_maskToolbar is not null)
+        {
+            _maskToolbar.BrushSizeChanged += OnToolbarBrushSizeChanged;
+            _maskToolbar.FeatherChanged += OnToolbarFeatherChanged;
+        }
+
         _mask.Changed += (_, _) => OnMaskChanged();
 
         if (_toolbar is not null)
@@ -80,6 +88,47 @@ public partial class ImagePreview
 
         _tools.StateChanged += (_, _) => UpdateMaskMode();
         UpdateMaskMode();
+    }
+
+    /// <summary>Pushes the toolbar sliders from the live <see cref="MaskState"/> (no events).</summary>
+    private void SyncMaskToolbar()
+    {
+        if (_mask is null || _maskToolbar is null)
+        {
+            return;
+        }
+
+        _maskToolbar.SetBrushSize(_mask.BrushDiameter);
+        _maskToolbar.SetFeather(_mask.FeatherPx);
+        _maskOverlay?.SetBrush(_mask.BrushDiameter);
+    }
+
+    private void OnToolbarBrushSizeChanged(object? sender, int diameterPx)
+    {
+        if (_mask is null)
+        {
+            return;
+        }
+
+        _mask.BrushDiameter = diameterPx;
+        _maskOverlay?.SetBrush(_mask.BrushDiameter);
+
+        // The brush circle follows the cursor; repaint even when no mask exists yet.
+        _maskOverlay?.InvalidateVisual();
+    }
+
+    private void OnToolbarFeatherChanged(object? sender, int featherPx)
+    {
+        if (_mask is null)
+        {
+            return;
+        }
+
+        _mask.FeatherPx = featherPx;
+
+        // Feather changes only display / export; force a bitmap rebuild and re-export.
+        _maskOverlay?.MarkDirty();
+        ScheduleMaskExport();
     }
 
     /// <summary>
@@ -115,11 +164,27 @@ public partial class ImagePreview
                 _maskOverlay.IsVisible = true;
             }
 
+            if (_maskToolbar is not null)
+            {
+                _maskToolbar.IsVisible = true;
+            }
+
+            SyncMaskToolbar();
             RefreshMaskCanvas();
         }
-        else if (_maskOverlay is not null)
+        else
         {
-            _maskOverlay.IsVisible = false;
+            if (_maskOverlay is not null)
+            {
+                _maskOverlay.IsVisible = false;
+            }
+
+            if (_maskToolbar is not null)
+            {
+                _maskToolbar.IsVisible = false;
+            }
+
+            _maskOverlay?.ClearPointer();
         }
 
         _maskOverlay?.InvalidateVisual();
@@ -150,6 +215,9 @@ public partial class ImagePreview
 
         if (_mask.Width != width || _mask.Height != height)
         {
+            // Restore the node's user-explicit feather before resizing (defaults to 0).
+            _mask.FeatherPx = _nodeMask?.FeatherPx ?? 0;
+
             _suppressMaskExport = true;
             try
             {
@@ -170,6 +238,7 @@ public partial class ImagePreview
             }
         }
 
+        SyncMaskToolbar();
         _tools.NotifyUndoStackChanged(_mask.CanUndo);
         _tools.NotifyMaskChanged(_mask.CanClear);
     }
@@ -213,6 +282,9 @@ public partial class ImagePreview
 
         if (_mask is not null)
         {
+            // Restore the node's stored feather (0 when the node has no mask / old project).
+            _mask.FeatherPx = mask?.FeatherPx ?? 0;
+
             _suppressMaskExport = true;
             try
             {
@@ -227,6 +299,7 @@ public partial class ImagePreview
             _tools.NotifyMaskChanged(_mask.CanClear);
         }
 
+        SyncMaskToolbar();
         _maskOverlay?.MarkDirty();
     }
 
@@ -315,6 +388,7 @@ public partial class ImagePreview
                 Height = _mask.Height,
                 IsBinary = true,
                 Invert = false,
+                FeatherPx = _mask.FeatherPx,
             };
         }
 
@@ -328,7 +402,8 @@ public partial class ImagePreview
             var pixels = _mask.CopyPixels();
             var width = _mask.Width;
             var height = _mask.Height;
-            _maskWrite = RunMaskExportAsync(_maskWrite, sessionId, nodeId, pixels, width, height);
+            var featherPx = _mask.FeatherPx;
+            _maskWrite = RunMaskExportAsync(_maskWrite, sessionId, nodeId, pixels, width, height, featherPx);
         }
     }
 
@@ -338,7 +413,8 @@ public partial class ImagePreview
         string nodeId,
         byte[] pixels,
         int width,
-        int height)
+        int height,
+        int featherPx)
     {
         try
         {
@@ -351,7 +427,7 @@ public partial class ImagePreview
 
         try
         {
-            await MaskExporter.ExportAsync(sessionId, nodeId, pixels, width, height).ConfigureAwait(false);
+            await MaskExporter.ExportAsync(sessionId, nodeId, pixels, width, height, featherPx).ConfigureAwait(false);
         }
         catch (Exception)
         {
