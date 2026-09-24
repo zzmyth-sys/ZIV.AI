@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -39,9 +40,28 @@ public partial class MainWindow
             _shell.ApplyChrome(preview);
             preview.Closed += async (_, _) =>
             {
+                MaskDiagnostics.Log(
+                    $"[close] preview closed edited={_maskEditedInPreview} busy={_vm.IsBusy} closing={_closing}");
+
                 // S2: wait for any in-flight mask export before dropping the reference, so a
                 // save / close right after a stroke still sees the PNG on disk.
                 await FlushPendingMaskAsync();
+
+                // R3.1: the bubble overlay is refreshed exactly once, here, and only when this
+                // preview session edited a mask. No edit -> no refresh (no flicker); app
+                // shutdown skips the pointless rebuild.
+                if (_maskEditedInPreview)
+                {
+                    _maskEditedInPreview = false;
+                    if (!_vm.IsBusy && !_closing)
+                    {
+                        MaskDiagnostics.Log("[rebuild] current=" + _vm.Session.CurrentNodeId
+                            + " path=" + string.Join(",", _vm.Session.GetPathToCurrent()
+                                .Select(n => n.NodeId[..6] + ":" + (n.Mask is null ? "-" : "M"))));
+                        _vm.RebuildContext();
+                    }
+                }
+
                 if (ReferenceEquals(_imagePreview, preview))
                 {
                     _imagePreview = null;

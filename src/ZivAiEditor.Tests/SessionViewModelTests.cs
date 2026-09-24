@@ -797,12 +797,14 @@ public class SessionViewModelTests
     }
 
     [Fact]
-    public void SetNodeMask_Shows_Mask_On_The_Bubble_And_Clears_It()
+    public void SetNodeMask_Defers_The_Bubble_Update_To_RebuildContext()
     {
         var session = new EditSession();
         var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
         var rootId = session.CurrentNodeId!;
+
+        Assert.Null(vm.Messages.Single(m => m.Role == ChatRole.System && m.ImagePath == Root).MaskPath);
 
         vm.SetNodeMask(rootId, new MaskSpec
         {
@@ -812,12 +814,22 @@ public class SessionViewModelTests
             FeatherPx = 6,
         });
 
+        // R3.1: a stroke end writes the node but does NOT rebuild the chat stream.
+        Assert.Null(vm.Messages.Single(m => m.Role == ChatRole.System && m.ImagePath == Root).MaskPath);
+        Assert.NotNull(session.GetHistory().Single(n => n.NodeId == rootId).Mask);
+
+        // The caller (preview close) rebuilds once; the bubble then carries the overlay.
+        vm.RebuildContext();
+
         var bubble = vm.Messages.Single(m => m.Role == ChatRole.System && m.ImagePath == Root);
         Assert.Equal(@"C:\img\m.png", bubble.MaskPath);
         Assert.Equal(6, bubble.MaskFeatherPx);
 
+        // Clearing defers too: node is updated, bubble updates only after a rebuild.
         vm.SetNodeMask(rootId, null);
+        Assert.NotNull(vm.Messages.Single(m => m.Role == ChatRole.System && m.ImagePath == Root).MaskPath);
 
+        vm.RebuildContext();
         var cleared = vm.Messages.Single(m => m.Role == ChatRole.System && m.ImagePath == Root);
         Assert.Null(cleared.MaskPath);
         Assert.Equal(0, cleared.MaskFeatherPx);

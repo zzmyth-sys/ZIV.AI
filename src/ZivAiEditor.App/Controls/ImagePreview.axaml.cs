@@ -362,11 +362,13 @@ public partial class ImagePreview : Window
             return;
         }
 
+        // R2: the mask tools show ONLY the self-drawn brush circle (MaskOverlay), so the system
+        // cursor is hidden for them. Crop keeps Cross (its rectangle needs a precise pointer).
         var type = _tools.CurrentTool switch
         {
             ToolMode.Crop => StandardCursorType.Cross,
-            ToolMode.MaskBrush => StandardCursorType.Cross,
-            ToolMode.Eraser => StandardCursorType.Hand,
+            ToolMode.MaskBrush => StandardCursorType.None,
+            ToolMode.Eraser => StandardCursorType.None,
             _ => StandardCursorType.Arrow,
         };
 
@@ -430,6 +432,7 @@ public partial class ImagePreview : Window
 
     private void Cleanup()
     {
+        MaskDiagnostics.Log("[close] ImagePreview cleanup");
         DisposeBitmap();
         DisposeParentBitmap();
         ResetMask();

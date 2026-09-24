@@ -231,21 +231,16 @@ public sealed partial class SessionViewModel
     /// <summary>
     /// Sets (or clears) the hand-drawn mask of one node (Step 9C.7) and refreshes the
     /// history. A mask is a node property, not an edit step: no node is added, and the
-    /// displayed pipeline image is unchanged, so the chat stream is not rebuilt. A no-op
-    /// when the node is unknown.
+    /// displayed pipeline image is unchanged.
+    ///
+    /// <para><b>R3.1:</b> the chat stream is deliberately <b>not</b> rebuilt here. The bubble
+    /// overlay is refreshed once when the preview window closes (the caller's job), so a stroke
+    /// end never rebuilds the stream. A no-op when the node is unknown.</para>
     /// </summary>
     public void SetNodeMask(string nodeId, MaskSpec? mask)
     {
         _writer.SetNodeMask(nodeId, mask);
         RefreshHistory();
-
-        // E1: the node's chat bubble shows the mask visualization (original + overlay), so a
-        // mask change must re-render the stream. Skipped while generating, to avoid clearing
-        // the in-flight bubble (mirrors SetNodeCrop).
-        if (!IsBusy)
-        {
-            RebuildContext();
-        }
     }
 
     /// <summary>

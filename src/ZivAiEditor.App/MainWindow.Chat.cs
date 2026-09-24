@@ -160,6 +160,10 @@ public partial class MainWindow
             {
                 MaskDiagnostics.Log($"[overlay] skip (file missing): {maskPath}");
             }
+            else
+            {
+                MaskDiagnostics.Log("[overlay] skip: maskPath null");
+            }
 
             panel.Children.Add(image);
             return;

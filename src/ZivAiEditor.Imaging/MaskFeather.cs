@@ -26,7 +26,12 @@ namespace ZivAiEditor.Imaging;
 /// </summary>
 internal static class MaskFeather
 {
-    /// <summary>Upper bound on the feather radius, in pixels (slider / setter clamp).</summary>
+    /// <summary>
+    /// Algorithmic upper bound on the feather radius, in pixels; this pure function supports
+    /// up to 25px. The <b>product</b> UI caps the user-facing value at 15px
+    /// (<c>MaskState.MaxFeatherPx</c>, E8), so the two values intentionally differ — keep this
+    /// at the algorithm's capability and do not raise the UI cap to match (M-9).
+    /// </summary>
     public const int MaxRadiusPx = 25;
 
     /// <summary>

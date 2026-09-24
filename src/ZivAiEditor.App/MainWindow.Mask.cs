@@ -22,23 +22,29 @@ public partial class MainWindow
     private Task? _pendingMaskExport;
 
     /// <summary>
+    /// True when the current preview session produced at least one mask change (R3.1). The chat
+    /// bubble is refreshed once when the preview closes, not per stroke.
+    /// </summary>
+    private bool _maskEditedInPreview;
+
+    /// <summary>
     /// Stores a drawn mask (or its clear) on the node shown in the preview — no node is
     /// appended. The history refresh (inside the view model) reflects the updated node.
-    /// Step E1: the bubble shows the mask visualization, which reads the exported PNG, so the
-    /// flush is awaited and the chat re-rendered once the file has landed.
+    ///
+    /// <para><b>R3.1:</b> the chat stream is <b>not</b> rebuilt on a stroke end (that caused a
+    /// visible stall). The node property is written, the PNG export is flushed, and the bubble
+    /// overlay is refreshed once when the preview window closes.</para>
     /// </summary>
     private async void OnPreviewMaskCompleted(object? sender, MaskCompletedEventArgs e)
     {
-        _vm.SetNodeMask(e.NodeId, e.Mask);
+        MaskDiagnostics.Log(
+            $"[mask] completed node={e.NodeId} spec={e.Mask?.MaskImagePath ?? "null"} current={_vm.Session.CurrentNodeId}");
 
-        // The PNG export is chained behind earlier strokes; wait for it so the bubble overlay
-        // can decode the finished file, then refresh the stream (the in-view-model rebuild may
-        // have run before the file existed).
+        _vm.SetNodeMask(e.NodeId, e.Mask);
+        _maskEditedInPreview = true;
+
+        // Chain behind earlier strokes so the PNG is on disk before the close-time refresh.
         await FlushPendingMaskAsync();
-        if (!_vm.IsBusy)
-        {
-            _vm.RebuildContext();
-        }
     }
 
     /// <summary>Keeps the latest chained export at window level so a flush can always await it (S2).</summary>

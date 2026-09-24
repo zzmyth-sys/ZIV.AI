@@ -47,7 +47,10 @@ public partial class ImagePreview
     private MaskSpec? _nodeMask;
     private Task _maskWrite = Task.CompletedTask;
     private bool _maskPointerDown;
-    private bool _suppressMaskExport;
+    // Suppression depth (R3.2): a counter, not a bool, so nested suppressions are safe. A bool
+    // was cleared early by the inner RefreshMaskCanvas finally during ResetMask, which leaked a
+    // Null (empty) mask commit on close and wiped the node's mask.
+    private int _suppressMaskExportDepth;
     private int _maskLoadGeneration;
     private bool _maskModeActive;
 
@@ -69,9 +72,6 @@ public partial class ImagePreview
 
     /// <summary>The mask state (diagnostics / tests).</summary>
     public MaskState? Mask => _mask;
-
-    /// <summary>Awaits the last scheduled mask export (called before a send reads the mask).</summary>
-    public Task FlushMaskAsync() => _maskWrite;
 
     /// <summary>True when the active tool draws on the mask.</summary>
     private bool IsMaskActive => _tools.CurrentTool is ToolMode.MaskBrush or ToolMode.Eraser;
@@ -110,6 +110,24 @@ public partial class ImagePreview
 
         _tools.StateChanged += (_, _) => UpdateMaskMode();
         UpdateMaskMode();
+    }
+
+    /// <summary>
+    /// R3.3: the mask overlay is visible whenever the node has a mask (stored or just painted)
+    /// <b>or</b> a mask tool is active — independent of the tool. It only decides whether the
+    /// overlay is <b>shown</b>, never whether it can be edited (the toolbar stays tool-gated).
+    /// Keeping it visible for a stored mask (even before its PNG loads) avoids a flash.
+    /// </summary>
+    private void UpdateMaskOverlayVisibility()
+    {
+        if (_maskOverlay is null)
+        {
+            return;
+        }
+
+        _maskOverlay.IsVisible = IsMaskActive
+            || (_mask?.HasContent ?? false)
+            || _nodeMask is not null;
     }
 
     /// <summary>Pushes the toolbar sliders from the live <see cref="MaskState"/> (no events).</summary>
@@ -183,11 +201,6 @@ public partial class ImagePreview
                 LoadImage(_displayPath);
             }
 
-            if (_maskOverlay is not null)
-            {
-                _maskOverlay.IsVisible = true;
-            }
-
             if (_maskToolbar is not null)
             {
                 _maskToolbar.IsVisible = true;
@@ -198,11 +211,6 @@ public partial class ImagePreview
         }
         else
         {
-            if (_maskOverlay is not null)
-            {
-                _maskOverlay.IsVisible = false;
-            }
-
             if (_maskToolbar is not null)
             {
                 _maskToolbar.IsVisible = false;
@@ -211,6 +219,8 @@ public partial class ImagePreview
             _maskOverlay?.ClearPointer();
         }
 
+        // R3.3: overlay visibility no longer follows the tool; it follows mask presence.
+        UpdateMaskOverlayVisibility();
         _maskOverlay?.InvalidateVisual();
 
         // E2=A: entering a mask tool tells the App to make the previewed node current.
@@ -231,7 +241,8 @@ public partial class ImagePreview
             return;
         }
 
-        if (!IsMaskActive && !_mask.HasImage)
+        // R3.3: still size / load when the node carries a stored mask, even if no tool is active.
+        if (!IsMaskActive && !_mask.HasImage && _nodeMask is null)
         {
             return;
         }
@@ -248,14 +259,14 @@ public partial class ImagePreview
             // Restore the node's user-explicit feather before resizing (defaults to 0).
             _mask.FeatherPx = _nodeMask?.FeatherPx ?? 0;
 
-            _suppressMaskExport = true;
+            _suppressMaskExportDepth++;
             try
             {
                 _mask.SetCanvas(width, height);
             }
             finally
             {
-                _suppressMaskExport = false;
+                _suppressMaskExportDepth--;
             }
 
             var stored = _nodeMask;
@@ -271,6 +282,7 @@ public partial class ImagePreview
         SyncMaskToolbar();
         _tools.NotifyUndoStackChanged(_mask.CanUndo);
         _tools.NotifyMaskChanged(_mask.CanClear);
+        UpdateMaskOverlayVisibility();
     }
 
     private async Task LoadMaskAsync(string path, int width, int height)
@@ -287,17 +299,18 @@ public partial class ImagePreview
             return;
         }
 
-        _suppressMaskExport = true;
+        _suppressMaskExportDepth++;
         try
         {
             _mask.LoadFrom(data.Pixels, data.Width, data.Height);
         }
         finally
         {
-            _suppressMaskExport = false;
+            _suppressMaskExportDepth--;
         }
 
         _maskOverlay?.MarkDirty();
+        UpdateMaskOverlayVisibility();
     }
 
     /// <summary>
@@ -315,14 +328,14 @@ public partial class ImagePreview
             // Restore the node's stored feather (0 when the node has no mask / old project).
             _mask.FeatherPx = mask?.FeatherPx ?? 0;
 
-            _suppressMaskExport = true;
+            _suppressMaskExportDepth++;
             try
             {
                 _mask.SetCanvas(0, 0);
             }
             finally
             {
-                _suppressMaskExport = false;
+                _suppressMaskExportDepth--;
             }
 
             _tools.NotifyUndoStackChanged(_mask.CanUndo);
@@ -331,6 +344,7 @@ public partial class ImagePreview
 
         SyncMaskToolbar();
         _maskOverlay?.MarkDirty();
+        UpdateMaskOverlayVisibility();
     }
 
     // --- Pointer routing (called by the main partial's handlers) ---------------
@@ -399,6 +413,8 @@ public partial class ImagePreview
         {
             _maskOverlay.PatchRegion(_mask, region.X, region.Y, region.Width, region.Height);
         }
+
+        UpdateMaskOverlayVisibility();
     }
 
     /// <summary>
@@ -416,6 +432,7 @@ public partial class ImagePreview
         }
 
         ScheduleMaskExport();
+        UpdateMaskOverlayVisibility();
     }
 
     /// <summary>
@@ -425,7 +442,7 @@ public partial class ImagePreview
     /// </summary>
     private void ScheduleMaskExport()
     {
-        if (_suppressMaskExport || _mask is null || _maskSessionId is null || _maskNodeId is null)
+        if (_suppressMaskExportDepth > 0 || _mask is null || _maskSessionId is null || _maskNodeId is null)
         {
             return;
         }
@@ -507,14 +524,14 @@ public partial class ImagePreview
 
         if (_mask is not null)
         {
-            _suppressMaskExport = true;
+            _suppressMaskExportDepth++;
             try
             {
                 _mask.SetCanvas(0, 0);
             }
             finally
             {
-                _suppressMaskExport = false;
+                _suppressMaskExportDepth--;
             }
 
             _tools.NotifyUndoStackChanged(_mask.CanUndo);
@@ -522,5 +539,6 @@ public partial class ImagePreview
         }
 
         _maskOverlay?.MarkDirty();
+        UpdateMaskOverlayVisibility();
     }
 }

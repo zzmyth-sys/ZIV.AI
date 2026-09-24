@@ -15,8 +15,11 @@ namespace ZivAiEditor.App.Controls;
 /// </summary>
 internal static class MaskOverlayBitmap
 {
-    /// <summary>Semi-transparent red for a painted pixel (BGRA bytes, display only).</summary>
-    private const byte Red = 0x80;
+    /// <summary>
+    /// Overlay alpha for a fully-painted pixel — 50% (<c>0x80</c> / 255). The underlying image
+    /// stays visible; a feathered value yields a proportionally lower alpha.
+    /// </summary>
+    private const int MaxAlpha = 0x80;
 
     /// <summary>
     /// Returns a premultiplied BGRA bitmap where each grayscale <paramref name="display"/>
@@ -65,11 +68,14 @@ internal static class MaskOverlayBitmap
                 var value = values[source + rx];
                 if (value != 0)
                 {
-                    // BGRA, premultiplied: red scaled by the (possibly feathered) alpha.
-                    row[offset] = 0x00;
-                    row[offset + 1] = 0x00;
-                    row[offset + 2] = (byte)(value * Red / 255);
-                    row[offset + 3] = value;
+                    // Semi-transparent red, premultiplied (BGRA):
+                    //   A = value * 50%  (255 -> 128, 128 -> 64, 0 -> 0)
+                    //   R = value scaled by A, G = B = 0
+                    var alpha = (byte)(value * MaxAlpha / 255);
+                    row[offset] = 0x00;                            // B
+                    row[offset + 1] = 0x00;                        // G
+                    row[offset + 2] = (byte)(value * alpha / 255); // R (premultiplied)
+                    row[offset + 3] = alpha;                       // A
                 }
                 else
                 {
