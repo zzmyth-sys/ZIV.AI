@@ -21,12 +21,23 @@ public sealed class Executor : IExecutor
 {
     private readonly IToolRegistry _tools;
     private readonly ExecutionQueue _queue;
+    private readonly IEditSession _session;
+    private readonly IEditSessionWriter _writer;
+    private readonly ICommandParser _parser;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _running = new(StringComparer.Ordinal);
 
-    public Executor(IToolRegistry tools, ExecutionQueue queue)
+    public Executor(
+        IToolRegistry tools,
+        ExecutionQueue queue,
+        IEditSession session,
+        IEditSessionWriter writer,
+        ICommandParser parser)
     {
         _tools = tools ?? throw new ArgumentNullException(nameof(tools));
         _queue = queue ?? throw new ArgumentNullException(nameof(queue));
+        _session = session ?? throw new ArgumentNullException(nameof(session));
+        _writer = writer ?? throw new ArgumentNullException(nameof(writer));
+        _parser = parser ?? throw new ArgumentNullException(nameof(parser));
     }
 
     public async Task<TaskState> ExecuteAsync(
@@ -75,12 +86,103 @@ public sealed class Executor : IExecutor
         return state;
     }
 
-    public Task<TaskState> RerunAsync(
-        string taskId,
+    /// <summary>
+    /// Re-runs the edit that produced <paramref name="nodeId"/> (Step 9C.8-A). The plan is
+    /// rebuilt from the DAG: the parent node is made current so the parser resolves the
+    /// same source image / mask, the node's <c>Command</c> is re-parsed (the tool / steps /
+    /// denoise are deterministic), the stored <see cref="RerunSpec"/> supplies the UI
+    /// resolution and reference images, and the previous current node is restored. The
+    /// rebuilt plan is then executed as a fresh task (new random seed). The DAG append is
+    /// the caller's job (the UI appends the new node as a sibling).
+    /// </summary>
+    public async Task<TaskState> RerunAsync(
+        string nodeId,
         IProgress<TaskProgress>? progress = null,
         CancellationToken ct = default)
-        => throw new NotSupportedException(
-            "RerunAsync requires task persistence (ITaskStore), scheduled for a later step.");
+    {
+        var node = FindNode(nodeId);
+        if (node is null)
+        {
+            throw new ArgumentException($"Unknown node '{nodeId}'.", nameof(nodeId));
+        }
+
+        if (string.IsNullOrEmpty(node.ParentNodeId))
+        {
+            throw new InvalidOperationException("该节点没有源图，无法重跑。");
+        }
+
+        var plan = await BuildRerunPlanAsync(node, ct).ConfigureAwait(false);
+        return await ExecuteAsync(plan, progress, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Rebuilds the plan for a re-run: navigates to the node's parent (so the parser reads
+    /// the original source image / mask), re-parses <see cref="IEditNode.Command"/>, then
+    /// stamps the snapshot's reference images. The previous current node is restored in a
+    /// <c>finally</c> so the DAG selection is unchanged when this returns.
+    /// </summary>
+    private async Task<EditPlan> BuildRerunPlanAsync(IEditNode node, CancellationToken ct)
+    {
+        var saved = _session.CurrentNodeId;
+        EditPlan plan;
+        try
+        {
+            _writer.NavigateTo(node.ParentNodeId!);
+            var parsed = await _parser
+                .ParseAsync(node.Command, _session, node.Rerun?.Resolution, ct)
+                .ConfigureAwait(false);
+            if (!parsed.Success || parsed.Plan is null)
+            {
+                throw new InvalidOperationException(
+                    parsed.ErrorMessage ?? "无法从历史节点重建重跑计划。");
+            }
+
+            plan = node.Rerun is { AdditionalImages.Count: > 0 } spec
+                ? WithAdditionalImages(parsed.Plan, spec.AdditionalImages)
+                : parsed.Plan;
+        }
+        finally
+        {
+            if (!string.IsNullOrEmpty(saved))
+            {
+                _writer.NavigateTo(saved);
+            }
+        }
+
+        return plan;
+    }
+
+    private IEditNode? FindNode(string nodeId)
+    {
+        if (string.IsNullOrEmpty(nodeId))
+        {
+            return null;
+        }
+
+        foreach (var node in _session.GetHistory())
+        {
+            if (string.Equals(node.NodeId, nodeId, StringComparison.Ordinal))
+            {
+                return node;
+            }
+        }
+
+        return null;
+    }
+
+    private static EditPlan WithAdditionalImages(EditPlan plan, IReadOnlyList<string> additionalImages)
+        => new()
+        {
+            PlanId = plan.PlanId,
+            SourcePrompt = plan.SourcePrompt,
+            MainImagePath = plan.MainImagePath,
+            ReferenceImagePath = plan.ReferenceImagePath,
+            AdditionalImages = additionalImages,
+            Mask = plan.Mask,
+            Steps = plan.Steps,
+            CreatedAt = plan.CreatedAt,
+            Resolution = plan.Resolution,
+        };
 
     public Task<bool> CancelAsync(string taskId, CancellationToken ct = default)
     {

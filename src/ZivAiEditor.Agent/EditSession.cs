@@ -22,7 +22,7 @@ namespace ZivAiEditor.Agent;
 /// the write <see cref="IEditSessionWriter"/>, so the UI can drive the session without
 /// referencing this concrete type (V1).</para>
 /// </summary>
-public sealed class EditSession : IEditSession, IEditSessionWriter
+public sealed partial class EditSession : IEditSession, IEditSessionWriter
 {
     /// <summary>
     /// Hard ceiling for the parent / depth walks below. The graph is built
@@ -114,6 +114,7 @@ public sealed class EditSession : IEditSession, IEditSessionWriter
                 Command = node.Command,
                 Crop = node.Crop,
                 Mask = node.Mask,
+                Rerun = node.Rerun,
                 CreatedAt = node.CreatedAt,
             };
         }
@@ -192,6 +193,7 @@ public sealed class EditSession : IEditSession, IEditSessionWriter
             CreatedAt = node.CreatedAt,
             Crop = crop,
             Mask = cropChanged ? null : node.Mask,
+            Rerun = node.Rerun,
         };
 
         Nodes[nodeId] = updated;
@@ -223,6 +225,71 @@ public sealed class EditSession : IEditSession, IEditSessionWriter
             CreatedAt = node.CreatedAt,
             Crop = node.Crop,
             Mask = mask,
+            Rerun = node.Rerun,
+        };
+
+        Nodes[nodeId] = updated;
+        if (ReferenceEquals(_rootNode, node))
+        {
+            _rootNode = updated;
+        }
+    }
+
+    /// <summary>
+    /// Sets (or clears) the re-run snapshot of one node (Step 9C.8-A). Like the crop /
+    /// mask the node is rebuilt in place with the same identity / parent / image / command
+    /// / timestamp and its crop / mask preserved. A no-op when <paramref name="nodeId"/> is
+    /// unknown.
+    /// </summary>
+    public void SetNodeRerun(string nodeId, RerunSpec? rerun)
+    {
+        if (string.IsNullOrEmpty(nodeId) || !Nodes.TryGetValue(nodeId, out var node))
+        {
+            return;
+        }
+
+        var updated = new EditNode
+        {
+            NodeId = node.NodeId,
+            ParentNodeId = node.ParentNodeId,
+            ImagePath = node.ImagePath,
+            Command = node.Command,
+            CreatedAt = node.CreatedAt,
+            Crop = node.Crop,
+            Mask = node.Mask,
+            Rerun = rerun,
+        };
+
+        Nodes[nodeId] = updated;
+        if (ReferenceEquals(_rootNode, node))
+        {
+            _rootNode = updated;
+        }
+    }
+
+    /// <summary>
+    /// Replaces a node's output image in place (Step 9C.8-A2). The node is rebuilt with the
+    /// same identity / parent / command / timestamp / crop / mask / re-run snapshot; only
+    /// <see cref="EditNode.ImagePath"/> changes. A no-op when <paramref name="nodeId"/> is
+    /// unknown.
+    /// </summary>
+    public void ReplaceNodeImage(string nodeId, string newImagePath)
+    {
+        if (string.IsNullOrEmpty(nodeId) || !Nodes.TryGetValue(nodeId, out var node))
+        {
+            return;
+        }
+
+        var updated = new EditNode
+        {
+            NodeId = node.NodeId,
+            ParentNodeId = node.ParentNodeId,
+            ImagePath = newImagePath,
+            Command = node.Command,
+            CreatedAt = node.CreatedAt,
+            Crop = node.Crop,
+            Mask = node.Mask,
+            Rerun = node.Rerun,
         };
 
         Nodes[nodeId] = updated;
@@ -455,6 +522,12 @@ public sealed class EditNode : IEditNode
     /// node — re-drawing replaces it, never appends a node. Cleared when the crop changes.
     /// </summary>
     public MaskSpec? Mask { get; init; }
+
+    /// <summary>
+    /// The node's re-run snapshot (Step 9C.8-A); <c>null</c> when the edit carried neither
+    /// a UI resolution nor reference images. At most one per node — replaced in place.
+    /// </summary>
+    public RerunSpec? Rerun { get; init; }
 
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.Now;
 }

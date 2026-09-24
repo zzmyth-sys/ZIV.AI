@@ -1,4 +1,5 @@
 using ZivAiEditor.Agent;
+using ZivAiEditor.Contracts.Imaging;
 using Xunit;
 
 namespace ZivAiEditor.Tests;
@@ -286,6 +287,85 @@ public class SessionLoaderTests
             var loaded = Assert.Single(result.Session.GetHistory());
             Assert.NotNull(loaded.Mask);
             Assert.Equal(12, loaded.Mask!.FeatherPx);
+        }
+        finally
+        {
+            Cleanup(dir);
+        }
+    }
+
+    [Fact]
+    public void Loads_Rerun_Snapshot_With_Resolution_And_Reference()
+    {
+        var dir = NewDir();
+        try
+        {
+            WriteImage(dir, "a.png");
+            Directory.CreateDirectory(Path.Combine(dir, "refs"));
+            File.WriteAllBytes(Path.Combine(dir, "refs", "a_ref1.png"), new byte[] { 1 });
+            var node = "{\"node_id\": \"a\", \"parent_node_id\": null, \"image_path\": \"a.png\", "
+                       + "\"command\": \"c\", \"created_at\": \"2026-01-01T00:00:00+00:00\", "
+                       + "\"rerun\": {\"resolution\": {\"mode\": \"Side\", \"side\": 1024, \"max_pixels\": 4700000}, "
+                       + "\"additional_images\": [\"refs/a_ref1.png\"]}}";
+            var json = MakeFile("p", "a", node);
+
+            var result = SessionLoader.LoadFromJson(json, dir);
+
+            var loaded = Assert.Single(result.Session.GetHistory());
+            Assert.NotNull(loaded.Rerun);
+            Assert.NotNull(loaded.Rerun!.Resolution);
+            Assert.Equal(ResolutionMode.Side, loaded.Rerun.Resolution!.Mode);
+            Assert.Equal(1024, loaded.Rerun.Resolution.Side);
+            Assert.Single(loaded.Rerun.AdditionalImages);
+            Assert.EndsWith("a_ref1.png", loaded.Rerun.AdditionalImages[0], StringComparison.Ordinal);
+            Assert.Empty(result.Warnings);
+        }
+        finally
+        {
+            Cleanup(dir);
+        }
+    }
+
+    [Fact]
+    public void Missing_Reference_Image_Drops_It_With_Warning_But_Keeps_Resolution()
+    {
+        var dir = NewDir();
+        try
+        {
+            WriteImage(dir, "a.png");
+            var node = "{\"node_id\": \"a\", \"parent_node_id\": null, \"image_path\": \"a.png\", "
+                       + "\"command\": \"c\", \"created_at\": \"2026-01-01T00:00:00+00:00\", "
+                       + "\"rerun\": {\"resolution\": {\"mode\": \"Side\", \"side\": 1024}, "
+                       + "\"additional_images\": [\"refs/gone.png\"]}}";
+            var json = MakeFile("p", "a", node);
+
+            var result = SessionLoader.LoadFromJson(json, dir);
+
+            var loaded = Assert.Single(result.Session.GetHistory());
+            Assert.NotNull(loaded.Rerun);
+            Assert.Empty(loaded.Rerun!.AdditionalImages);
+            Assert.NotNull(loaded.Rerun.Resolution);
+            Assert.Contains(result.Warnings, w => w.Contains("参考图", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Cleanup(dir);
+        }
+    }
+
+    [Fact]
+    public void Json_Without_Rerun_Field_Leaves_Node_Rerun_Null()
+    {
+        var dir = NewDir();
+        try
+        {
+            WriteImage(dir, "a.png");
+            var json = MakeFile("p", "a", Node("a", null, "a.png"));
+
+            var result = SessionLoader.LoadFromJson(json, dir);
+
+            Assert.Null(Assert.Single(result.Session.GetHistory()).Rerun);
+            Assert.Empty(result.Warnings);
         }
         finally
         {

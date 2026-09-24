@@ -2088,3 +2088,226 @@ UI（D6 遗留）。
 - **未跑 GPU 端到端**（Z29 / Z30）。
 - 备注：`IpcIdleUnloadTests` 等 GPU 测试在 GPU 非空闲（用户进程 `group_webui.py` 占用）时会失败，
   不属本步影响面（Z29 / Z30）。
+
+---
+
+## Step 9C.8-A 验收：参数快照 + RerunAsync（放弃 SQLite）
+
+**目标**：历史节点可重跑。`EditNode` 加最小参数快照（UI 分辨率 + 参考图），
+`IExecutor.RerunAsync(nodeId)` 从 DAG 重建 `EditPlan` 并执行，历史节点右键「重跑」。
+**不含** SQLite / `ITaskStore` / `GetTaskAsync` / 生成中取消（9C.8-B）/ 固定 seed 复现 / GPU 端到端。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ |
+| G2 | 依赖方向没破 | 改动在 Contracts / Agent / UI / App / Tests；`Executor` 新增注入 `IEditSession` / `IEditSessionWriter` / `ICommandParser`（Agent / Contracts）；无反向 / 循环依赖 | ✅ |
+| G3 | 契约与 FROZEN 一致 | 新增 `RerunSpec` / `IEditNode.Rerun` / `IEditSessionWriter.SetNodeRerun`；`RerunAsync` 签名变更为授权项 | ✅ |
+| G4 | 未授权修改检查 | Step 0–9C.7-B 冻结行未改；变更走 FROZEN 尾部追加（Z20 修订 / D7 修订 / 签名授权） | ✅ |
+| G5 | 文档已更新 | `FROZEN` / `DEVLOG` / `ACCEPTANCE` 追加 9C.8-A | ✅ |
+| G6 | 便携性未破 | 数据仍随程序目录（Z14）；参考图拷入项目目录、相对名，无新注册表 / 外部配置 | ✅ |
+| G7 | AI 推理进程隔离未破 | `Executor` 仍不调 `IInferenceClient`；重跑仍经 Tool → `IInferenceClient`（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.8A.1 | 节点快照写入 | `SessionViewModelTests.Submit_Stores_Rerun_Snapshot_On_Node` | 提交后节点 `Rerun` 含分辨率 + 参考图 | ✅ |
+| 9C.8A.2 | 无快照不写 | `SessionViewModelTests.Submit_Without_Resolution_Or_Refs_Stores_No_Snapshot` | `Rerun` 为 null | ✅ |
+| 9C.8A.3 | `SetNodeRerun` | `EditSessionTests.SetNodeRerun_*` | 设置 / 清除 / 保留 crop+mask / 未知 no-op | ✅ |
+| 9C.8A.4 | 重跑重建计划 | `ExecutorTests.Rerun_Rebuilds_Plan_From_Node_And_Restores_Current` | 源图 = 父节点；prompt 重解析；分辨率 + 参考图注入；current 恢复 | ✅ |
+| 9C.8A.5 | 不可重跑守卫 | `ExecutorTests.Rerun_Parentless_Node_Throws` / `Rerun_Unknown_Node_Throws` | 无父节点抛 `InvalidOperationException`；未知抛 `ArgumentException` | ✅ |
+| 9C.8A.6 | 新节点为兄弟、旧节点保留 | `SessionViewModelTests.RerunNode_Appends_Sibling_And_Preserves_Original` | 3 节点；新节点父 = 原父；原节点仍在；current = 新节点 | ✅ |
+| 9C.8A.7 | 快照随重跑复制 | `SessionViewModelTests.RerunNode_Copies_Snapshot_To_New_Node` | 新节点 `Rerun` 分辨率一致 | ✅ |
+| 9C.8A.8 | root 重跑拒绝 | `SessionViewModelTests.RerunNode_Root_Is_Rejected_With_Hint` | 返回 false + 系统提示 | ✅ |
+| 9C.8A.9 | 快照往返 | `SessionStoreTests.Save_Then_Load_RoundTrips_Rerun_Snapshot` | 分辨率 + 参考图往返；`refs/` 文件存在 | ✅ |
+| 9C.8A.10 | 无快照 JSON 干净 | `SessionStoreTests.Save_Without_Snapshot_Does_Not_Record_Additional_Images` | 无 `additional_images` | ✅ |
+| 9C.8A.11 | 加载 rerun | `SessionLoaderTests.Loads_Rerun_Snapshot_With_Resolution_And_Reference` | 分辨率 + 参考图还原 | ✅ |
+| 9C.8A.12 | 缺参考图容错 | `SessionLoaderTests.Missing_Reference_Image_Drops_It_With_Warning_But_Keeps_Resolution` | 丢参考图 + 警告；保留分辨率 | ✅ |
+| 9C.8A.13 | 旧项目兼容 | `SessionLoaderTests.Json_Without_Rerun_Field_Leaves_Node_Rerun_Null` | 无 `rerun` 字段 → `Rerun = null` | ✅ |
+| 9C.8A.14 | UI 入口 | 查 `MainWindow.Rerun.cs` | 历史节点右键「重跑」；无父节点不挂菜单 | ✅（代码确认） |
+| 9C.8A.15 | 构建 / 测试 | `dotnet build` / `dotnet test`（仅受影响类） | 0 错误；**135 通过 / 0 失败** | ✅ |
+| 9C.8A.16 | Z8 | 查改动文件 | 均 < 600（`SessionStore.cs` 560 / `SessionViewModel.cs` 575） | ✅ |
+| 9C.8A.17 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.8A.18 | 手动：重跑 | 用户 | 编辑 A → 右键重跑 → 新节点 B（结果不同）；A 保留；分辨率 / 多图沿用 | ⏳ 待用户真机确认 |
+
+### Step 9C.8-A 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.8A.1–9C.8A.17 全过；9C.8A.18 由用户真机确认。
+
+### Step 9C.8-A 遗留说明（非阻断）
+
+- **生成中取消** → 9C.8-B。
+- **固定 seed 复现**：重跑为「重新执行」，不保证逐像素一致（后置）。
+- **`GetTaskAsync`** 继续 `NotSupportedException`（阻塞式 submit 下无调用方）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### Step 9C.8-A 验收后动作
+
+1. 追加 `DEVLOG.md` / `FROZEN.md` 的 9C.8-A 记录（本步已完成）
+2. 在「验收记录」追加“Step 9C.8-A 通过，日期：____”（待签）
+3. 进入 Step 9C.8-B：生成中取消
+
+---
+
+## Step 9C.8-A2 验收：重跑改为「替换节点」
+
+**目标**：修正 9C.8-A 的重跑语义——重跑 = 重新执行同一节点、**原地替换**（同 `NodeId`），
+**级联删除其子节点**，删除旧图。**不含** SQLite / 生成中取消（9C.8-B）/ 固定 seed 复现 / GPU 端到端。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ |
+| G2 | 依赖方向没破 | 改动在 Contracts / Agent / UI / App / Tests；UI 经委托注入（不引用 Agent 实现类） | ✅ |
+| G3 | 契约与 FROZEN 一致 | 新增 `ReplaceNodeImage` / `RemoveSubtree`；`RerunAsync` 签名沿用 9C.8-A 授权 | ✅ |
+| G4 | 未授权修改检查 | Step 0–9C.8-A 冻结行未改；变更走 FROZEN 尾部追加（A2/B1 授权） | ✅ |
+| G5 | 文档已更新 | `FROZEN` / `DEVLOG` / `ACCEPTANCE` 追加 9C.8-A2 | ✅ |
+| G6 | 便携性未破 | 数据仍随程序目录（Z14）；无新注册表 / 外部配置 | ✅ |
+| G7 | AI 推理进程隔离未破 | `Executor` 仍不调 `IInferenceClient`（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增对 ZIV 应用的依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.8A2.1 | 原地替换 | `SessionViewModelTests.RerunNode_Replaces_Node_In_Place` | 节点数不变；同 `NodeId`；`ImagePath` = 新输出 | ✅ |
+| 9C.8A2.2 | 快照保留 | `RerunNode_Keeps_Snapshot_On_Node` | 重跑后 `Rerun` 仍在（连续重跑） | ✅ |
+| 9C.8A2.3 | 清 crop/mask | `RerunNode_Clears_Crop_And_Mask` | 重跑后 `Crop` / `Mask` 为 null | ✅ |
+| 9C.8A2.4 | 级联删子树 | `RerunNode_Cascade_Deletes_Descendants` | 子节点消失；被重跑节点保留；current 回指 | ✅ |
+| 9C.8A2.5 | 删旧输出图 | `RerunNode_Deletes_Old_Output_File` | 旧输出文件被删 | ✅ |
+| 9C.8A2.6 | 未知节点 | `RerunNode_Unknown_Node_Is_Rejected` | 返回 false + 系统提示 | ✅ |
+| 9C.8A2.7 | `ReplaceNodeImage` | `EditSessionTests.ReplaceNodeImage_*` | 改图保 identity/crop/mask/rerun；未知 no-op | ✅ |
+| 9C.8A2.8 | `RemoveSubtree` | `EditSessionTests.RemoveSubtree_*` | 删后代保节点；保兄弟；未知空列表 | ✅ |
+| 9C.8A2.9 | 项目副本清理 | `SessionStoreTests.DeleteNodeArtifacts_*` | 删节点图 + 参考副本；`includeReferences=false` 保留 refs；缺失项目 no-op | ✅ |
+| 9C.8A2.10 | 外部参考图不删 | 代码审查 `SessionViewModel.DeleteArtifact` | 仅删应用自有文件；不删用户原图（Z24） | ✅ |
+| 9C.8A2.11 | 失败不删 | 代码审查 `RerunNodeAsync` | 失败分支在任何删除之前返回 | ✅ |
+| 9C.8A2.12 | 构建 / 测试 | `dotnet build` / `dotnet test`（受影响类） | 0 错误；**147 通过 / 0 失败** | ✅ |
+| 9C.8A2.13 | Z8 | 查改动文件 | 均 < 600（`EditSession.cs` 533） | ✅ |
+| 9C.8A2.14 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.8A2.15 | 手动：重跑替换 | 用户 | 编辑 A → 右键重跑 → A 原地换图（同位置）；A 的旧图被删；有子节点则级联删 | ⏳ 待用户真机确认 |
+
+### Step 9C.8-A2 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.8A2.1–9C.8A2.14 全过；9C.8A2.15 由用户真机确认。
+
+### Step 9C.8-A2 遗留说明（非阻断）
+
+- **生成中取消** → 9C.8-B。
+- **固定 seed 复现**（后置）。
+- **外部用户参考图不删**（与 B1 草稿差异，已登记 FROZEN 9C.8A2.3 / 9C.8A2.7）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### Step 9C.8-A2 验收后动作
+
+1. 追加 `DEVLOG.md` / `FROZEN.md` 的 9C.8-A2 记录（本步已完成）
+2. 在「验收记录」追加“Step 9C.8-A2 通过，日期：____”（待签）
+3. 进入 Step 9C.8-B：生成中取消
+
+---
+
+## Step 9C.8-A3 验收：重跑聊天流原地更新
+
+**目标**：重跑**不新增聊天消息**——在原 AI 气泡上显示「重跑中 / sampling X%」，完成后**原地换图**
+（位置不变）。**不含** DAG / 历史列表改动（9C.8-A2 已完成）/ 生成中取消（9C.8-B）/ GPU 端到端。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ |
+| G2 | 依赖方向没破 | 改动仅 UI（`ChatMessage` / `SessionViewModel`）；`Contracts` 零变更 | ✅ |
+| G3 | 契约与 FROZEN 一致 | `ChatMessage.NodeId` 为 UI 自有类型追加（非契约），FROZEN 尾部登记 | ✅ |
+| G4 | 未授权修改检查 | Step 0–9C.8-A2 冻结行未改；`SubmitAsync` 气泡数量 / 流程不变 | ✅ |
+| G5 | 文档已更新 | `FROZEN` / `DEVLOG` / `ACCEPTANCE` 追加 9C.8-A3 | ✅ |
+| G6 | 便携性未破 | 无文件系统 / 注册表 / 外部路径改动 | ✅ |
+| G7 | AI 推理进程隔离未破 | 仅 UI 消息更新，未触推理（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.8A3.1 | 归属字段 | `SessionViewModelTests.Submit_Sets_NodeId_On_Assistant_Bubble` | 完成气泡 `NodeId` = 节点 id | ✅ |
+| 9C.8A3.2 | 重跑不新增消息 | `RerunNode_Adds_No_New_Message_And_Updates_Bubble_In_Place` | 消息数不变；无「重跑」用户气泡 | ✅ |
+| 9C.8A3.3 | 原地换图 | 同上 | 原 AI 气泡 `ImagePath` = 新输出；`IsPending=false` | ✅ |
+| 9C.8A3.4 | 失败原地显示 | `RerunNode_Failure_Shows_Error_On_Original_Bubble` | 消息数不变；原气泡 `IsError`；保留旧图 | ✅ |
+| 9C.8A3.5 | 构建 / 测试 | `dotnet build` / `dotnet test`（受影响类） | 0 错误；**131 通过 / 0 失败** | ✅ |
+| 9C.8A3.6 | Z8 | 查改动文件 | 均 < 600（`SessionViewModel.cs` 599） | ✅ |
+| 9C.8A3.7 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.8A3.8 | 手动：重跑原地更新 | 用户 | 右键重跑 → 聊天流不新增消息；原「AI 完成」气泡变进度 → 原地换图 | ⏳ 待用户真机确认 |
+
+### Step 9C.8-A3 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.8A3.1–9C.8A3.7 全过；9C.8A3.8 由用户真机确认。
+
+### Step 9C.8-A3 遗留说明（非阻断）
+
+- **生成中取消** → 9C.8-B。
+- **`SessionViewModel.cs` 599 行**（逼近 Z8），后续需拆分。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### Step 9C.8-A3 验收后动作
+
+1. 追加 `DEVLOG.md` / `FROZEN.md` 的 9C.8-A3 记录（本步已完成）
+2. 在「验收记录」追加“Step 9C.8-A3 通过，日期：____”（待签）
+3. 进入 Step 9C.8-B：生成中取消
+
+---
+
+## Step 9C.8-B 验收：生成中取消
+
+**目标**：生成中气泡加「取消」按钮，中断在飞任务；取消后原位替换为「已取消。」+ 状态恢复。
+**不含** 多任务并发取消 / 取消后重试 / SQLite / GetTaskAsync / GPU 端到端。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ |
+| G2 | 依赖方向没破 | 改动仅 UI / App；`Contracts` 零变更 | ✅ |
+| G3 | 契约与 FROZEN 一致 | 无契约变更；UI 行为 / Z8 拆分走 FROZEN 尾部登记 | ✅ |
+| G4 | 未授权修改检查 | Step 0–9C.8-A3 冻结行未改 | ✅ |
+| G5 | 文档已更新 | `FROZEN` / `DEVLOG` / `ACCEPTANCE` 追加 9C.8-B | ✅ |
+| G6 | 便携性未破 | 无文件系统 / 注册表 / 外部路径改动 | ✅ |
+| G7 | AI 推理进程隔离未破 | 取消经 token → `IpcInferenceClient` 转发 `cancel` 帧（Z17 / Z11） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.8B.1 | 无在飞取消 | `SessionViewModelTests.CancelCurrent_With_No_InFlight_Returns_False` | 返回 false，不抛 | ✅ |
+| 9C.8B.2 | 提交取消 | `Cancel_Submit_Marks_Bubble_Canceled_And_Adds_No_Node` | 不新增节点；气泡「已取消。」；`IsBusy=false`；二次点击 false | ✅ |
+| 9C.8B.3 | 重跑取消 | `Cancel_Rerun_Keeps_Old_Image_And_Marks_Bubble_Canceled` | 原节点旧图不变；原气泡「已取消。」；消息数不变 | ✅ |
+| 9C.8B.4 | 取消文案 | `BuildFailureMessage`（R3） | `Canceled` → 「已取消。」（中文） | ✅ |
+| 9C.8B.5 | 取消链路 | 代码审查 `SubmitAsync`/`RerunNodeAsync` | CTS 在任何 await 前建链；token 传执行器；finally 清理 | ✅ |
+| 9C.8B.6 | UI 按钮 | 代码审查 `MainWindow.BuildMessage` | pending 气泡预览下方「取消」；点击禁用 + `SetStatus("取消中…")` + `CancelCurrent()` | ✅ |
+| 9C.8B.7 | `_cts` 移除（R4） | 代码审查 | `MainWindow._cts` 删除；改传 `CancellationToken.None` | ✅ |
+| 9C.8B.8 | 构建 / 测试 | `dotnet build` / `dotnet test`（受影响类） | 0 错误；**153 通过 / 0 失败** | ✅ |
+| 9C.8B.9 | Z8（R6） | 查改动文件 | `SessionViewModel.cs` **546**（< 550）；其余 < 600 | ✅ |
+| 9C.8B.10 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.8B.11 | 手动：取消 | 用户 | 编辑 / 重跑生成中点「取消」→ 气泡「取消中…」→「已取消。」；无新节点；可再次提交 | ⏳ 待用户真机确认 |
+| 9C.8B.12 | GPU：取消回落（R5） | 用户（GPU） | 取消后 `nvidia-smi` 回落 + 无残留 Python | ⏳ 待用户确认 GPU 空闲 + 明确同意 |
+
+### Step 9C.8-B 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.8B.1–9C.8B.10 全过；9C.8B.11–9C.8B.12 由用户真机 / GPU 确认。
+
+### Step 9C.8-B 遗留说明（非阻断）
+
+- **多任务并发取消**（当前单队列，仅当前在飞可取消）。
+- **取消后的「重试」按钮**（后置）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### Step 9C.8-B 验收后动作
+
+1. 追加 `DEVLOG.md` / `FROZEN.md` 的 9C.8-B 记录（本步已完成）
+2. 在「验收记录」追加“Step 9C.8-B 通过，日期：____”（待签）

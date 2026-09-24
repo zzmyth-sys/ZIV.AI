@@ -9,43 +9,6 @@ using TaskStatus = ZivAiEditor.Contracts.Enums.TaskStatus;
 
 namespace ZivAiEditor.UI.Chat;
 
-/// <summary>Who produced a chat message.</summary>
-public enum ChatRole
-{
-    User,
-    Assistant,
-    System,
-}
-
-/// <summary>One rendered line in the chat stream (INTERACTION.md §3).</summary>
-public sealed class ChatMessage
-{
-    public ChatRole Role { get; init; }
-
-    public string Text { get; init; } = "";
-
-    /// <summary>Optional preview image (a user input or an edit output — Z24 new file).</summary>
-    public string? ImagePath { get; init; }
-
-    public bool IsError { get; init; }
-
-    /// <summary>
-    /// True for the in-flight "生成中…" bubble. The App layer renders live
-    /// preview frames (0x02 IPC frames) into this bubble while the executor runs.
-    /// </summary>
-    public bool IsPending { get; init; }
-}
-
-/// <summary>One entry in the history list, carrying its tree depth for indentation.</summary>
-public sealed class HistoryItem
-{
-    public IEditNode Node { get; init; } = null!;
-
-    public int Depth { get; init; }
-
-    public bool IsCurrent { get; init; }
-}
-
 /// <summary>
 /// Chat-session view model (Step 9A): it drives the in-memory session through the
 /// frozen Agent contracts only — <see cref="ICommandParser"/> to turn input into an
@@ -58,7 +21,7 @@ public sealed class HistoryItem
 /// The class has no Avalonia dependency so the chat flow is unit-testable; the App
 /// layer renders <see cref="Messages"/> / <see cref="History"/> into controls.
 /// </summary>
-public sealed class SessionViewModel
+public sealed partial class SessionViewModel
 {
     /// <summary>Delay before retrying a transient CUDA-OOM failure (Step 9C.6-D).</summary>
     private const int OomRetryDelayMs = 2000;
@@ -71,16 +34,25 @@ public sealed class SessionViewModel
     private readonly ICommandParser _parser;
     private readonly IExecutor _executor;
 
+    /// <summary>
+    /// Deletes a saved project's per-node artifacts (Step 9C.8-A2). Injected by the App so
+    /// the UI view model stays free of the concrete <c>SessionStore</c> (V1); <c>null</c>
+    /// in tests / when the project has never been saved.
+    /// </summary>
+    private readonly Action<string, IReadOnlyCollection<string>, bool>? _nodeArtifactsCleaner;
+
     public SessionViewModel(
         IEditSession session,
         IEditSessionWriter writer,
         ICommandParser parser,
-        IExecutor executor)
+        IExecutor executor,
+        Action<string, IReadOnlyCollection<string>, bool>? nodeArtifactsCleaner = null)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _parser = parser ?? throw new ArgumentNullException(nameof(parser));
         _executor = executor ?? throw new ArgumentNullException(nameof(executor));
+        _nodeArtifactsCleaner = nodeArtifactsCleaner;
     }
 
     /// <summary>The underlying session, exposed read-only (Step 9C.5: no Agent type crosses).</summary>
@@ -155,43 +127,17 @@ public sealed class SessionViewModel
             return false;
         }
 
-        Messages.Add(new ChatMessage { Role = ChatRole.User, Text = text });
-
-        var parsed = await _parser.ParseAsync(text, _session, Resolution, ct);
-        if (!parsed.Success || parsed.Plan is null)
-        {
-            Messages.Add(new ChatMessage
-            {
-                Role = ChatRole.Assistant,
-                Text = parsed.ErrorMessage ?? "无法解析该输入，请输入斜杠命令或一句编辑指令。",
-                IsError = true,
-            });
-            return false;
-        }
-
-        // Step 9C.5-D: the UI passes the reference images (main excluded). Cap at 3 extras
-        // (max 4 pipeline images, D4) and surface an over-limit hint right after the user
-        // message; the send is never refused. The parser interface stays untouched, so the
-        // plan is rebuilt (init-only) mirroring CommandParser.ApplyResolution.
-        var plan = parsed.Plan;
-        var extras = NormalizeAdditionalImages(additionalImages);
-        if (extras.Count > MaxAdditionalImages)
-        {
-            AddHint("最多支持 3 张参考图，多余的已忽略");
-            extras = extras.Take(MaxAdditionalImages).ToArray();
-        }
-
-        if (extras.Count > 0)
-        {
-            plan = WithAdditionalImages(plan, extras);
-        }
+        // Step 9C.8-B: arm the in-flight CTS before any await, so CancelCurrent() can
+        // interrupt the parse / execute and the token reaches the backend (Z11).
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _inFlightCts = cts;
+        _cancelRequested = false;
+        LastRunCanceled = false;
+        IsBusy = true;
 
         // The pending bubble is replaced in place once the executor returns. It is tracked
         // by identity (not index) so a context rebuild while generating cannot desync it.
         var pending = new ChatMessage { Role = ChatRole.Assistant, Text = "生成中…", IsPending = true };
-        Messages.Add(pending);
-        IsBusy = true;
-
         var parentId = _session.CurrentNodeId;
 
         // End-to-end wall-clock: click-to-bubble-replacement (Step 9C.3 收尾 10). This is
@@ -202,39 +148,73 @@ public sealed class SessionViewModel
 
         try
         {
-            var state = await _executor.ExecuteAsync(plan, progress, ct);
+            Messages.Add(new ChatMessage { Role = ChatRole.User, Text = text });
 
-            // Step 9C.6-D: the backend can hit a transient CUDA OOM (a run that fails while
-            // the previous run's memory is still settling). The next attempt succeeds, so
-            // retry once after a short pause before surfacing a failure.
-            if (!IsSuccess(state) && IsOutOfMemory(state) && !ct.IsCancellationRequested)
+            var parsed = await _parser.ParseAsync(text, _session, Resolution, cts.Token);
+            if (!parsed.Success || parsed.Plan is null)
             {
-                progress?.Report(new TaskProgress
+                Messages.Add(new ChatMessage
                 {
-                    TaskId = state.TaskId,
-                    Status = TaskStatus.Running,
-                    Fraction = 0,
-                    StepIndex = 0,
-                    StepCount = 1,
-                    Message = "显存不足，正在重试…",
+                    Role = ChatRole.Assistant,
+                    Text = parsed.ErrorMessage ?? "无法解析该输入，请输入斜杠命令或一句编辑指令。",
+                    IsError = true,
                 });
-                await Task.Delay(OomRetryDelayMs, ct);
-                state = await _executor.ExecuteAsync(plan, progress, ct);
+                return false;
             }
+
+            // Step 9C.5-D: the UI passes the reference images (main excluded). Cap at 3 extras
+            // (max 4 pipeline images, D4) and surface an over-limit hint right after the user
+            // message; the send is never refused. The parser interface stays untouched, so the
+            // plan is rebuilt (init-only) mirroring CommandParser.ApplyResolution.
+            var plan = parsed.Plan;
+            var extras = NormalizeAdditionalImages(additionalImages);
+            if (extras.Count > MaxAdditionalImages)
+            {
+                AddHint("最多支持 3 张参考图，多余的已忽略");
+                extras = extras.Take(MaxAdditionalImages).ToArray();
+            }
+
+            if (extras.Count > 0)
+            {
+                plan = WithAdditionalImages(plan, extras);
+            }
+
+            Messages.Add(pending);
+
+            var state = await RunWithOomRetryAsync(
+                () => _executor.ExecuteAsync(plan, progress, cts.Token), progress, cts.Token);
 
             var elapsed = stopwatch.Elapsed;
             if (IsSuccess(state))
             {
                 var outputPath = state.OutputImagePath!;
-                _writer.AppendNode(parentId, outputPath, text);
+                var appended = _writer.AppendNode(parentId, outputPath, text);
+
+                // Step 9C.8-A: snapshot the two inputs the DAG cannot reconstruct, so the
+                // node can be re-run later (the prompt / tool / steps are re-parsed).
+                if (BuildRerunSpec(plan.Resolution, plan.AdditionalImages) is { } snapshot)
+                {
+                    _writer.SetNodeRerun(appended.NodeId, snapshot);
+                }
+
                 ReplacePending(pending, new ChatMessage
                 {
                     Role = ChatRole.Assistant,
                     Text = $"{elapsed.TotalSeconds:F1}秒 完成",
                     ImagePath = outputPath,
+                    NodeId = appended.NodeId,
                 });
                 RefreshHistory();
                 return true;
+            }
+
+            if (state.Status == TaskStatus.Canceled)
+            {
+                // Revert the chat to the pre-send state (no new node, no bubbles); the App
+                // puts the prompt / attachments back into the input (Step 9C.8-B follow-up).
+                LastRunCanceled = true;
+                RebuildContext();
+                return false;
             }
 
             ReplacePending(pending, new ChatMessage
@@ -247,7 +227,8 @@ public sealed class SessionViewModel
         }
         catch (OperationCanceledException)
         {
-            ReplacePending(pending, new ChatMessage { Role = ChatRole.Assistant, Text = "已取消。", IsError = true });
+            LastRunCanceled = true;
+            RebuildContext();
             return false;
         }
         catch (Exception ex)
@@ -258,6 +239,10 @@ public sealed class SessionViewModel
         finally
         {
             IsBusy = false;
+            if (ReferenceEquals(_inFlightCts, cts))
+            {
+                _inFlightCts = null;
+            }
         }
     }
 
@@ -367,48 +352,6 @@ public sealed class SessionViewModel
     /// <summary>Appends a non-blocking system hint to the chat stream (Step 9C.6-C).</summary>
     public void AddHint(string text)
         => Messages.Add(new ChatMessage { Role = ChatRole.System, Text = text, IsError = true });
-
-    /// <summary>
-    /// Drops blank entries from the UI-supplied reference images and keeps their order
-    /// (Step 9C.5-D). A <c>null</c> / empty list yields an empty list.
-    /// </summary>
-    private static IReadOnlyList<string> NormalizeAdditionalImages(IReadOnlyList<string>? additionalImages)
-    {
-        if (additionalImages is null || additionalImages.Count == 0)
-        {
-            return Array.Empty<string>();
-        }
-
-        var images = new List<string>(additionalImages.Count);
-        foreach (var path in additionalImages)
-        {
-            if (!string.IsNullOrWhiteSpace(path))
-            {
-                images.Add(path);
-            }
-        }
-
-        return images;
-    }
-
-    /// <summary>
-    /// Rebuilds <paramref name="plan"/> with <see cref="EditPlan.AdditionalImages"/> set
-    /// (Step 9C.5-D). <see cref="EditPlan"/> is init-only, so the plan is copied rather
-    /// than mutated; the parser interface is untouched.
-    /// </summary>
-    private static EditPlan WithAdditionalImages(EditPlan plan, IReadOnlyList<string> additionalImages)
-        => new()
-        {
-            PlanId = plan.PlanId,
-            SourcePrompt = plan.SourcePrompt,
-            MainImagePath = plan.MainImagePath,
-            ReferenceImagePath = plan.ReferenceImagePath,
-            AdditionalImages = additionalImages,
-            Mask = plan.Mask,
-            Steps = plan.Steps,
-            CreatedAt = plan.CreatedAt,
-            Resolution = plan.Resolution,
-        };
 
     /// <summary>
     /// Sets (or clears) the intrinsic crop of one node (Step 9C.6-B) and refreshes the
@@ -532,12 +475,19 @@ public sealed class SessionViewModel
             Role = ChatRole.System,
             Text = "起始图像",
             ImagePath = PipelinePath(path[0]),
+            NodeId = path[0].NodeId,
         });
 
         foreach (var node in path.Skip(1))
         {
             Messages.Add(new ChatMessage { Role = ChatRole.User, Text = node.Command });
-            Messages.Add(new ChatMessage { Role = ChatRole.Assistant, Text = "完成", ImagePath = PipelinePath(node) });
+            Messages.Add(new ChatMessage
+            {
+                Role = ChatRole.Assistant,
+                Text = "完成",
+                ImagePath = PipelinePath(node),
+                NodeId = node.NodeId,
+            });
         }
     }
 
@@ -562,23 +512,4 @@ public sealed class SessionViewModel
     /// <summary>The image a node shows in the chat: its crop result, else its output.</summary>
     private static string PipelinePath(IEditNode node)
         => node.Crop is { ResultImagePath.Length: > 0 } crop ? crop.ResultImagePath : node.ImagePath;
-
-    private static bool IsSuccess(TaskState state)
-        => state.Status == TaskStatus.Succeeded && !string.IsNullOrWhiteSpace(state.OutputImagePath);
-
-    /// <summary>
-    /// True when a failed task looks like a CUDA out-of-memory error (Step 9C.6-D). The
-    /// backend surfaces <c>AcceleratorError: CUDA error: out of memory</c> / torch's
-    /// <c>CUDA out of memory</c> as the task error message.
-    /// </summary>
-    private static bool IsOutOfMemory(TaskState state)
-    {
-        var message = state.ErrorMessage ?? "";
-        return message.Contains("out of memory", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("OutOfMemory", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string BuildFailureMessage(TaskState state)
-        => state.ErrorMessage
-           ?? (state.Status == TaskStatus.Canceled ? "已取消。" : $"执行未成功（{state.Status}）。");
 }

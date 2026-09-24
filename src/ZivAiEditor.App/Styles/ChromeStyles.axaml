@@ -123,6 +123,37 @@
     <Setter Property="StrokeJoin" Value="Round" />
   </Style>
 
+  <!-- Chat-bubble action button (Step 9C.8-B follow-up): a 75%-transparent rounded base
+       holding an icon. The close variant reuses the title-bar close hover (red). -->
+  <Style Selector="Button.bubbleAction">
+    <Setter Property="Width" Value="22" />
+    <Setter Property="Height" Value="22" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Background" Value="#40FFFFFF" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.bubbleAction:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#66FFFFFF" />
+  </Style>
+  <Style Selector="Button.bubbleAction.bubbleClose:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource ZivCloseHoverBrush}" />
+  </Style>
+  <Style Selector="Button.bubbleAction.bubbleClose:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource ZivClosePressedBrush}" />
+  </Style>
+  <Style Selector="Path.bubbleIcon">
+    <Setter Property="Width" Value="11" />
+    <Setter Property="Height" Value="11" />
+    <Setter Property="Stretch" Value="Uniform" />
+    <Setter Property="Stroke" Value="{StaticResource ZivTextBrush}" />
+    <Setter Property="StrokeThickness" Value="1.4" />
+    <Setter Property="StrokeLineCap" Value="Round" />
+    <Setter Property="StrokeJoin" Value="Round" />
+  </Style>
+
   <!-- Borderless transparent text box used inside the input container. -->
   <Style Selector="TextBox.plainInput">
     <Setter Property="Background" Value="Transparent" />

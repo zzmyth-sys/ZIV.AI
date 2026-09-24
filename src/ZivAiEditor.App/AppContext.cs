@@ -116,7 +116,13 @@ internal sealed class AppContext : IDisposable
         tools.Register(new QwenImage21OutpaintTool(client));
 
         var executionQueue = new ExecutionQueue();
-        var executor = new Executor(tools, executionQueue);
+
+        // Step 9C.8-A: the executor rebuilds a re-run plan from the DAG, so it needs the
+        // session (read + navigate) and the deterministic command parser.
+        var commandParser = new CommandParser(ResolveCommandsPath());
+        var session = new EditSession();
+        var executor = new Executor(tools, executionQueue, session, session, commandParser);
+
         var modelProfiles = new ModelProfileRegistry();
 
         // LocalLlmClient applies its own per-call timeout, so the shared
@@ -143,11 +149,8 @@ internal sealed class AppContext : IDisposable
             new FallbackPlanner(),
             ex => Debug.WriteLine($"[planner] degraded to fallback: {ex.Message}"));
 
-        // Step 8: deterministic command parser, one in-memory session, and the
-        // close-time exporter. The UI (Step 9) drives the session and asks the
-        // user whether to export on exit.
-        var commandParser = new CommandParser(ResolveCommandsPath());
-        var session = new EditSession();
+        // Step 8: one in-memory session; Step 9C.6-E: a project store. The UI drives the
+        // session (already built above, before the executor).
         var sessionStore = new SessionStore();
 
         return new AppContext(

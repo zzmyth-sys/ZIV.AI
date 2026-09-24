@@ -112,6 +112,7 @@ public partial class MainWindow
         }
 
         var attachments = _importBar?.Paths;
+        var attachmentsSnapshot = attachments?.ToArray() ?? Array.Empty<string>();
         var preparation = _vm.PrepareAttachments(text, attachments);
         if (preparation == AttachmentPreparation.NoImage)
         {
@@ -164,9 +165,9 @@ public partial class MainWindow
 
         input.Text = "";
         SetBusy(true);
-        _cts?.Dispose();
-        _cts = new CancellationTokenSource();
 
+        // Step 9C.8-B: the view model owns the in-flight CTS and exposes CancelCurrent();
+        // no outer token is needed here.
         var progress = new Progress<TaskProgress>(OnProgress);
         try
         {
@@ -177,7 +178,19 @@ public partial class MainWindow
                 await _imagePreview.FlushMaskAsync();
             }
 
-            await _vm.SubmitAsync(text, progress, _cts.Token, references);
+            await _vm.SubmitAsync(text, progress, CancellationToken.None, references);
+
+            if (_vm.LastRunCanceled)
+            {
+                // Step 9C.8-B follow-up: a canceled edit reverts the send — the chat is
+                // restored by the view model, and the prompt / attachments come back here
+                // so the user can adjust and retry.
+                input.Text = text;
+                if (attachmentsSnapshot.Length > 0)
+                {
+                    _importBar?.AddFiles(attachmentsSnapshot);
+                }
+            }
         }
         catch (Exception ex)
         {

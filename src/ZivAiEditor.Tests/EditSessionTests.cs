@@ -475,4 +475,150 @@ public class EditSessionTests
         var empty = new EditSession();
         Assert.Null(empty.GetCurrentMaskSpec());
     }
+
+    [Fact]
+    public void SetNodeRerun_Sets_Snapshot_On_Node()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        var spec = new RerunSpec
+        {
+            Resolution = new ResolutionPolicy { Mode = ResolutionMode.Side, Side = 1024 },
+            AdditionalImages = new[] { @"C:\img\r.png" },
+        };
+
+        session.SetNodeRerun(rootId, spec);
+
+        Assert.Same(spec, session.Nodes[rootId].Rerun);
+        Assert.Equal(1024, session.Nodes[rootId].Rerun!.Resolution!.Side);
+    }
+
+    [Fact]
+    public void SetNodeRerun_Preserves_Crop_And_Mask()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        var crop = new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\c.png" };
+        var mask = new MaskSpec { MaskImagePath = @"C:\img\m.png", Width = 8, Height = 8 };
+        session.SetNodeCrop(rootId, crop);
+        session.SetNodeMask(rootId, mask);
+
+        session.SetNodeRerun(rootId, new RerunSpec { Resolution = new ResolutionPolicy() });
+
+        Assert.Same(crop, session.Nodes[rootId].Crop);
+        Assert.Same(mask, session.Nodes[rootId].Mask);
+        Assert.NotNull(session.Nodes[rootId].Rerun);
+    }
+
+    [Fact]
+    public void SetNodeRerun_Null_Clears_Snapshot()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        session.SetNodeRerun(rootId, new RerunSpec { Resolution = new ResolutionPolicy() });
+
+        session.SetNodeRerun(rootId, null);
+
+        Assert.Null(session.Nodes[rootId].Rerun);
+    }
+
+    [Fact]
+    public void SetNodeRerun_Unknown_Node_Is_NoOp()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+
+        session.SetNodeRerun("missing", new RerunSpec { Resolution = new ResolutionPolicy() });
+
+        Assert.Null(session.Nodes[session.CurrentNodeId!].Rerun);
+        Assert.Single(session.Nodes);
+    }
+
+    [Fact]
+    public void ReplaceNodeImage_Changes_Image_Keeps_Identity()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        var node = session.AppendNode(rootId, @"C:\img\old.png", "/去水印");
+        var crop = new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\c.png" };
+        var mask = new MaskSpec { MaskImagePath = @"C:\img\m.png", Width = 8, Height = 8 };
+        var rerun = new RerunSpec { Resolution = new ResolutionPolicy() };
+        session.SetNodeCrop(node.NodeId, crop);
+        session.SetNodeMask(node.NodeId, mask);
+        session.SetNodeRerun(node.NodeId, rerun);
+
+        session.ReplaceNodeImage(node.NodeId, @"C:\img\new.png");
+
+        var updated = session.Nodes[node.NodeId];
+        Assert.Equal(@"C:\img\new.png", updated.ImagePath);
+        Assert.Equal(node.NodeId, updated.NodeId);
+        Assert.Equal(rootId, updated.ParentNodeId);
+        Assert.Equal("/去水印", updated.Command);
+        Assert.Same(crop, updated.Crop);
+        Assert.Same(mask, updated.Mask);
+        Assert.Same(rerun, updated.Rerun);
+    }
+
+    [Fact]
+    public void ReplaceNodeImage_Unknown_Node_Is_NoOp()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+
+        session.ReplaceNodeImage("missing", @"C:\img\new.png");
+
+        Assert.Equal(@"C:\img\root.png", session.Nodes[session.CurrentNodeId!].ImagePath);
+    }
+
+    [Fact]
+    public void RemoveSubtree_Removes_Descendants_But_Keeps_Node()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        var a = session.AppendNode(rootId, @"C:\img\a.png", "a");
+        var b = session.AppendNode(a.NodeId, @"C:\img\b.png", "b");
+        var c = session.AppendNode(b.NodeId, @"C:\img\c.png", "c");
+        var d = session.AppendNode(a.NodeId, @"C:\img\d.png", "d");
+
+        var removed = session.RemoveSubtree(a.NodeId);
+
+        Assert.Equal(3, removed.Count);
+        Assert.Contains(removed, n => n.NodeId == b.NodeId);
+        Assert.Contains(removed, n => n.NodeId == c.NodeId);
+        Assert.Contains(removed, n => n.NodeId == d.NodeId);
+        Assert.True(session.Nodes.ContainsKey(a.NodeId));
+        Assert.True(session.Nodes.ContainsKey(rootId));
+        Assert.False(session.Nodes.ContainsKey(b.NodeId));
+    }
+
+    [Fact]
+    public void RemoveSubtree_Keeps_Siblings()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        var a = session.AppendNode(rootId, @"C:\img\a.png", "a");
+        var b = session.AppendNode(rootId, @"C:\img\b.png", "b");
+
+        var removed = session.RemoveSubtree(a.NodeId);
+
+        Assert.Empty(removed);
+        Assert.True(session.Nodes.ContainsKey(a.NodeId));
+        Assert.True(session.Nodes.ContainsKey(b.NodeId));
+    }
+
+    [Fact]
+    public void RemoveSubtree_Unknown_Node_Returns_Empty()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+
+        Assert.Empty(session.RemoveSubtree("missing"));
+        Assert.Single(session.Nodes);
+    }
 }

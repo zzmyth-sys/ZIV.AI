@@ -37,5 +37,12 @@ public interface IEditNode
     /// </summary>
     MaskSpec? Mask { get; }
 
+    /// <summary>
+    /// The per-node re-run snapshot (Step 9C.8-A): the UI resolution and reference images
+    /// the edit was submitted with. <c>null</c> when the node carries neither. Everything
+    /// else needed to re-run is re-derived from <see cref="Command"/> and the parent node.
+    /// </summary>
+    RerunSpec? Rerun { get; }
+
     DateTimeOffset CreatedAt { get; }
 }

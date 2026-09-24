@@ -43,4 +43,27 @@ public interface IEditSessionWriter
     /// preserved. A no-op when <paramref name="nodeId"/> is unknown.
     /// </summary>
     void SetNodeMask(string nodeId, MaskSpec? mask);
+
+    /// <summary>
+    /// Sets (or clears) the re-run snapshot of one node (Step 9C.8-A). Like the crop /
+    /// mask it is a node property — no node is added, and the node's identity / parent /
+    /// image / crop / mask are preserved. A no-op when <paramref name="nodeId"/> is unknown.
+    /// </summary>
+    void SetNodeRerun(string nodeId, RerunSpec? rerun);
+
+    /// <summary>
+    /// Replaces a node's output image <b>in place</b> (Step 9C.8-A2): the node is rebuilt
+    /// with the same identity / parent / command / crop / mask / re-run snapshot; only
+    /// <see cref="IEditNode.ImagePath"/> changes. No node is added. A no-op when
+    /// <paramref name="nodeId"/> is unknown.
+    /// </summary>
+    void ReplaceNodeImage(string nodeId, string newImagePath);
+
+    /// <summary>
+    /// Removes the whole subtree <b>below</b> <paramref name="nodeId"/> — every descendant,
+    /// while the node itself is preserved — and returns the removed nodes so the caller can
+    /// clean up their files (Step 9C.8-A2). Returns an empty list when
+    /// <paramref name="nodeId"/> is unknown (no-op, matching <see cref="SetNodeCrop"/>).
+    /// </summary>
+    IReadOnlyList<IEditNode> RemoveSubtree(string nodeId);
 }

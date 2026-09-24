@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Chrome;
+using Path = Avalonia.Controls.Shapes.Path;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
@@ -44,7 +45,6 @@ public partial class MainWindow : Window
     private IModelProfileRegistry _modelProfiles = null!;
     private EditSession _session = null!;
     private ImagePreview? _imagePreview;
-    private CancellationTokenSource? _cts;
     private bool _closing;
     private bool _suppressHistorySelection;
 
@@ -75,7 +75,7 @@ public partial class MainWindow : Window
         // Step 9C.5: the same EditSession instance is passed as both the read-only
         // session view and the writer (it implements IEditSession / IEditSessionWriter);
         // the UI view model never references the Agent implementation type.
-        _vm = new SessionViewModel(session, session, commandParser, executor);
+        _vm = new SessionViewModel(session, session, commandParser, executor, _store.DeleteNodeArtifacts);
 
         InitializeComponent();
         if (this.FindControl<ChromeTitleBar>("PART_Chrome") is { } chrome)
@@ -239,40 +239,50 @@ public partial class MainWindow : Window
         ScrollToEnd();
     }
 
+    /// <summary>Chat-bubble image size (70% of the former 320; the text is not scaled).</summary>
+    private const double BubbleImageSize = 224;
+
     private Control BuildMessage(ChatMessage message)
     {
         var panel = new StackPanel { Spacing = 4, MaxWidth = 420 };
 
-        panel.Children.Add(new TextBlock
-        {
-            Text = message.Role switch
-            {
-                ChatRole.User => "你",
-                ChatRole.Assistant => "AI",
-                _ => "系统",
-            },
-            Foreground = SecondaryTextBrush,
-            FontSize = 12,
-        });
+        var rerunNodeId = message.Role == ChatRole.Assistant ? message.NodeId : null;
+        var canRerun = rerunNodeId is { Length: > 0 } id && _vm.CanRerun(id);
+        var hasAction = message.IsPending || canRerun;
 
-        if (!string.IsNullOrWhiteSpace(message.Text))
-        {
-            var textBlock = new TextBlock
+        var textBlock = string.IsNullOrWhiteSpace(message.Text)
+            ? null
+            : new TextBlock
             {
                 Text = message.Text,
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = message.IsError ? ErrorBrush : TextBrush,
+                VerticalAlignment = VerticalAlignment.Center,
             };
 
-            // Progress / status is routed into the in-flight "生成中" bubble.
-            if (message.IsPending)
-            {
-                _pendingTextLabel = textBlock;
-            }
-
-            panel.Children.Add(textBlock);
+        // Progress / status is routed into the in-flight "生成中" bubble.
+        if (message.IsPending)
+        {
+            _pendingTextLabel = textBlock;
         }
 
+        if (!hasAction)
+        {
+            if (textBlock is not null)
+            {
+                panel.Children.Add(textBlock);
+            }
+
+            if (message.ImagePath is { Length: > 0 } stillPath)
+            {
+                AddPreview(panel, stillPath);
+            }
+
+            return BuildBubbleBorder(message, panel);
+        }
+
+        // Image(s) first, then one row with the status text and the action button
+        // (Step 9C.8-B2 follow-up: the info text moves down next to the ×/regenerate button).
         if (message.ImagePath is { Length: > 0 } path)
         {
             AddPreview(panel, path);
@@ -283,8 +293,8 @@ public partial class MainWindow : Window
             // The live preview target; ShowPreview fills it as 0x02 frames arrive.
             var preview = new Image
             {
-                MaxWidth = 320,
-                MaxHeight = 320,
+                MaxWidth = BubbleImageSize,
+                MaxHeight = BubbleImageSize,
                 Stretch = Stretch.Uniform,
                 HorizontalAlignment = HorizontalAlignment.Left,
                 IsVisible = false,
@@ -293,53 +303,10 @@ public partial class MainWindow : Window
             panel.Children.Add(preview);
         }
 
-        return new Border
-        {
-            Background = message.Role == ChatRole.User ? UserBubbleBrush : AssistantBubbleBrush,
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(10, 8),
-            HorizontalAlignment = message.Role == ChatRole.User
-                ? HorizontalAlignment.Right
-                : HorizontalAlignment.Left,
-            Child = panel,
-        };
-    }
+        var action = BuildBubbleAction(message, canRerun ? rerunNodeId : null);
+        panel.Children.Add(BuildActionRow(textBlock, action));
 
-    private void AddPreview(Panel panel, string path)
-    {
-        try
-        {
-            var bitmap = new Bitmap(path);
-            _bitmaps.Add(bitmap);
-
-            // Clicking a chat image opens the standalone large-image preview window.
-            var image = new Image
-            {
-                Source = bitmap,
-                MaxWidth = 320,
-                MaxHeight = 320,
-                Stretch = Stretch.Uniform,
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Cursor = new Cursor(StandardCursorType.Hand),
-            };
-            image.PointerPressed += (_, e) =>
-            {
-                e.Handled = true;
-                OpenImagePreview(path);
-            };
-            ToolTip.SetTip(image, "点击查看大图");
-
-            panel.Children.Add(image);
-        }
-        catch (Exception ex)
-        {
-            panel.Children.Add(new TextBlock
-            {
-                Text = $"[预览失败] {ex.Message}",
-                Foreground = ErrorBrush,
-                TextWrapping = TextWrapping.Wrap,
-            });
-        }
+        return BuildBubbleBorder(message, panel);
     }
 
     private void RenderHistory()
@@ -364,13 +331,13 @@ public partial class MainWindow : Window
         }
     }
 
-    private static ListBoxItem BuildHistoryItem(HistoryItem item)
+    private ListBoxItem BuildHistoryItem(HistoryItem item)
     {
         var label = string.IsNullOrWhiteSpace(item.Node.Command)
             ? item.Node.NodeId[..Math.Min(8, item.Node.NodeId.Length)]
             : item.Node.Command;
 
-        return new ListBoxItem
+        var listItem = new ListBoxItem
         {
             Tag = item.Node.NodeId,
             Content = new TextBlock
@@ -381,6 +348,9 @@ public partial class MainWindow : Window
                 TextTrimming = TextTrimming.CharacterEllipsis,
             },
         };
+
+        AttachRerunMenu(listItem, item);
+        return listItem;
     }
 
     private void SetBusy(bool busy)
@@ -508,6 +478,5 @@ public partial class MainWindow : Window
     private void DisposeBitmaps()
     {
         ReleaseBitmaps();
-        _cts?.Dispose();
     }
 }

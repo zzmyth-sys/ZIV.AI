@@ -174,10 +174,55 @@ public class SessionStoreTests
     }
 
     [Fact]
-    public async Task Save_Does_Not_Record_Additional_Images()
+    public async Task Save_Then_Load_RoundTrips_Rerun_Snapshot()
     {
-        // D7 (Step 9C.5-D): reference images are a per-request concern and must not
-        // leak into session.json.
+        // Step 9C.8-A: a node's re-run snapshot (UI resolution + reference images) is
+        // persisted under the node's `rerun` object; reference images are copied into
+        // the project's refs/ folder and stored as relative names.
+        var root = NewRoot();
+        var source = NewRoot();
+
+        try
+        {
+            var store = new SessionStore(root);
+            var session = new EditSession();
+            session.SetRoot(WriteFile(source, "root.png"));
+            var rootId = session.CurrentNodeId!;
+            var node = session.AppendNode(rootId, WriteFile(source, "out.png"), "/去水印");
+            session.SetNodeRerun(node.NodeId, new RerunSpec
+            {
+                Resolution = new ResolutionPolicy { Mode = ResolutionMode.Side, Side = 1536 },
+                AdditionalImages = new[] { WriteFile(source, "ref1.png"), WriteFile(source, "ref2.png") },
+            });
+
+            await store.SaveAsync(session, "重跑项目");
+            var loaded = await store.LoadAsync(session.SessionId);
+
+            Assert.Empty(loaded.Warnings);
+            var loadedNode = loaded.Session.GetHistory().Single(n => n.NodeId == node.NodeId);
+            Assert.NotNull(loadedNode.Rerun);
+            Assert.NotNull(loadedNode.Rerun!.Resolution);
+            Assert.Equal(ResolutionMode.Side, loadedNode.Rerun.Resolution!.Mode);
+            Assert.Equal(1536, loadedNode.Rerun.Resolution.Side);
+            Assert.Equal(2, loadedNode.Rerun.AdditionalImages.Count);
+            Assert.All(loadedNode.Rerun.AdditionalImages, path => Assert.True(File.Exists(path)));
+            Assert.Contains(
+                loadedNode.Rerun.AdditionalImages,
+                path => path.EndsWith("_ref1.png", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Cleanup(root);
+            Cleanup(source);
+        }
+    }
+
+    [Fact]
+    public async Task Save_Without_Snapshot_Does_Not_Record_Additional_Images()
+    {
+        // A node with no re-run snapshot must not write an `additional_images` array,
+        // so a plain project's session.json stays unchanged (Step 9C.8-A). `rerun` may
+        // still serialize as null, matching the existing `crop` / `mask` nulls.
         var root = NewRoot();
         var source = NewRoot();
 
@@ -346,6 +391,95 @@ public class SessionStoreTests
             var store = new SessionStore(root);
 
             Assert.Empty(await store.ListAsync());
+        }
+        finally
+        {
+            Cleanup(root);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteNodeArtifacts_Removes_Node_Image_And_References()
+    {
+        var root = NewRoot();
+        var source = NewRoot();
+
+        try
+        {
+            var store = new SessionStore(root);
+            var session = new EditSession();
+            session.SetRoot(WriteFile(source, "root.png"));
+            var rootId = session.CurrentNodeId!;
+            var node = session.AppendNode(rootId, WriteFile(source, "out.png"), "/去水印");
+            session.SetNodeRerun(node.NodeId, new RerunSpec
+            {
+                Resolution = new ResolutionPolicy { Mode = ResolutionMode.Side, Side = 1536 },
+                AdditionalImages = new[] { WriteFile(source, "ref1.png") },
+            });
+
+            await store.SaveAsync(session, "p");
+            var projectDir = store.GetProjectDirectory(session.SessionId);
+            Assert.True(File.Exists(Path.Combine(projectDir, node.NodeId + ".png")));
+            Assert.Single(Directory.GetFiles(Path.Combine(projectDir, "refs"), node.NodeId + "_ref*"));
+
+            store.DeleteNodeArtifacts(session.SessionId, new[] { node.NodeId }, includeReferences: true);
+
+            Assert.False(File.Exists(Path.Combine(projectDir, node.NodeId + ".png")));
+            Assert.Empty(Directory.GetFiles(Path.Combine(projectDir, "refs"), node.NodeId + "_ref*"));
+            // A sibling / root artifact is untouched.
+            Assert.True(File.Exists(Path.Combine(projectDir, rootId + ".png")));
+        }
+        finally
+        {
+            Cleanup(root);
+            Cleanup(source);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteNodeArtifacts_Without_References_Keeps_Refs()
+    {
+        var root = NewRoot();
+        var source = NewRoot();
+
+        try
+        {
+            var store = new SessionStore(root);
+            var session = new EditSession();
+            session.SetRoot(WriteFile(source, "root.png"));
+            var rootId = session.CurrentNodeId!;
+            var node = session.AppendNode(rootId, WriteFile(source, "out.png"), "/去水印");
+            session.SetNodeRerun(node.NodeId, new RerunSpec
+            {
+                Resolution = new ResolutionPolicy { Mode = ResolutionMode.Side, Side = 1536 },
+                AdditionalImages = new[] { WriteFile(source, "ref1.png") },
+            });
+            await store.SaveAsync(session, "p");
+            var projectDir = store.GetProjectDirectory(session.SessionId);
+
+            store.DeleteNodeArtifacts(session.SessionId, new[] { node.NodeId }, includeReferences: false);
+
+            Assert.False(File.Exists(Path.Combine(projectDir, node.NodeId + ".png")));
+            Assert.Single(Directory.GetFiles(Path.Combine(projectDir, "refs"), node.NodeId + "_ref*"));
+        }
+        finally
+        {
+            Cleanup(root);
+            Cleanup(source);
+        }
+    }
+
+    [Fact]
+    public void DeleteNodeArtifacts_Missing_Project_Is_NoOp()
+    {
+        var root = NewRoot();
+
+        try
+        {
+            var store = new SessionStore(root);
+            store.DeleteNodeArtifacts("missing", new[] { "n1" }, includeReferences: true);
+
+            Assert.False(Directory.Exists(store.GetProjectDirectory("missing")));
         }
         finally
         {

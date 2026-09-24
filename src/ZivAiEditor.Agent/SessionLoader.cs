@@ -106,6 +106,30 @@ public static class SessionLoader
                 }
             }
 
+            RerunSpec? rerun = null;
+            if (dtoNode.Rerun is { } dtoRerun)
+            {
+                var references = new List<string>();
+                foreach (var referenceName in dtoRerun.AdditionalImages)
+                {
+                    var referencePath = Resolve(projectDirectory, referenceName);
+                    if (!string.IsNullOrWhiteSpace(referencePath) && File.Exists(referencePath))
+                    {
+                        references.Add(referencePath);
+                    }
+                    else
+                    {
+                        warnings.Add($"节点 {ShortId(dtoNode.NodeId)} 的参考图缺失，已忽略。");
+                    }
+                }
+
+                var resolution = FromDto(dtoRerun.Resolution);
+                if (resolution is not null || references.Count > 0)
+                {
+                    rerun = new RerunSpec { Resolution = resolution, AdditionalImages = references };
+                }
+            }
+
             nodes.Add(new EditNode
             {
                 NodeId = dtoNode.NodeId,
@@ -114,6 +138,7 @@ public static class SessionLoader
                 Command = dtoNode.Command,
                 Crop = crop,
                 Mask = mask,
+                Rerun = rerun,
                 CreatedAt = dtoNode.CreatedAt,
             });
         }
@@ -173,8 +198,32 @@ public static class SessionLoader
         Command = node.Command,
         Crop = node.Crop,
         Mask = node.Mask,
+        Rerun = node.Rerun,
         CreatedAt = node.CreatedAt,
     };
+
+    private static ResolutionPolicy? FromDto(SessionFileResolution? dto)
+    {
+        if (dto is null)
+        {
+            return null;
+        }
+
+        var mode = Enum.TryParse<ResolutionMode>(dto.Mode, ignoreCase: true, out var parsed)
+            ? parsed
+            : ResolutionMode.Side;
+
+        return new ResolutionPolicy
+        {
+            Mode = mode,
+            Side = dto.Side,
+            Area = dto.Area,
+            Scale = dto.Scale,
+            Width = dto.Width,
+            Height = dto.Height,
+            MaxPixels = dto.MaxPixels,
+        };
+    }
 
     private static string Resolve(string projectDirectory, string? name)
     {

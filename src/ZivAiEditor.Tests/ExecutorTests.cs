@@ -244,14 +244,65 @@ public class ExecutorTests
     }
 
     [Fact]
-    public async Task Rerun_Is_Not_Supported()
+    public async Task Rerun_Rebuilds_Plan_From_Node_And_Restores_Current()
     {
-        var executor = CreateExecutor(new FakeTool("a", (input, _) => Task.FromResult(Ok(input.StepId, "x"))));
+        var tool = new FakeTool("QW21edit", (input, _) => Task.FromResult(Ok(input.StepId, @"C:\out\r.png")));
+        var session = new EditSession();
+        var executor = CreateExecutor(session, TempParser(), tool);
 
-        await Assert.ThrowsAsync<NotSupportedException>(() => executor.RerunAsync("task-1"));
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        var node = session.AppendNode(rootId, @"C:\img\out.png", "把天空换成日落");
+        var resolution = new ResolutionPolicy { Mode = ResolutionMode.Side, Side = 1024 };
+        session.SetNodeRerun(node.NodeId, new RerunSpec
+        {
+            Resolution = resolution,
+            AdditionalImages = new[] { @"C:\img\ref.png" },
+        });
+
+        var state = await executor.RerunAsync(node.NodeId);
+
+        Assert.Equal(TaskStatus.Succeeded, state.Status);
+        var input = Assert.Single(tool.Received);
+        // Source image comes from the parent node (the root), not the node's own output.
+        Assert.Equal(@"C:\img\root.png", input.MainImagePath);
+        Assert.Equal("把天空换成日落", input.Parameters["prompt"]);
+        Assert.Same(resolution, input.Resolution);
+        Assert.Equal(new[] { @"C:\img\ref.png" }, input.AdditionalImages);
+        // The previous current node is restored after the rebuild.
+        Assert.Equal(node.NodeId, session.CurrentNodeId);
+        Assert.Equal(2, session.GetHistory().Count);
+    }
+
+    [Fact]
+    public async Task Rerun_Parentless_Node_Throws()
+    {
+        var session = new EditSession();
+        var executor = CreateExecutor(session, TempParser(),
+            new FakeTool("a", (input, _) => Task.FromResult(Ok(input.StepId, "x"))));
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => executor.RerunAsync(rootId));
+    }
+
+    [Fact]
+    public async Task Rerun_Unknown_Node_Throws()
+    {
+        var session = new EditSession();
+        var executor = CreateExecutor(session, TempParser(),
+            new FakeTool("a", (input, _) => Task.FromResult(Ok(input.StepId, "x"))));
+
+        await Assert.ThrowsAsync<ArgumentException>(() => executor.RerunAsync("missing"));
     }
 
     private static Executor CreateExecutor(params IEditTool[] tools)
+    {
+        var session = new EditSession();
+        return CreateExecutor(session, TempParser(), tools);
+    }
+
+    private static Executor CreateExecutor(EditSession session, ICommandParser parser, params IEditTool[] tools)
     {
         var registry = new ToolRegistry();
         foreach (var tool in tools)
@@ -259,8 +310,11 @@ public class ExecutorTests
             registry.Register(tool);
         }
 
-        return new Executor(registry, new ExecutionQueue());
+        return new Executor(registry, new ExecutionQueue(), session, session, parser);
     }
+
+    private static CommandParser TempParser()
+        => new(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "commands.json"));
 
     private static EditPlan Plan(params EditStep[] steps)
         => new() { MainImagePath = Main, Steps = steps };

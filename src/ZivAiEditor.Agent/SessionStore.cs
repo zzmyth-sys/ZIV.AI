@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using ZivAiEditor.Contracts.Imaging;
 
 namespace ZivAiEditor.Agent;
 
@@ -41,7 +42,7 @@ public sealed class ProjectCorruptException : Exception
 /// "save a copy elsewhere" capability for a later UI. Pure BCL file IO / JSON — no platform
 /// or GPU dependency — so it is unit-testable.</para>
 /// </summary>
-public sealed class SessionStore
+public sealed partial class SessionStore
 {
     public const int FormatVersion = 1;
 
@@ -286,6 +287,17 @@ public sealed class SessionStore
                 };
             }
 
+            SessionFileRerun? rerun = null;
+            if (node.Rerun is { } rerunSpec
+                && (rerunSpec.Resolution is not null || rerunSpec.AdditionalImages.Count > 0))
+            {
+                rerun = new SessionFileRerun
+                {
+                    Resolution = ToDto(rerunSpec.Resolution),
+                    AdditionalImages = CopyReferenceImages(directory, node.NodeId, rerunSpec.AdditionalImages),
+                };
+            }
+
             SessionFileMask? mask = null;
             if (node.Mask is { } maskSpec && !string.IsNullOrWhiteSpace(maskSpec.MaskImagePath))
             {
@@ -310,6 +322,7 @@ public sealed class SessionStore
                 Command = node.Command,
                 Crop = crop,
                 Mask = mask,
+                Rerun = rerun,
                 CreatedAt = node.CreatedAt,
             });
         }
@@ -327,6 +340,55 @@ public sealed class SessionStore
         var json = JsonSerializer.Serialize(dto, Json.SessionFileDto);
         await File.WriteAllTextAsync(Path.Combine(directory, SessionFileName), json, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Copies a node's reference images into the project's <c>refs/</c> folder as
+    /// <c>{nodeId}_ref{n}{ext}</c> and returns their <b>relative</b> names (Step 9C.8-A).
+    /// Missing sources are skipped. The destination folder is created on demand.
+    /// </summary>
+    private static List<string> CopyReferenceImages(
+        string directory,
+        string nodeId,
+        IReadOnlyList<string> sources)
+    {
+        var names = new List<string>(sources.Count);
+        for (var index = 0; index < sources.Count; index++)
+        {
+            var source = sources[index];
+            if (string.IsNullOrWhiteSpace(source) || !File.Exists(source))
+            {
+                continue;
+            }
+
+            var extension = Path.GetExtension(source);
+            if (string.IsNullOrEmpty(extension))
+            {
+                extension = ".png";
+            }
+
+            var relative = $"refs/{nodeId}_ref{index + 1}{extension}";
+            var destination = Path.Combine(directory, "refs", $"{nodeId}_ref{index + 1}{extension}");
+            Directory.CreateDirectory(Path.Combine(directory, "refs"));
+            CopyIfNeeded(source, destination);
+            names.Add(relative);
+        }
+
+        return names;
+    }
+
+    private static SessionFileResolution? ToDto(ResolutionPolicy? policy)
+        => policy is null
+            ? null
+            : new SessionFileResolution
+            {
+                Mode = policy.Mode.ToString(),
+                Side = policy.Side,
+                Area = policy.Area,
+                Scale = policy.Scale,
+                Width = policy.Width,
+                Height = policy.Height,
+                MaxPixels = policy.MaxPixels,
+            };
 
     private static void CopyIfNeeded(string? source, string destination)
     {
@@ -436,6 +498,10 @@ internal sealed class SessionFileNode
     [JsonPropertyName("mask")]
     public SessionFileMask? Mask { get; init; }
 
+    /// <summary>Optional re-run snapshot (Step 9C.8-A); absent in older projects.</summary>
+    [JsonPropertyName("rerun")]
+    public SessionFileRerun? Rerun { get; init; }
+
     [JsonPropertyName("created_at")]
     public DateTimeOffset CreatedAt { get; init; }
 }
@@ -487,6 +553,8 @@ internal sealed class SessionFileMask
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(SessionFileDto))]
 [JsonSerializable(typeof(SessionFileMask))]
+[JsonSerializable(typeof(SessionFileRerun))]
+[JsonSerializable(typeof(SessionFileResolution))]
 internal partial class SessionStoreJsonContext : JsonSerializerContext
 {
 }

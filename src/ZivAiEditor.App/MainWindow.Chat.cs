@@ -1,0 +1,140 @@
+using System;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using ZivAiEditor.UI.Chat;
+using Path = Avalonia.Controls.Shapes.Path;
+
+namespace ZivAiEditor.App;
+
+/// <summary>
+/// Chat-bubble rendering half of <see cref="MainWindow"/> (Step 9C.8-B2): the bubble action
+/// row (× cancel / regenerate), its button builder and the image preview. Split out of the
+/// main file to keep each file within the Z8 budget.
+/// </summary>
+public partial class MainWindow
+{
+    /// <summary>A row with the status text (fills) and the action button docked right.</summary>
+    private static Control BuildActionRow(TextBlock? text, Button? action)
+    {
+        if (text is null)
+        {
+            return (Control?)action ?? new Panel();
+        }
+
+        if (action is null)
+        {
+            return text;
+        }
+
+        var dock = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(action, Dock.Right);
+        dock.Children.Add(action);
+        dock.Children.Add(text);
+        return dock;
+    }
+
+    /// <summary>Builds the × (pending) / regenerate (rerunnable) bubble action button.</summary>
+    private Button? BuildBubbleAction(ChatMessage message, string? rerunNodeId)
+    {
+        if (message.IsPending)
+        {
+            // Step 9C.8-B: cancel the in-flight run (title-bar close style, 75%-transparent
+            // rounded base).
+            var cancel = new Button
+            {
+                Classes = { "bubbleAction", "bubbleClose" },
+                Content = new Path { Classes = { "bubbleIcon" }, Data = BubbleIcon("IconClose") },
+            };
+            ToolTip.SetTip(cancel, "取消");
+            cancel.Click += (_, _) =>
+            {
+                cancel.IsEnabled = false;
+                SetStatus("取消中…");
+                _vm.CancelCurrent();
+            };
+            return cancel;
+        }
+
+        if (rerunNodeId is { Length: > 0 })
+        {
+            // Once the image is generated the × becomes a regenerate (re-run) button,
+            // mirroring the history-node menu.
+            var regenerate = new Button
+            {
+                Classes = { "bubbleAction" },
+                Content = new Path { Classes = { "bubbleIcon" }, Data = BubbleIcon("IconRefresh") },
+            };
+            ToolTip.SetTip(regenerate, "重新生成");
+            regenerate.Click += (_, _) => _ = RerunAsync(rerunNodeId);
+            return regenerate;
+        }
+
+        return null;
+    }
+
+    private static Border BuildBubbleBorder(ChatMessage message, Control child) => new()
+    {
+        Background = message.Role == ChatRole.User ? UserBubbleBrush : AssistantBubbleBrush,
+        CornerRadius = new CornerRadius(6),
+        Padding = new Thickness(7, 6),
+        HorizontalAlignment = message.Role == ChatRole.User
+            ? HorizontalAlignment.Right
+            : HorizontalAlignment.Left,
+        Child = child,
+    };
+
+    private void AddPreview(Panel panel, string path)
+    {
+        try
+        {
+            var bitmap = new Bitmap(path);
+            _bitmaps.Add(bitmap);
+
+            // Clicking a chat image opens the standalone large-image preview window.
+            var image = new Image
+            {
+                Source = bitmap,
+                MaxWidth = BubbleImageSize,
+                MaxHeight = BubbleImageSize,
+                Stretch = Stretch.Uniform,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Cursor = new Cursor(StandardCursorType.Hand),
+            };
+            image.PointerPressed += (_, e) =>
+            {
+                // Only the left button opens the large preview; the right button is
+                // reserved for the node's context menu (Step 9C.8-A: "重跑").
+                if (!e.GetCurrentPoint(image).Properties.IsLeftButtonPressed)
+                {
+                    return;
+                }
+
+                e.Handled = true;
+                OpenImagePreview(path);
+            };
+            AttachRerunMenuToImage(image, path);
+            ToolTip.SetTip(image, "左键查看大图 / 右键重跑");
+
+            panel.Children.Add(image);
+        }
+        catch (Exception ex)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"[预览失败] {ex.Message}",
+                Foreground = ErrorBrush,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+    }
+
+    /// <summary>Resolves a Tabler icon geometry for a chat-bubble action button.</summary>
+    private Geometry BubbleIcon(string key)
+        => this.TryFindResource(key, out var resource) && resource is Geometry geometry
+            ? geometry
+            : Geometry.Parse("M18 6l-12 12 M6 6l12 12");
+}

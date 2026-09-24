@@ -2584,3 +2584,379 @@ Agent 编排，应下沉至 Agent；涉及 `IExecutor` 设计变更，单独立�
 - **羽化视觉与后端一致性 GPU 验证**（待用户确认 GPU 空闲 + 明确同意）。
 - **App 层指针路由（中键 / 悬停）无自动化测试**：`PointerArbiter` 已单测，`OnPressed/Moved/Released`
   路由为 App 层薄封装，由真机 / 无头探针覆盖。
+
+---
+
+## Step 9C.8-A（日期：2026-09-24）
+
+> **修订说明（Step 9C.8-A · 参数快照 + `RerunAsync`（放弃 SQLite））**
+>
+> 本段为 Step 9C.8-A **只增**记录。目标：让历史节点可**重跑**——`EditNode` 加最小参数快照，
+> `IExecutor.RerunAsync` 从 DAG 重建 `EditPlan` 并执行，历史节点右键「重跑」。
+> **不改动 Step 0–9C.7-B 已冻结行**；本段为**纯追加**。契约变更为**新增类型 / 新增成员 /
+> 一次授权签名变更**（`RerunAsync` 的键 `taskId` → `nodeId`）。
+
+### 9C.8A.1 Z20 修订（冻结 · 授权说明，不改原文）
+
+> **修订说明（2026-09-24 · Z20 落地方式）**
+>
+> **Z20 的任务状态来源 = DAG（`session.json`）。** 运行记录的可重跑性由 `EditNode` 的
+> 参数快照 / `Command` 保证。**不引入独立 SQLite 存储**——经评估，其成本（AOT 风险 /
+> 依赖 / 表结构维护 / 迁移）与 ZIV.AI 单机轻量定位（不做跨会话任务查询 / 统计）不成比例。
+> Z20 原文（`SPEC.md` §6.2）不改，以本说明为准；`SqliteTaskStore` / `ITaskStore` 不再落地。
+
+### 9C.8A.2 新增契约（冻结 · 追加 → 非破坏）
+
+| 类型 | 文件 | 说明 |
+|---|---|---|
+| `RerunSpec`（类） | `ZivAiEditor.Contracts/Planning/RerunSpec.cs` | `ResolutionPolicy? Resolution`；`IReadOnlyList<string> AdditionalImages`（默认空）。**只存 DAG 无法重建的两项**：UI 分辨率 + 参考图；`prompt` / `tool` / `steps` / `denoise` 由 `Command` 重解析，源图 / mask 由父节点推导 |
+
+- `IEditNode` **新增** `RerunSpec? Rerun { get; }`（默认 null）；`EditNode` 新增同名 `init` 属性。
+- `IEditSessionWriter` **新增** `void SetNodeRerun(string nodeId, RerunSpec? rerun)`。
+- **既有成员零修改**（除下方 9C.8A.3 授权的 `RerunAsync`）。
+
+### 9C.8A.3 `IExecutor.RerunAsync` 签名变更（冻结 · 授权）
+
+> **2026-09-24，用户授权：`RerunAsync` 的重跑键由 `taskId` 改为 `nodeId`。**
+> 原因：本仓库**没有 taskId**（`TaskState.TaskId` 是执行时新建的 Guid，从不外传 / 落盘）；
+> 可重跑的实体是 DAG 节点。旧签名 `RerunAsync(string taskId, ...)` **不再存在**。
+
+```csharp
+// 新签名（旧 taskId 版作废）
+Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = null,
+                           CancellationToken ct = default);
+```
+
+- **语义**：重跑 = **重新执行**（新随机 seed；**不保证逐像素复现**）。无父节点的节点
+  （源图 root / T2I-first 节点）**不可重跑**（`InvalidOperationException`）；未知节点抛
+  `ArgumentException`。**生成新节点、不覆盖旧节点（Z24）**——新节点为原节点的**兄弟**
+  （同父），由 UI 追加。
+
+### 9C.8A.4 `session.json` 节点结构（冻结 · 追加字段，向后兼容）
+
+- `SessionFileNode` 新增可选 `rerun` 对象；**两者皆空时序列化为 `null`**（与既有 `crop` /
+  `mask` 的 null 一致）。`FormatVersion` **仍为 1**；缺字段 → `Rerun = null`（旧项目加载不受影响）。
+
+```json
+"rerun": {
+  "resolution": { "mode": "Side", "side": 1536, "area": null, "scale": null,
+                  "width": null, "height": null, "max_pixels": 4700000 },
+  "additional_images": ["refs/{NodeId}_ref1.png", "refs/{NodeId}_ref2.jpg"]
+}
+```
+
+- `resolution` 可空；`mode` 为可读字符串（`Side` / `Area` / `Scale` / `Explicit`）。
+- `additional_images` 为**相对项目目录**的名字，位于 `refs/` 子目录。
+
+### 9C.8A.5 参考图持久化（冻结 · D7 修订授权）
+
+> **2026-09-24，用户授权修订 9C.5-D.5（D7=B）：参考图**允许**作为节点重跑快照写入
+> `session.json`。** 原 D7「参考图不写入 `session.json`」的**一般性**仍成立（不写顶层
+> 字段、不作为节点图）；本修订仅放开「节点重跑快照」这一受限场景。
+
+- **路径策略 = 拷入项目目录**：保存时把节点快照的参考图拷为
+  `sessions/{sessionId}/refs/{NodeId}_ref{n}{ext}`，`session.json` 存**相对名**；加载时拼
+  项目目录解析（与节点图 / 遮罩 / 裁切一致，保持项目可移植）。缺文件 → 丢该参考图 + 警告，
+  **保留 resolution 与节点**。
+
+### 9C.8A.6 实现清单（冻结 · 非契约）
+
+| 类 / 改动 | 文件 | 职责 |
+|---|---|---|
+| `RerunSpec`（新增） | `Contracts/Planning/RerunSpec.cs` | 重跑快照值对象 |
+| （修改）`IEditNode` / `EditNode` | `Contracts/Planning/IEditNode.cs` / `Agent/EditSession.cs` | `Rerun` 属性 |
+| （修改）`IEditSessionWriter` / `EditSession` | `Contracts/Planning/IEditSessionWriter.cs` / `Agent/EditSession.cs` | `SetNodeRerun`；`Restore` / `SetNodeCrop` / `SetNodeMask` 均保留 `Rerun` |
+| （修改）`IExecutor` / `Executor` | `Contracts/Execution/IExecutor.cs` / `Agent/Executor.cs` | `RerunAsync(nodeId)`：查节点 → 暂存 current → `NavigateTo(parent)` → `ParseAsync(Command, Resolution)` → 注入 `AdditionalImages` → 恢复 current（try/finally）→ `ExecuteAsync`。**Executor 新增注入 `IEditSession` / `IEditSessionWriter` / `ICommandParser`**（重跑需从 DAG 重建计划） |
+| （修改）`SessionStore` / `SessionLoader` | `Agent/SessionStore.cs` / `Agent/SessionLoader.cs` / `Agent/SessionFileRerun.cs`（新 DTO） | `rerun` 序列化 / 反序列化 + `refs/` 拷贝 / 解析 |
+| （修改）`SessionViewModel` | `UI/Chat/SessionViewModel.cs` / `SessionViewModel.Rerun.cs`（partial，新） | `SubmitAsync` 写快照；`RerunNodeAsync` 追加兄弟节点；`RunWithOomRetryAsync` 共用提取 |
+| （修改）`MainWindow` | `App/MainWindow.axaml.cs` / `MainWindow.Rerun.cs`（partial，新） | 历史节点右键「重跑」→ `RerunNodeAsync` |
+| （修改）`AppContext` | `App/AppContext.cs` | 先建 session / parser，再注入 `Executor` |
+
+- **DAG 追加仍留在 UI**：`Executor.RerunAsync` 只重建计划 + 执行，不写 DAG；`SessionViewModel`
+  追加新节点（与 `SubmitAsync` 现有分工一致）。
+- **Z8**：`SessionStore.cs` 560 行；新增 `SessionFileRerun.cs`（DTO）、`SessionViewModel.Rerun.cs`、
+  `MainWindow.Rerun.cs` 均为满足 600 行预算的拆分。
+
+### 9C.8A.7 测试结果（冻结）
+
+- `dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：受影响类 `EditSessionTests` / `SessionStoreTests` /
+  `SessionLoaderTests` / `ExecutorTests` / `SessionViewModelTests` / `ContractsSmokeTests` /
+  `CommandParserTests` → **135 通过 / 0 失败**；非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）
+  → **358 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）；本步不加载模型、不启动 Python、不占 GPU。
+
+### 9C.8A.8 遗留项（冻结）
+
+- **生成中取消**（重跑 / 提交的在飞取消 UI）→ 9C.8-B。
+- **固定 seed 复现**：重跑为「重新执行」，不保证逐像素一致；如需复现需先引入 seed 链路（后置）。
+- **`GetTaskAsync`**：阻塞式 submit 下无调用方，继续 `NotSupportedException`（后置）。
+
+---
+
+## Step 9C.8-A2（日期：2026-09-24）
+
+> **修订说明（Step 9C.8-A2 · 重跑改为「替换节点」）**
+>
+> 本段为 Step 9C.8-A2 **只增**记录。9C.8-A 的重跑语义有误——它**新建兄弟节点**；用户裁决
+> 重跑 = **重新执行同一节点、原地替换、不新建**。**不改动 Step 0–9C.8-A 已冻结行的既有成员**；
+> 契约变更为**新增两个方法**（走本段追加）。**A2/B1 授权**：级联删除子节点 + 删除旧图。
+
+### 9C.8A2.1 语义修正（冻结）
+
+- 重跑 = **原地替换**：保留 `NodeId` / `ParentNodeId` / `Command`，仅更新 `ImagePath`；
+  **不新建节点**（取代 9C.8-A 的「新建兄弟」）。
+- **A2（授权）**：重跑一个有子节点的节点 → **级联删除其全部后代**（该节点自身保留）。
+- **B1（授权）**：重跑成功后删除旧图（旧输出图 / 裁切图 / 遮罩图 / 参考图副本）。
+- **失败不删**：先执行重跑，**成功才删**；失败则节点与子树原状不动、不删任何文件。
+- 清空 `Crop` / `Mask`（新输出图，旧坐标失效）；**`Rerun` 快照保留**（支持连续重跑）。
+
+### 9C.8A2.2 新增契约（冻结 · 追加 → 非破坏）
+
+| 成员 | 文件 | 说明 |
+|---|---|---|
+| `IEditSessionWriter.ReplaceNodeImage(string nodeId, string newImagePath)` | `Contracts/Planning/IEditSessionWriter.cs` | 原地替换节点输出图；同 identity / parent / command / crop / mask / rerun；未知 nodeId → no-op |
+| `IEditSessionWriter.RemoveSubtree(string nodeId) → IReadOnlyList<IEditNode>` | 同上 | 删除 `nodeId` 的**全部后代**（`nodeId` 自身保留），返回被删节点供清文件；未知 nodeId → 空列表（no-op） |
+
+> **语义说明（与草稿注释的差异，以本段为准）**：`RemoveSubtree(nodeId)` 删除的是
+> **`nodeId` 的后代子树（不含 `nodeId` 自身）**——与 A2「级联删除所有**子节点**」一致，
+> 且使 `RerunNodeAsync` 的「先 `RemoveSubtree(N)` 再 `ReplaceNodeImage(N)`」成立。草稿注释
+> 「删除节点及其所有后代」措辞不精确，**以本段为准**。
+
+- `EditSession` 实现两方法（`EditSession.Subtree.cs`，Z8 拆分）；`EditSession` 改为 `partial`。
+- **既有成员零修改**。
+
+### 9C.8A2.3 文件清理（冻结 · 非契约）
+
+`SessionViewModel.RerunNodeAsync` 成功后的清理：
+
+| 文件 | 位置 | 处置 |
+|---|---|---|
+| 被替换节点旧输出图 | `node.ImagePath`（主图目录 `{StepId}.png` / T2I 的 `%TEMP%/zivai/{StepId}.png`） | 删 |
+| 被替换节点旧裁切图 / 遮罩图 | `_cache/crops|masks/{sessionId}/{nodeId}.png` | 删 |
+| 被删子树各节点 | 输出图 / 裁切图 / 遮罩图 | 删 |
+| **项目副本**（保存过才有） | `sessions/{id}/{nodeId}.png` / `_crop.png` / `_mask.png` | 删（被替换节点 + 子树） |
+| **项目参考图副本** | `sessions/{id}/refs/{nodeId}_ref*` | **仅删子树**；被替换节点自身的参考副本**保留**（连续重跑仍需） |
+| **外部用户参考图** | `node.Rerun.AdditionalImages`（用户原文件） | **不删（Z24）** |
+
+- **安全边界**：绝不再删除 `_session.RootImagePath`；每文件单独 try-catch、绝不抛（同
+  `CleanupSession` 精神）。
+- **项目副本清理**：`SessionStore.DeleteNodeArtifacts(sessionId, nodeIds, includeReferences)`
+  （`SessionStore.Cleanup.cs`，Z8 拆分；`SessionStore` 改为 `partial`）。未保存过 → 项目目录
+  不存在 → no-op。
+- 清理在 `Task.Run` 后台执行（Z11）。
+
+### 9C.8A2.4 `RerunNodeAsync` 流程（冻结 · 非契约）
+
+```
+1. 查节点 N（未知 → 提示并返回 false）
+2. N 无父节点 → 提示并返回 false（root / T2I-first 不可重跑）
+3. 记下 currentBefore = CurrentNodeId
+4. executor.RerunAsync(N) → state；失败 → 报错，不删任何文件
+5. 成功后：
+   a. removed = writer.RemoveSubtree(N)            // 后代子树
+   b. writer.ReplaceNodeImage(N, newOutput)
+   c. writer.SetNodeCrop(N, null) / SetNodeMask(N, null)
+   d. currentBefore ∈ {N} ∪ removed → writer.NavigateTo(N)
+   e. 项目副本清理（Task.Run）：removed 含 refs；N 不含 refs
+   f. 删旧文件（Task.Run）：N 旧输出/裁切/遮罩 + 子树各文件；不删外部参考图
+   g. RefreshHistory() + RebuildContext()
+```
+
+- **DAG 追加/删除** 仍在 UI（`SessionViewModel`）；`Executor.RerunAsync`（Agent）语义**不变**。
+
+### 9C.8A2.5 实现清单（冻结 · 非契约）
+
+| 类 / 改动 | 文件 |
+|---|---|
+| `IEditSessionWriter` +2 方法 | `Contracts/Planning/IEditSessionWriter.cs` |
+| `EditSession.ReplaceNodeImage` | `Agent/EditSession.cs`（`partial`） |
+| `EditSession.RemoveSubtree` | `Agent/EditSession.Subtree.cs`（新，Z8） |
+| `SessionStore.DeleteNodeArtifacts` | `Agent/SessionStore.Cleanup.cs`（新，Z8；`SessionStore` `partial`） |
+| `SessionViewModel` 注入 `nodeArtifactsCleaner` 委托 | `UI/Chat/SessionViewModel.cs` |
+| `RerunNodeAsync` 替换语义 + 清理 | `UI/Chat/SessionViewModel.Rerun.cs` |
+| `MainWindow` 传 `_store.DeleteNodeArtifacts` | `App/MainWindow.axaml.cs` |
+
+### 9C.8A2.6 测试结果（冻结）
+
+- `dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：受影响类 → **147 通过 / 0 失败**；非 GPU 全量（排除
+  `Ipc*` / `PlannerIntegration`）→ **370 通过 / 0 失败**。
+- **Z8**：`EditSession.cs` 533 / `EditSession.Subtree.cs` 87 / `SessionStore.cs` 560 /
+  `SessionStore.Cleanup.cs` 94 / `SessionViewModel.cs` 584 / `SessionViewModel.Rerun.cs` 244，
+  均 < 600。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 9C.8A2.7 遗留项（冻结）
+
+- **生成中取消** → 9C.8-B。
+- **固定 seed 复现**（后置）。
+- **外部用户参考图不删**：与 B1 草稿「删除参考图」的差异——仅删应用自有的项目副本，
+  不删用户原始参考图（Z24）。
+
+---
+
+## Step 9C.8-A3（日期：2026-09-24）
+
+> **新增说明（Step 9C.8-A3 · 重跑聊天流原地更新）**
+>
+> 本段为 Step 9C.8-A3 **只增**记录。9C.8-A2 已实现「重跑原地替换节点」（DAG / 历史列表正确），
+> 但聊天流仍**新增消息**（「重跑:」用户气泡 + 新 AI pending 气泡）。用户要求重跑**不新增任何
+> 消息**，直接在**原 AI 气泡**上显示进度并原地换图。**不改动 Step 0–9C.8-A2 已冻结行的既有成员**；
+> 唯一类型变化为 UI 自有类型 `ChatMessage` **追加字段**（非契约）。**不改** `SubmitAsync` 的气泡数量。
+
+### 9C.8A3.1 `ChatMessage` 追加字段（冻结 · 非契约，UI 类型）
+
+- `ZivAiEditor.UI/Chat/SessionViewModel.cs` 的 `ChatMessage` 追加：
+  `public string? NodeId { get; init; }`——标识该气泡归属的会话节点（AI 气泡），使重跑能
+  **按 NodeId 定位原气泡并原地更新**。`null` = 用户 / 系统气泡或尚未 append 的 pending 气泡。
+- **非契约**（`ChatMessage` 为 UI 自有类型，见 9A.8）；`Contracts` 零变更。
+
+### 9C.8A3.2 归属写入（冻结 · 非契约）
+
+- `SubmitAsync` 完成气泡：填 `NodeId = appended.NodeId`（**气泡数量与流程不变**，仅补字段）。
+- `RebuildContext`：System「起始图像」填 root 节点 id；每个节点的 Assistant「完成」气泡填
+  `NodeId = node.NodeId`。
+
+### 9C.8A3.3 `RerunNodeAsync` 行为（冻结 · 非契约）
+
+- **不新增任何消息**：按 `NodeId` 找到该节点的 Assistant 气泡，**原地替换**为 pending 副本
+  （`Text="重跑中…"`、`IsPending=true`、保留原 `ImagePath`、`NodeId` 不变）。
+- **进度**：`SetStatus` / `ShowPreview`（既有 pending 机制）自动指向该气泡（`RenderChat` 在
+  替换时重建并捕获 `_pendingTextLabel` / `_pendingPreviewImage`）。
+- **完成**：原地替换为 `Text="{耗时}秒 完成"`、`ImagePath=新输出`、`IsPending=false`；仅
+  `RefreshHistory()`，**不调用 `RebuildContext()`**（避免清空 / 重建气泡）。
+- **失败 / 取消**：原地替换为错误气泡（`IsError=true`、保留原 `ImagePath`）。
+- **回退**：若找不到带该 `NodeId` 的气泡（节点从未渲染），追加一个 pending 气泡（防御性）。
+
+### 9C.8A3.4 实现清单（冻结 · 非契约）
+
+| 类 / 改动 | 文件 |
+|---|---|
+| `ChatMessage.NodeId` | `UI/Chat/SessionViewModel.cs` |
+| `SubmitAsync` 完成气泡填 `NodeId` | 同上 |
+| `RebuildContext` 填 `NodeId` | 同上 |
+| `RerunNodeAsync` 原地更新 + `FindAssistantMessage` | `UI/Chat/SessionViewModel.Rerun.cs` |
+
+### 9C.8A3.5 测试结果（冻结）
+
+- `dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：受影响类 → **131 通过 / 0 失败**；非 GPU 全量（排除
+  `Ipc*` / `PlannerIntegration`）→ **373 通过 / 0 失败**。
+- **Z8**：`SessionViewModel.cs` 599 / `SessionViewModel.Rerun.cs` 308，均 < 600。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 9C.8A3.6 遗留项（冻结）
+
+- **生成中取消** → 9C.8-B。
+- **`SessionViewModel.cs` 逼近 Z8（599 行）**：后续若再加成员需拆分。
+
+---
+
+## Step 9C.8-B（日期：2026-09-24）
+
+> **新增说明（Step 9C.8-B · 生成中取消）**
+>
+> 本段为 Step 9C.8-B **只增**记录。为生成中气泡加「取消」按钮，中断在飞任务。
+> **无契约变更**（`Contracts` 零修改）；仅 UI / App 层行为 + Z8 拆分。用户裁决：
+> D1=A（VM 持有在飞 CTS + `CancelCurrent()`）/ D2=气泡内「取消」按钮 / D3=原位替换为「已取消。」/
+> D4=状态恢复。
+
+### 9C.8B.1 取消链路（冻结 · 非契约）
+
+- **机制 A**：`SessionViewModel` 持有在飞 `_inFlightCts`（`CancellationTokenSource`），
+  `SubmitAsync` / `RerunNodeAsync` 在**任何 await 之前**用 `CreateLinkedTokenSource(ct)` 建链、
+  传 `cts.Token` 给执行器，`finally` 清理。
+- **为什么不用 `IExecutor.CancelAsync(taskId)` / `IInferenceClient.CancelTaskAsync(taskId)`**：
+  `TaskState.TaskId` 在执行器内部生成、完成才返回，UI **执行期间拿不到 taskId** → 这两个 API
+  在 UI 流程中不可达。取消外部 token 是**已验证可达后端**的路径（`IpcInferenceClient` 的
+  `TryForwardCancelAsync`，Step 6E）——`Executor` 吞掉工具抛的 OCE 并返回 `Canceled` 状态。
+- **`CancelCurrent()`**（`SessionViewModel.Rerun.cs`）：`_cancelRequested || _inFlightCts is null`
+  → `false`；否则置 `_cancelRequested=true`、`cts.Cancel()`、返回 `true`；`ObjectDisposedException`
+  → `false`；**不抛**（R1）。`_cancelRequested` 保证「多次点击 → false」，且**不参与** OOM 重试
+  （token 是唯一中断源）。
+
+### 9C.8B.2 UI（冻结 · 非契约）
+
+- pending 气泡（`MainWindow.BuildMessage`）在预览图下方加「取消」`Button`：点击 → 立即禁用按钮
+  + `SetStatus("取消中…")` + `_vm.CancelCurrent()`（R2）。
+- **移除 `MainWindow._cts`**（R4）：确认其唯一用途是「传给 VM 的 token」+ `Closed` 时 `Dispose`；
+  窗口关闭走 `_closing` 标志、**不**取消 `_cts` → 改为传 `CancellationToken.None`。
+
+### 9C.8B.3 取消后语义（冻结 · 非契约）
+
+- `BuildFailureMessage`：`TaskStatus.Canceled` **优先**返回「已取消。」（R3）——此前会显示执行器写入的
+  `"canceled"`。
+- 新提交取消：User 气泡保留；pending **原位替换**为「已取消。」+ `IsError`；**不 append 节点**。
+- 重跑取消：原 AI 气泡 **原位替换**为「已取消。」+ **保留旧图** + `IsError`（A3 机制）。
+- 状态恢复：`IsBusy=false`（finally）→ 输入框 / 发送按钮恢复；`_inFlightCts` 置 null（R4/D4）。
+
+### 9C.8B.4 Z8 拆分（冻结 · 非契约）
+
+- `ChatRole` / `ChatMessage` / `HistoryItem` → `UI/Chat/ChatMessage.cs`。
+- 取消成员（`_inFlightCts` / `_cancelRequested` / `CancelCurrent`）与运行状态助手
+  （`IsSuccess` / `IsOutOfMemory` / `BuildFailureMessage`）→ `SessionViewModel.Rerun.cs`。
+- 结果：`SessionViewModel.cs` **546** 行（< 550 目标）；`SessionViewModel.Rerun.cs` 383。
+
+### 9C.8B.5 测试结果（冻结）
+
+- `dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：受影响类 → **153 通过 / 0 失败**；非 GPU 全量（排除
+  `Ipc*` / `PlannerIntegration`）→ **376 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）；取消后 `nvidia-smi` 回落由用户确认（R5）。
+
+### 9C.8B.6 遗留项（冻结）
+
+- **多任务并发取消**（当前单队列，仅当前在飞可取消）。
+- **取消后的「重试」按钮**（后置）。
+- **GPU 端到端**：取消后显存回落 + 无残留 Python（待用户确认 GPU 空闲 + 明确同意）。
+
+---
+
+## Step 9C.8-B2（日期：2026-09-24）
+
+> **新增说明（Step 9C.8-B2 · 取消按钮样式 + 重新生成 + 编辑取消回退）**
+>
+> 本段为 9C.8-B 的**用户 UI 反馈**修订。**无契约变更**（`Contracts` 零修改）；仅 UI / App 行为。
+
+### 9C.8B2.1 取消 / 重新生成按钮（冻结 · 非契约）
+
+- 生成中气泡的取消按钮改用**关闭窗体的 × 样式**（`Path.bubbleIcon` + 标题栏同款 × 几何），
+  底为 **75% 透明圆角底**（`Button.bubbleAction`：`#40FFFFFF` 圆角 6；`bubbleClose` 变体 hover 红）。
+- **生成完成后**：该位置的按钮变为**「重新生成」（重跑）**按钮（`IconRefresh`，Tabler 同源，
+  新增于 `TablerIcons.axaml`）。仅对可重跑节点（有父节点）显示（`SessionViewModel.CanRerun`）。
+- 重跑入口与历史节点右键「重跑」共用 `MainWindow.RerunAsync`。
+
+### 9C.8B2.2 编辑取消 = 回退（冻结 · 非契约）
+
+- **提交（编辑）取消**：不再显示「已取消。」气泡；`SessionViewModel` **回退聊天**（`RebuildContext`，
+  移除本次 User + pending 气泡），并置 `LastRunCanceled=true`。
+- `MainWindow` 在提交后若 `LastRunCanceled`：把**提示词打回输入框**、**附件打回附件条**
+  （`ImageImportBar.AddFiles`，快照自发送前）。
+- **重跑取消**：语义不变（原 AI 气泡「已取消。」+ 保留旧图）。
+- 新增 `SessionViewModel.LastRunCanceled` / `CanRerun(nodeId)`。
+
+### 9C.8B2.3 实现清单（冻结 · 非契约）
+
+| 类 / 改动 | 文件 |
+|---|---|
+| `IconRefresh`（Tabler 同源） | `App/Assets/Icons/TablerIcons.axaml` |
+| `Button.bubbleAction`（+`.bubbleClose`）/ `Path.bubbleIcon` | `App/Styles/ChromeStyles.axaml` |
+| 气泡取消 × / 重新生成按钮 + `BubbleIcon` | `App/MainWindow.axaml.cs` |
+| 取消回退 + `LastRunCanceled` + `CanRerun` | `UI/Chat/SessionViewModel.cs` / `SessionViewModel.Rerun.cs` |
+| 取消后恢复提示词 / 附件 | `App/MainWindow.Send.cs` |
+
+### 9C.8B2.4 测试结果（冻结）
+
+- `dotnet build ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：`SessionViewModelTests` → **47 通过 / 0 失败**；非 GPU 全量
+  （排除 `Ipc*` / `PlannerIntegration`）→ **377 通过 / 0 失败**。
+- **Z8**：`SessionViewModel.cs` 515 / `SessionViewModel.Rerun.cs` 444 / `MainWindow.axaml.cs` 562，
+  均 < 600。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 9C.8B2.5 遗留项（冻结）
+
+- **无根会话取消**：首个附件被 `PrepareAttachments` 提升为 root 时，取消**不回退该 root**
+  （仅恢复输入 / 附件）；属边界场景。
+- **多任务并发取消** / **GPU 端到端**（同 9C.8B.6）。

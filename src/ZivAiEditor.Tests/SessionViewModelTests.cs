@@ -44,10 +44,10 @@ public class SessionViewModelTests
             });
 
         public Task<TaskState> RerunAsync(
-            string taskId,
+            string nodeId,
             IProgress<TaskProgress>? progress = null,
             CancellationToken ct = default)
-            => throw new NotSupportedException();
+            => ExecuteAsync(new EditPlan(), progress, ct);
 
         public Task<bool> CancelAsync(string taskId, CancellationToken ct = default)
             => Task.FromResult(false);
@@ -78,10 +78,10 @@ public class SessionViewModelTests
         }
 
         public Task<TaskState> RerunAsync(
-            string taskId,
+            string nodeId,
             IProgress<TaskProgress>? progress = null,
             CancellationToken ct = default)
-            => throw new NotSupportedException();
+            => ExecuteAsync(new EditPlan(), progress, ct);
 
         public Task<bool> CancelAsync(string taskId, CancellationToken ct = default)
             => Task.FromResult(false);
@@ -102,10 +102,10 @@ public class SessionViewModelTests
         public void Complete(TaskState state) => _completion.TrySetResult(state);
 
         public Task<TaskState> RerunAsync(
-            string taskId,
+            string nodeId,
             IProgress<TaskProgress>? progress = null,
             CancellationToken ct = default)
-            => throw new NotSupportedException();
+            => ExecuteAsync(new EditPlan(), progress, ct);
 
         public Task<bool> CancelAsync(string taskId, CancellationToken ct = default)
             => Task.FromResult(false);
@@ -145,10 +145,181 @@ public class SessionViewModelTests
         }
 
         public Task<TaskState> RerunAsync(
-            string taskId,
+            string nodeId,
             IProgress<TaskProgress>? progress = null,
             CancellationToken ct = default)
-            => throw new NotSupportedException();
+            => ExecuteAsync(new EditPlan(), progress, ct);
+
+        public Task<bool> CancelAsync(string taskId, CancellationToken ct = default)
+            => Task.FromResult(false);
+    }
+
+    /// <summary>Returns a queued output per execute / rerun call, so submit + rerun differ.</summary>
+    private sealed class SequenceExecutor : IExecutor
+    {
+        private readonly Queue<string> _outputs;
+
+        public SequenceExecutor(params string[] outputs) => _outputs = new Queue<string>(outputs);
+
+        public Task<TaskState> ExecuteAsync(
+            EditPlan plan,
+            IProgress<TaskProgress>? progress = null,
+            CancellationToken ct = default)
+            => Next(plan);
+
+        public Task<TaskState> RerunAsync(
+            string nodeId,
+            IProgress<TaskProgress>? progress = null,
+            CancellationToken ct = default)
+            => Next(new EditPlan());
+
+        public Task<bool> CancelAsync(string taskId, CancellationToken ct = default)
+            => Task.FromResult(false);
+
+        private Task<TaskState> Next(EditPlan plan)
+            => Task.FromResult(new TaskState
+            {
+                TaskId = Guid.NewGuid().ToString("N"),
+                Status = TaskStatus.Succeeded,
+                Plan = plan,
+                OutputImagePath = _outputs.Dequeue(),
+            });
+    }
+
+    /// <summary>Submit succeeds, re-run fails (Step 9C.8-A3 failure-bubble test).</summary>
+    private sealed class RerunFailExecutor : IExecutor
+    {
+        private readonly string _output;
+
+        public RerunFailExecutor(string output) => _output = output;
+
+        public Task<TaskState> ExecuteAsync(
+            EditPlan plan,
+            IProgress<TaskProgress>? progress = null,
+            CancellationToken ct = default)
+            => Task.FromResult(new TaskState
+            {
+                TaskId = Guid.NewGuid().ToString("N"),
+                Status = TaskStatus.Succeeded,
+                Plan = plan,
+                OutputImagePath = _output,
+            });
+
+        public Task<TaskState> RerunAsync(
+            string nodeId,
+            IProgress<TaskProgress>? progress = null,
+            CancellationToken ct = default)
+            => Task.FromResult(new TaskState
+            {
+                TaskId = Guid.NewGuid().ToString("N"),
+                Status = TaskStatus.Failed,
+                ErrorMessage = "模拟重跑失败",
+            });
+
+        public Task<bool> CancelAsync(string taskId, CancellationToken ct = default)
+            => Task.FromResult(false);
+    }
+
+    /// <summary>Blocks until canceled; returns a Canceled state (Step 9C.8-B).</summary>
+    private sealed class BlockingExecutor : IExecutor
+    {
+        private readonly string? _output;
+
+        public BlockingExecutor(string? output) => _output = output;
+
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<TaskState> ExecuteAsync(
+            EditPlan plan,
+            IProgress<TaskProgress>? progress = null,
+            CancellationToken ct = default)
+            => BlockAsync(plan, ct);
+
+        public Task<TaskState> RerunAsync(
+            string nodeId,
+            IProgress<TaskProgress>? progress = null,
+            CancellationToken ct = default)
+            => BlockAsync(new EditPlan(), ct);
+
+        public Task<bool> CancelAsync(string taskId, CancellationToken ct = default)
+            => Task.FromResult(false);
+
+        private async Task<TaskState> BlockAsync(EditPlan plan, CancellationToken ct)
+        {
+            Started.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return new TaskState
+                {
+                    TaskId = Guid.NewGuid().ToString("N"),
+                    Status = TaskStatus.Canceled,
+                    Plan = plan,
+                    ErrorMessage = "canceled",
+                };
+            }
+
+            return new TaskState
+            {
+                TaskId = Guid.NewGuid().ToString("N"),
+                Status = TaskStatus.Succeeded,
+                Plan = plan,
+                OutputImagePath = _output,
+            };
+        }
+    }
+
+    /// <summary>Submit succeeds; re-run blocks until canceled (Step 9C.8-B).</summary>
+    private sealed class BlockingRerunExecutor : IExecutor
+    {
+        private readonly string _submitOutput;
+
+        public BlockingRerunExecutor(string submitOutput) => _submitOutput = submitOutput;
+
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<TaskState> ExecuteAsync(
+            EditPlan plan,
+            IProgress<TaskProgress>? progress = null,
+            CancellationToken ct = default)
+            => Task.FromResult(new TaskState
+            {
+                TaskId = Guid.NewGuid().ToString("N"),
+                Status = TaskStatus.Succeeded,
+                Plan = plan,
+                OutputImagePath = _submitOutput,
+            });
+
+        public async Task<TaskState> RerunAsync(
+            string nodeId,
+            IProgress<TaskProgress>? progress = null,
+            CancellationToken ct = default)
+        {
+            Started.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return new TaskState
+                {
+                    TaskId = Guid.NewGuid().ToString("N"),
+                    Status = TaskStatus.Canceled,
+                    ErrorMessage = "canceled",
+                };
+            }
+
+            return new TaskState
+            {
+                TaskId = Guid.NewGuid().ToString("N"),
+                Status = TaskStatus.Succeeded,
+                OutputImagePath = @"C:\img\rerun.png",
+            };
+        }
 
         public Task<bool> CancelAsync(string taskId, CancellationToken ct = default)
             => Task.FromResult(false);
@@ -624,5 +795,297 @@ public class SessionViewModelTests
         vm.SetNodeCrop(rootId, new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\c.png" });
 
         Assert.DoesNotContain(vm.Messages, m => m.Text == "裁切已改，遮罩已重置");
+    }
+
+    [Fact]
+    public async Task Submit_Stores_Rerun_Snapshot_On_Node()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        vm.Resolution = new ResolutionPolicy { Mode = ResolutionMode.Side, Side = 1024 };
+
+        await vm.SubmitAsync("编辑", additionalImages: new[] { "r1", "r2" });
+
+        var node = session.Nodes[session.CurrentNodeId!];
+        Assert.NotNull(node.Rerun);
+        Assert.Equal(1024, node.Rerun!.Resolution!.Side);
+        Assert.Equal(new[] { "r1", "r2" }, node.Rerun.AdditionalImages);
+    }
+
+    [Fact]
+    public async Task Submit_Without_Resolution_Or_Refs_Stores_No_Snapshot()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        await vm.SubmitAsync("/去水印");
+
+        Assert.Null(session.Nodes[session.CurrentNodeId!].Rerun);
+    }
+
+    [Fact]
+    public async Task RerunNode_Replaces_Node_In_Place()
+    {
+        const string rerunOutput = @"C:\img\rerun.png";
+        var session = new EditSession();
+        var vm = new SessionViewModel(
+            session, session, ParserWithoutFile(), new SequenceExecutor(Output, rerunOutput));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        await vm.SubmitAsync("/去水印");
+        var nodeId = session.CurrentNodeId!;
+
+        var ok = await vm.RerunNodeAsync(nodeId);
+
+        Assert.True(ok);
+        Assert.Equal(2, vm.History.Count);                // root + the same node, no sibling
+        Assert.True(session.Nodes.ContainsKey(nodeId));   // same identity
+        Assert.Equal(rerunOutput, session.Nodes[nodeId].ImagePath);
+        Assert.Equal(nodeId, session.CurrentNodeId);
+    }
+
+    [Fact]
+    public async Task RerunNode_Keeps_Snapshot_On_Node()
+    {
+        const string rerunOutput = @"C:\img\rerun.png";
+        var session = new EditSession();
+        var vm = new SessionViewModel(
+            session, session, ParserWithoutFile(), new SequenceExecutor(Output, rerunOutput));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        vm.Resolution = new ResolutionPolicy { Mode = ResolutionMode.Side, Side = 2048 };
+        await vm.SubmitAsync("/去水印");
+        var nodeId = session.CurrentNodeId!;
+
+        await vm.RerunNodeAsync(nodeId);
+
+        Assert.NotNull(session.Nodes[nodeId].Rerun);
+        Assert.Equal(2048, session.Nodes[nodeId].Rerun!.Resolution!.Side);
+    }
+
+    [Fact]
+    public async Task RerunNode_Clears_Crop_And_Mask()
+    {
+        const string rerunOutput = @"C:\img\rerun.png";
+        var session = new EditSession();
+        var vm = new SessionViewModel(
+            session, session, ParserWithoutFile(), new SequenceExecutor(Output, rerunOutput));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        await vm.SubmitAsync("/去水印");
+        var nodeId = session.CurrentNodeId!;
+        vm.SetNodeCrop(nodeId, new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\c.png" });
+        vm.SetNodeMask(nodeId, new MaskSpec { MaskImagePath = @"C:\img\m.png", Width = 8, Height = 8 });
+
+        await vm.RerunNodeAsync(nodeId);
+
+        Assert.Null(session.Nodes[nodeId].Crop);
+        Assert.Null(session.Nodes[nodeId].Mask);
+    }
+
+    [Fact]
+    public async Task RerunNode_Cascade_Deletes_Descendants()
+    {
+        const string rerunOutput = @"C:\img\rerun.png";
+        var session = new EditSession();
+        var vm = new SessionViewModel(
+            session, session, ParserWithoutFile(), new SequenceExecutor(Output, rerunOutput));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        await vm.SubmitAsync("/去水印");
+        var nodeId = session.CurrentNodeId!;
+        var child = session.AppendNode(nodeId, @"C:\img\child.png", "child");
+
+        var ok = await vm.RerunNodeAsync(nodeId);
+
+        Assert.True(ok);
+        Assert.False(session.Nodes.ContainsKey(child.NodeId));
+        Assert.True(session.Nodes.ContainsKey(nodeId));
+        Assert.Equal(nodeId, session.CurrentNodeId);      // re-pointed out of the deleted subtree
+        Assert.Equal(2, vm.History.Count);
+    }
+
+    [Fact]
+    public async Task RerunNode_Deletes_Old_Output_File()
+    {
+        const string rerunOutput = @"C:\img\rerun.png";
+        var oldOutput = Path.Combine(Path.GetTempPath(), "zivai_rerun_" + Guid.NewGuid().ToString("N") + ".png");
+        File.WriteAllBytes(oldOutput, new byte[] { 1, 2, 3 });
+
+        try
+        {
+            var session = new EditSession();
+            var vm = new SessionViewModel(
+                session, session, ParserWithoutFile(), new SequenceExecutor(oldOutput, rerunOutput));
+            vm.Start(new LaunchOptions { ImagePath = Root });
+            await vm.SubmitAsync("/去水印");
+            var nodeId = session.CurrentNodeId!;
+            Assert.True(File.Exists(oldOutput));
+
+            await vm.RerunNodeAsync(nodeId);
+
+            Assert.False(File.Exists(oldOutput));
+        }
+        finally
+        {
+            if (File.Exists(oldOutput))
+            {
+                File.Delete(oldOutput);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RerunNode_Unknown_Node_Is_Rejected()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        Assert.False(await vm.RerunNodeAsync("missing"));
+        Assert.Contains(vm.Messages, m => m.Role == ChatRole.System && m.IsError);
+    }
+
+    [Fact]
+    public async Task RerunNode_Root_Is_Rejected_With_Hint()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var rootId = session.CurrentNodeId!;
+
+        Assert.False(await vm.RerunNodeAsync(rootId));
+        Assert.Contains(vm.Messages, m => m.Role == ChatRole.System && m.IsError);
+    }
+
+    [Fact]
+    public async Task Submit_Sets_NodeId_On_Assistant_Bubble()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        await vm.SubmitAsync("/去水印");
+
+        var bubble = vm.Messages.Single(m => m.Role == ChatRole.Assistant);
+        Assert.Equal(session.CurrentNodeId, bubble.NodeId);
+    }
+
+    [Fact]
+    public async Task RerunNode_Adds_No_New_Message_And_Updates_Bubble_In_Place()
+    {
+        const string rerunOutput = @"C:\img\rerun.png";
+        var session = new EditSession();
+        var vm = new SessionViewModel(
+            session, session, ParserWithoutFile(), new SequenceExecutor(Output, rerunOutput));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        await vm.SubmitAsync("/去水印");
+        var nodeId = session.CurrentNodeId!;
+        var countBefore = vm.Messages.Count;
+
+        var ok = await vm.RerunNodeAsync(nodeId);
+
+        Assert.True(ok);
+        Assert.Equal(countBefore, vm.Messages.Count);   // no new bubble
+        Assert.DoesNotContain(
+            vm.Messages,
+            m => m.Role == ChatRole.User && m.Text.StartsWith("重跑", StringComparison.Ordinal));
+        var bubble = vm.Messages.Single(m => m.Role == ChatRole.Assistant && m.NodeId == nodeId);
+        Assert.Equal(rerunOutput, bubble.ImagePath);
+        Assert.False(bubble.IsPending);
+    }
+
+    [Fact]
+    public async Task RerunNode_Failure_Shows_Error_On_Original_Bubble()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new RerunFailExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        await vm.SubmitAsync("/去水印");
+        var nodeId = session.CurrentNodeId!;
+        var countBefore = vm.Messages.Count;
+
+        var ok = await vm.RerunNodeAsync(nodeId);
+
+        Assert.False(ok);
+        Assert.Equal(countBefore, vm.Messages.Count);   // no new bubble
+        var bubble = vm.Messages.Single(m => m.Role == ChatRole.Assistant && m.NodeId == nodeId);
+        Assert.True(bubble.IsError);
+        Assert.Equal(Output, bubble.ImagePath);         // old image kept on failure
+        Assert.False(bubble.IsPending);
+    }
+
+    [Fact]
+    public void CancelCurrent_With_No_InFlight_Returns_False()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+
+        Assert.False(vm.CancelCurrent());
+    }
+
+    [Fact]
+    public async Task Cancel_Submit_Reverts_Chat_And_Flags_Canceled()
+    {
+        var session = new EditSession();
+        var executor = new BlockingExecutor(Output);
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        vm.Start(new LaunchOptions { ImagePath = Root });
+
+        var submit = vm.SubmitAsync("/去水印");
+        await executor.Started.Task;
+
+        Assert.True(vm.CancelCurrent());     // first click cancels
+        Assert.False(vm.CancelCurrent());    // second click is a no-op while in flight
+        var ok = await submit;
+
+        Assert.False(ok);
+        Assert.True(vm.LastRunCanceled);
+        Assert.Single(vm.History);           // only the root node, no new node
+        Assert.False(vm.IsBusy);
+        // The chat reverts to the pre-send state: no user bubble, no pending, no "已取消" bubble.
+        Assert.DoesNotContain(vm.Messages, m => m.Role == ChatRole.User && m.Text == "/去水印");
+        Assert.DoesNotContain(vm.Messages, m => m.IsPending);
+        Assert.DoesNotContain(vm.Messages, m => m.Text == "已取消。");
+        Assert.False(vm.CancelCurrent());    // nothing in flight after completion
+    }
+
+    [Fact]
+    public async Task CanRerun_True_For_Child_False_For_Root_And_Unknown()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var rootId = session.CurrentNodeId!;
+
+        Assert.False(vm.CanRerun(rootId));       // root has no source image
+        Assert.False(vm.CanRerun("missing"));
+
+        await vm.SubmitAsync("/去水印");
+
+        Assert.True(vm.CanRerun(session.CurrentNodeId!));
+    }
+
+    [Fact]
+    public async Task Cancel_Rerun_Keeps_Old_Image_And_Marks_Bubble_Canceled()
+    {
+        var session = new EditSession();
+        var executor = new BlockingRerunExecutor(Output);
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), executor);
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        await vm.SubmitAsync("/去水印");
+        var nodeId = session.CurrentNodeId!;
+        var countBefore = vm.Messages.Count;
+
+        var rerun = vm.RerunNodeAsync(nodeId);
+        await executor.Started.Task;
+        Assert.True(vm.CancelCurrent());
+        var ok = await rerun;
+
+        Assert.False(ok);
+        Assert.Equal(countBefore, vm.Messages.Count);        // no new bubble
+        Assert.Equal(Output, session.Nodes[nodeId].ImagePath); // node untouched
+        var bubble = vm.Messages.Single(m => m.Role == ChatRole.Assistant && m.NodeId == nodeId);
+        Assert.True(bubble.IsError);
+        Assert.Equal(Output, bubble.ImagePath);              // old image kept
+        Assert.False(vm.IsBusy);
     }
 }
