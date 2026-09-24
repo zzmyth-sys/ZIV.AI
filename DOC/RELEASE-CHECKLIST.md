@@ -24,3 +24,13 @@
 ## 4. 其他待办
 
 - （后续追加）
+
+## 5. 第 7 步现状核查（2026-09-24，只增）
+
+- **第 1–3 项现状不变**；第 7 步裁决 **D3：只列不改**，发布前单独一步处理。
+  - 路径硬编码：`PythonProcessManager.cs:22-24`、`Shell/SettingsLoader.cs:12-14`、
+    `settings.ini.template` 的 `[backend]` 段仍指向开发机路径。
+  - `publish.ps1` 仍只发布 C# App，不带 ComfyUI / python。
+  - `SettingsLoader.FindTemplate()` 仍向上找 `settings.ini`，未引用 `settings.ini.template`。
+- **新增参考（7-H）**：project 流程下沉 `App/Flows/ProjectFlowRunner` 的前置条件见
+  `DOC/FROZEN.md`「模块边界迁移 · 第 7 步」7D2 段（本文件不改既有 1–4 段）。

@@ -43,6 +43,14 @@ public sealed class ModelProfile
     public IReadOnlyDictionary<ResolutionTier, int> TierSides { get; init; }
         = new Dictionary<ResolutionTier, int>();
 
+    /// <summary>
+    /// Display label per <see cref="ResolutionTier"/> (Step 8-3), loaded from the model data
+    /// file (<c>tier_labels</c>). The UI tier picker shows these; empty = fall back to the enum
+    /// name (a missing label is a visible config error, not silently localized).
+    /// </summary>
+    public IReadOnlyDictionary<ResolutionTier, string> TierLabels { get; init; }
+        = new Dictionary<ResolutionTier, string>();
+
     /// <summary>Aspect-ratio presets. Capability metadata — no production consumer yet (Step 9C.3-R #5).</summary>
     public IReadOnlyList<AspectPreset> Presets { get; init; } = Array.Empty<AspectPreset>();
 }

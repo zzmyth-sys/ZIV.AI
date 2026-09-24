@@ -95,6 +95,23 @@ public class IpcSubmitMapperTests
     }
 
     [Fact]
+    public void ModelId_Maps_To_Payload()
+    {
+        var request = IpcSubmitMapper.BuildSubmitRequest(
+            "r",
+            "t",
+            new EditRequest
+            {
+                Op = EditOps.Inpaint,
+                ImagePath = "in.png",
+                Prompt = "x",
+                ModelId = "qwen-image-2.1",
+            });
+
+        Assert.Equal("qwen-image-2.1", request.Payload.ModelId);
+    }
+
+    [Fact]
     public void Inpaint_Maps_MaskPath()
     {
         // Step 9C.7-B: the mask PNG path still maps to the IPC payload; FeatherPx is a

@@ -1,6 +1,6 @@
-using ZivAiEditor.Agent;
+using ZivAiEditor.Agent.Execution;
 using ZivAiEditor.Backend;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Tools;
 using Xunit;
 using Xunit.Abstractions;

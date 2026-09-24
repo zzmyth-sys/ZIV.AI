@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 import config
 import model_loader
+import models
 
 STATE_NOT_LOADED = "not_loaded"
 STATE_LOADING = "loading"
@@ -59,6 +60,10 @@ class ModelEngine:
         self._total_seconds = None
         self._last_used_at = None
         self._notify = None
+        # Step 8-2: the loaded model's identity / resolved path set (None until first load).
+        self._model_id = None
+        self._model_name = None
+        self._model_paths = None
 
     @property
     def status(self):
@@ -90,21 +95,33 @@ class ModelEngine:
         with self._lock:
             return [
                 {
-                    "name": config.MODEL_NAME,
+                    "name": self._model_name or config.MODEL_NAME,
                     "loaded": self._state == STATE_LOADED,
                     "last_used_at": self._last_used_at,
                 }
             ]
 
-    def ensure_loaded(self, notify=None):
-        """Lazy-load the triple once. Returns per-stage timings (seconds)."""
+    def ensure_loaded(self, model_id=None, notify=None):
+        """Lazy-load the triple once (Step 8-2: ``model_id`` selects the registry entry).
+
+        A ``None`` / unknown id resolves to the default model (behaviour unchanged). If a
+        different model is requested while another is resident, the current one is unloaded
+        first (single-model process, Z18/Z21).
+        """
+        resolved = models.resolve_paths(model_id)
+
         with self._lock:
             if self._state == STATE_LOADED:
-                self._touch()
-                return dict(self._timings)
+                if self._model_id == resolved["id"]:
+                    self._touch()
+                    return dict(self._timings)
+                self.unload()
 
             self._state = STATE_LOADING
             self._notify = notify
+            self._model_id = resolved["id"]
+            self._model_name = resolved["display_name"]
+            self._model_paths = resolved
             started = time.time()
             try:
                 self._load_dit()
@@ -116,6 +133,8 @@ class ModelEngine:
                 self._dit = None
                 self._clip = None
                 self._vae = None
+                self._model_id = None
+                self._model_paths = None
                 raise
             finally:
                 self._notify = None
@@ -158,24 +177,30 @@ class ModelEngine:
             self._timings = {}
             self._total_seconds = None
             self._state = STATE_NOT_LOADED
+            self._model_id = None
+            self._model_paths = None
 
         _release_vram()
         _LOG.info("model unloaded (Z21 idle release)")
         return True
 
+    def _paths(self):
+        return self._model_paths or {}
+
     def _load_dit(self):
         self._emit("dit", model_loader.STAGE_FRACTIONS["dit"][0], "loading_model:dit")
-        self._dit, _ = model_loader.load_dit(config.DIT_MODEL_PATH, self._on_model_loaded)
+        path = self._paths().get("dit_path") or config.DIT_MODEL_PATH
+        self._dit, _ = model_loader.load_dit(path, self._on_model_loaded)
 
     def _load_text_encoder(self):
         self._emit("te", model_loader.STAGE_FRACTIONS["te"][0], "loading_model:te")
-        self._clip, _ = model_loader.load_text_encoder(
-            config.TEXT_ENCODER_PATH, self._on_model_loaded
-        )
+        path = self._paths().get("te_path") or config.TEXT_ENCODER_PATH
+        self._clip, _ = model_loader.load_text_encoder(path, self._on_model_loaded)
 
     def _load_vae(self):
         self._emit("vae", model_loader.STAGE_FRACTIONS["vae"][0], "loading_model:vae")
-        self._vae, _ = model_loader.load_vae(config.VAE_PATH, self._on_model_loaded)
+        path = self._paths().get("vae_path") or config.VAE_PATH
+        self._vae, _ = model_loader.load_vae(path, self._on_model_loaded)
 
     def _on_model_loaded(self, sub_stage, fraction, elapsed):
         self._timings[sub_stage] = round(elapsed, 3)

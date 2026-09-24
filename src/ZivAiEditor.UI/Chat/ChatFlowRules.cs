@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using ZivAiEditor.Contracts.Enums;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Imaging;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.UI.Editing;
 using TaskStatus = ZivAiEditor.Contracts.Enums.TaskStatus;
 
@@ -108,6 +109,45 @@ public static class ChatFlowRules
         return kept;
     }
 
+    /// <summary>
+    /// Resolves the pending attachment strip into a send plan (module-boundary migration step
+    /// 7-D1; Step 9C.6-C / 9C.5-D / 9C.10). The three-way dialog and the session mutation stay in
+    /// the view; this pure rule owns <b>which</b> attachments become pipeline references and
+    /// whether the DAG is reset:
+    /// <list type="bullet">
+    /// <item><see cref="AttachmentPreparation.NeedsDecision"/>: <paramref name="startNewSession"/>
+    /// picks "新会话" (reset the DAG, first attachment becomes the root, the rest are references)
+    /// versus "参考图" (keep the current node, every attachment is a reference).</item>
+    /// <item><see cref="AttachmentPreparation.Ready"/> with a multi-image batch: the first
+    /// attachment was already promoted to the root by <c>PrepareAttachments</c>, so the rest are
+    /// references.</item>
+    /// <item><see cref="AttachmentPreparation.NoImage"/>: empty plan (the caller blocks earlier).</item>
+    /// </list>
+    /// </summary>
+    public static AttachmentSendPlan ResolveAttachmentSend(
+        AttachmentPreparation preparation,
+        IReadOnlyList<string> attachments,
+        bool startNewSession)
+    {
+        if (preparation == AttachmentPreparation.NeedsDecision)
+        {
+            if (startNewSession)
+            {
+                var refs = attachments.Count > 1 ? attachments.Skip(1).ToArray() : Array.Empty<string>();
+                return new AttachmentSendPlan(true, refs, refs.Length > 0);
+            }
+
+            return new AttachmentSendPlan(false, attachments, false);
+        }
+
+        if (attachments.Count > 1)
+        {
+            return new AttachmentSendPlan(false, attachments.Skip(1).ToArray(), false);
+        }
+
+        return new AttachmentSendPlan(false, Array.Empty<string>(), false);
+    }
+
     /// <summary>Whether a task succeeded with an output image.</summary>
     public static bool IsSuccess(TaskState state)
         => state.Status == TaskStatus.Succeeded && !string.IsNullOrWhiteSpace(state.OutputImagePath);
@@ -197,6 +237,7 @@ public static class ChatFlowRules
             Steps = plan.Steps,
             CreatedAt = plan.CreatedAt,
             Resolution = plan.Resolution,
+            ModelId = plan.ModelId,
         };
 
     /// <summary>
@@ -321,3 +362,13 @@ public static class ChatFlowRules
         return path.Count > 0 ? path[^1] : null;
     }
 }
+
+/// <summary>
+/// Outcome of <see cref="ChatFlowRules.ResolveAttachmentSend"/> (module-boundary migration step
+/// 7-D1): whether to reset the session, the ordered pipeline references, and whether to show the
+/// "图 2/3 作为参考图" hint (only after a "新会话" that keeps extra references).
+/// </summary>
+public readonly record struct AttachmentSendPlan(
+    bool StartNewSession,
+    IReadOnlyList<string> References,
+    bool ShowReferenceHint);

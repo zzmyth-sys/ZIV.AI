@@ -1,0 +1,31 @@
+{
+  "version": "1",
+  "_comment": "Model registry (Step 8-2). Add a model = add one entry here; no code change. C# reads the profile block (resolution tiers / max_pixels / id); Python reads the paths + sampler block. Unknown fields are ignored by each side.",
+  "models": [
+    {
+      "id": "qwen-image-2.1",
+      "display_name": "Qwen-Image-2.1",
+      "dit_path": "C:\\AI\\ComfyUI_PIC\\ComfyUI\\models\\diffusion_models\\image2\\qwen_image_2.1_int8_convrot.safetensors",
+      "te_path": "C:\\AI\\ComfyUI_PIC\\ComfyUI\\models\\text_encoders\\qwen3vl_8b_int8_convrot.safetensors",
+      "vae_path": "C:\\AI\\ComfyUI_PIC\\ComfyUI\\models\\vae\\qwen_image_2.1_vae_bf16.safetensors",
+      "native_side": 2048,
+      "safe_max_side": 2048,
+      "min_side": 512,
+      "multiple_of": 16,
+      "max_pixels": 4700000,
+      "tier_sides": { "fast": 1024, "balanced": 1536, "high_quality": 2048 },
+      "tier_labels": { "fast": "快速", "balanced": "均衡", "high_quality": "高质" },
+      "presets": [
+        { "name": "1:1", "width": 2048, "height": 2048 },
+        { "name": "16:9", "width": 2752, "height": 1536 },
+        { "name": "9:16", "width": 1536, "height": 2752 },
+        { "name": "4:3", "width": 2368, "height": 1776 },
+        { "name": "3:4", "width": 1776, "height": 2368 },
+        { "name": "3:2", "width": 2496, "height": 1664 },
+        { "name": "2:3", "width": 1664, "height": 2496 }
+      ],
+      "sampler": { "type": "auraflow", "shift": 3.1, "sampler_name": "euler", "scheduler": "simple", "cfg": 1.0 },
+      "default": true
+    }
+  ]
+}

@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Platform.Storage;
 using ZivAiEditor.App.Controls;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Session;
 
 namespace ZivAiEditor.App;
 

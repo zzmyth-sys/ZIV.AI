@@ -33,6 +33,8 @@
   <ItemGroup>
     <None Include="..\..\settings.ini" Link="settings.ini" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Template\commands.json" Link="Template\commands.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Template\loras.json" Link="Template\loras.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Template\models.json" Link="Template\models.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- App logo (window / title-bar icon). The .ico is the Win32 exe icon. -->

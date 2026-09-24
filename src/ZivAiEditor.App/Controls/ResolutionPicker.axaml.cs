@@ -1,25 +1,19 @@
 using System;
 using Avalonia.Controls;
 using ZivAiEditor.Contracts.Models;
+using ZivAiEditor.UI.Editing;
 
 namespace ZivAiEditor.App.Controls;
 
 /// <summary>
-/// Resolution tier picker (Step 6.5 logic, first UI): a small dropdown offering the
-/// model's <see cref="ResolutionTier"/> values (Fast / Balanced / HighQuality / Custom)
-/// with their long edges read from the <see cref="ModelProfile"/>. It only holds the
-/// selection for now; wiring the chosen tier into the edit request is a follow-up.
+/// Resolution tier picker (Step 6.5 logic, first UI; Step 8-3 data-driven): a small dropdown
+/// offering the tiers the attached <see cref="ModelProfile"/> defines, with labels / long edges
+/// read from it via <see cref="ResolutionTierOptions"/>. The chosen tier is mapped to a
+/// <c>ResolutionPolicy</c> and applied to the session view model
+/// (<c>MainWindow.InitChat</c> → <c>ApplyResolution</c>).
 /// </summary>
 public partial class ResolutionPicker : UserControl
 {
-    private static readonly ResolutionTier[] Tiers =
-    {
-        ResolutionTier.Fast,
-        ResolutionTier.Balanced,
-        ResolutionTier.HighQuality,
-        ResolutionTier.Custom,
-    };
-
     private ModelProfile? _profile;
     private Button? _button;
     private TextBlock? _label;
@@ -35,13 +29,14 @@ public partial class ResolutionPicker : UserControl
     /// <summary>Raised when the user picks a different tier.</summary>
     public event EventHandler? SelectionChanged;
 
-    /// <summary>Active tier; defaults to <see cref="ResolutionTier.Balanced"/>.</summary>
+    /// <summary>Active tier; defaults to <see cref="ResolutionTier.Balanced"/> until attached.</summary>
     public ResolutionTier Tier { get; private set; } = ResolutionTier.Balanced;
 
-    /// <summary>Binds the model profile used for tier labels (long edges).</summary>
+    /// <summary>Binds the model profile that drives the tier set / labels (Step 8-3).</summary>
     public void Attach(ModelProfile profile)
     {
         _profile = profile ?? throw new ArgumentNullException(nameof(profile));
+        Tier = ResolutionTierOptions.DefaultTier(_profile);
         BuildMenu();
         UpdateLabel();
     }
@@ -54,9 +49,9 @@ public partial class ResolutionPicker : UserControl
         }
 
         var flyout = new MenuFlyout();
-        foreach (var tier in Tiers)
+        foreach (var tier in ResolutionTierOptions.Options(_profile))
         {
-            var item = new MenuItem { Header = LabelFor(tier) };
+            var item = new MenuItem { Header = ResolutionTierOptions.Display(_profile, tier) };
             var captured = tier;
             item.Click += (_, _) => SetTier(captured);
             flyout.Items.Add(item);
@@ -81,26 +76,7 @@ public partial class ResolutionPicker : UserControl
     {
         if (_label is not null)
         {
-            _label.Text = LabelFor(Tier);
+            _label.Text = ResolutionTierOptions.Display(_profile, Tier);
         }
-    }
-
-    private string LabelFor(ResolutionTier tier)
-    {
-        if (tier == ResolutionTier.Custom)
-        {
-            return "自定义";
-        }
-
-        var side = _profile is not null && _profile.TierSides.TryGetValue(tier, out var value)
-            ? $" {value}"
-            : "";
-        var name = tier switch
-        {
-            ResolutionTier.Fast => "快速",
-            ResolutionTier.HighQuality => "高质",
-            _ => "均衡",
-        };
-        return name + side;
     }
 }

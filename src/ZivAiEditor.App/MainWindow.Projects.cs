@@ -1,7 +1,9 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using ZivAiEditor.Agent;
+using ZivAiEditor.Agent.Project;
+using ZivAiEditor.Agent.Session;
+using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.UI;
 
 namespace ZivAiEditor.App;

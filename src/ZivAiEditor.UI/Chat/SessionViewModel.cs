@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Imaging;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.UI.Editing;
 using ZivAiEditor.UI.Imaging;
 

@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Session;
 
 namespace ZivAiEditor.UI.Chat;
 

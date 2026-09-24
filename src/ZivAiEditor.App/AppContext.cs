@@ -1,13 +1,16 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using ZivAiEditor.Agent;
+using ZivAiEditor.Agent.Execution;
+using ZivAiEditor.Agent.Project;
+using ZivAiEditor.Agent.Session;
 using ZivAiEditor.Backend;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Inference;
 using ZivAiEditor.Contracts.Models;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Project;
+using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.Contracts.Tools;
 using ZivAiEditor.Imaging;
 using ZivAiEditor.Tools;
@@ -37,8 +40,8 @@ internal sealed class AppContext : IDisposable
         CommandParser commandParser,
         IEditSession session,
         IEditSessionWriter sessionWriter,
-        SessionStore sessionStore,
-        ProjectService projects,
+        ISessionPersistence sessionStore,
+        IProjectService projects,
         IImagingService imaging,
         LocalLlmClient rewriterLlm,
         IPromptExpander promptExpander,
@@ -113,14 +116,14 @@ internal sealed class AppContext : IDisposable
     public IEditSessionWriter SessionWriter { get; }
 
     /// <summary>Persists sessions as projects (Step 9C.6-E); the UI drives save / open.</summary>
-    public SessionStore SessionStore { get; }
+    public ISessionPersistence SessionStore { get; }
 
     /// <summary>
     /// Project catalog (module-boundary migration step 3): list / delete / rename / locate
     /// projects and the last-opened id. Owns the <c>sessions/</c> directory tree; the session
-    /// content save / load stays on <see cref="SessionStore"/>.
+    /// content save / load stays on <see cref="ISessionPersistence"/>.
     /// </summary>
-    public ProjectService Projects { get; }
+    public IProjectService Projects { get; }
 
     /// <summary>
     /// Imaging-domain facade (module-boundary migration step 4): local crop / mask raster ops.
@@ -167,7 +170,9 @@ internal sealed class AppContext : IDisposable
         var session = new EditSession();
         var executor = new Executor(tools, executionQueue, session, session, commandParser);
 
-        var modelProfiles = new ModelProfileRegistry();
+        // Step 8-2: profiles come from the data file next to commands.json; a missing file
+        // falls back to the built-in Qwen-Image-2.1 profile inside the registry.
+        var modelProfiles = new ModelProfileRegistry(Path.Combine(shell.TemplateDirectory, "models.json"));
 
         // LocalLlmClient applies its own per-call timeout, so the shared
         // HttpClient stays timeout-free (single source of truth).

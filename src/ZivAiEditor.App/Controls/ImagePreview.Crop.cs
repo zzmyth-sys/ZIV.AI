@@ -4,7 +4,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using ZivAiEditor.Contracts.Imaging;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.UI.Editing;
 using ZivAiEditor.UI.Imaging;
 

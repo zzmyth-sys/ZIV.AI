@@ -2474,3 +2474,253 @@ UI（D6 遗留）。
 
 1. 追加 `DEVLOG.md` / `FROZEN.md` / `INTERACTION.md` / `ACCEPTANCE.MD` 的 9C.10-P2 记录（本步已完成）
 2. 在「验收记录」追加“Step 9C.10-P2 通过，日期：____”（待签）
+
+---
+
+## 模块边界迁移 · 第 1–6 步 验收（追认）
+
+> 依据 `DEVLOG.md` / `FROZEN.md` 既有记录追认；无 GPU（Z29 / Z30）。
+
+| 子步 | 内容 | 验收点 | 结果 |
+|---|---|---|---|
+| 迁移 1 | `ICommandParser` 上提 Contracts | 构建 0/0；UI 无 `using ZivAiEditor.Agent`；全量 448 | ✅ |
+| 迁移 2 | App 不再持 session 具体类型 | 具体 `EditSession` 仅 `AppContext.Create`；全量 448 | ✅ |
+| 迁移 3 | project 域抽取（`ProjectService`） | `MainWindow.Projects.cs` 260 < 300；编目测试搬 `ProjectServiceTests` | ✅ |
+| 迁移 4 | imaging 域抽取（新项目 `ZivAiEditor.Imaging`） | UI/App 无 `ImageCropper.` / `MaskExporter.` / `MaskFeather.` / `ZivAiEditor.Imaging` 命中 | ✅ |
+| 迁移 5 | shell 域收拢（`ShellService`） | App 对话框 / picker 仅经 `Shell/ShellService.cs`；全量 448 | ✅ |
+| 迁移 6 | ui 域瘦身 + flows 层 | VM 三文件 484 < 700；UI 不引用 App；全量 448 | ✅ |
+
+## 模块边界迁移 · 第 7 步 验收
+
+**目标**：剩余迁移 + 收尾 + 收口；D2 / D4 / D6 做，D1 / D3 / D5 不做；先判断再下沉。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 构建 | `dotnet build ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ |
+| G2 | 依赖方向 | App→UI→Contracts；App→Flows→Domains→Kernel；无环 | ✅ |
+| G3 | 契约一致 | FROZEN 7-C 契约新增为追加式；无擅改冻结签名 | ✅ |
+| G4 | 未授权修改 | 无已冻结成员改动；D1 / D3 / D5 未做并登记 | ✅ |
+| G5 | 文档已更新 | FROZEN / DEVLOG / ACCEPTANCE / RELEASE-CHECKLIST 追加 | ✅ |
+| G6 | 便携性未破 | 未改文件系统 / 注册表契约 | ✅ |
+| G7 | 推理进程隔离未破 | 未改 python / IPC | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未改 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 7A.1 | UI 去死引用 | `grep` UI 代码 | `using ZivAiEditor.Tools/Backend` 0 命中；构建 0/0 | ✅ |
+| 7A.2 | 删死代码 | `grep HttpInferenceClient / UiPlaceholder` | 零引用后删除；构建 0/0 | ✅ |
+| 7C.1 | 端口新增 | 构建 + `grep` | `IProjectService` / `ISessionPersistence` 落在 Contracts | ✅ |
+| 7C.2 | App 去具体类 | `grep \bProjectService\b\|\bSessionStore\b src/ZivAiEditor.App` | 具体类仅 `AppContext.Create` | ✅ |
+| 7C.3 | 兼容重载 | 读 `SessionStore.ExportToAsync` | `EditSession` 重载转发 `IEditSession` 版 | ✅ |
+| 7D1.1 | 附件规则下沉 | `ChatFlowRulesTests` | `ResolveAttachmentSend` 6 例通过 | ✅ |
+| 7D2.1 | Projects 判断 | 报告 | 判定不下沉 + 7-H 登记 | ✅ |
+| 7E.1 | flaky 修复 | 静态审阅 | 合并轮询 + 30s；未 GPU 验证 | ✅（待 GPU 复验） |
+| 7F.1 | 文档只增不改 | `git diff` | 无 `-` 行 | ✅ |
+| 7.2 | 无 GPU 负载 | 测试过程 | 未启动 Python / 未加载模型（Z29 / Z30） | ✅ |
+| 7.3 | Z8 | 查改动文件 | 源文件均 < 600 | ✅ |
+
+### 第 7 步 通过标准
+
+- 非 GPU 全量 **432 通过 / 0 失败**；含 GPU 全量既有基线 448。
+- VM 三文件 < 700；无循环依赖；G3 / G4 无异常；不做项（D1 / D3 / D5）登记完整。
+
+### 第 7 步 遗留说明（非阻断）
+
+- **7-H** project 流程下沉；**Agent 域物理划分**；**D1 / D3 / D5**；Nit 4 项（见 `FROZEN.md` 7.3）。
+- **7-E 用例留待 GPU 环境复验**。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### 遮罩不生效 遗留（登记）
+
+- 现象：发送时遮罩不生效（实现在、行为缺）；关联 9C.7 / 9C.7-B，验收项 **9C.7.16 / 9C.7B.16
+  当前状态 = 未通过（留后）**；根因待查；处置：用户裁决留后，另立步；**不改 9C.7 既有行**。
+
+### 第 7 步 验收后动作
+
+1. 在「验收记录」追加“模块边界迁移 · 第 7 步通过，日期：____”（待签）
+
+---
+
+## Step 8-1 验收：LoRA 数据驱动链路
+
+**目标**：加 LoRA 模板 = 改数据，0 代码；修 4 断点。**无 GPU**（Z29 / Z30）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 构建 | Release 0 错误 0 警告 | ✅ |
+| G2 | 依赖方向 | 无新增反向 / 循环依赖 | ✅ |
+| G3 | 契约一致 | 仅追加可选字段（`CommandDefinition` / `EditStep` / `ToolInput.Lora`）；`LoraOptions` 复用 | ✅ |
+| G4 | 未授权修改 | 无冻结签名改动 | ✅ |
+| G5 | 文档已更新 | FROZEN / DEVLOG / ACCEPTANCE 追加 8-1 | ✅ |
+| G6 | 便携性未破 | `Template/loras.json` 随程序目录；无注册表 | ✅ |
+| G7 | 推理进程隔离未破 | C# 仍只经 `EditRequest` → IPC；未直连 Python | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未改 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 8-1.1 | 契约追加 | 构建 | `Lora` 可选字段三处；向后兼容 | ✅ |
+| 8-1.2 | 透传链 | `CommandParserLoraTests` / `ExecutorTests` / `QwenImage21EditToolTests` | 命令 → EditStep → ToolInput → EditRequest.Lora | ✅ |
+| 8-1.3 | 数据驱动 | temp `commands.json` | 加 `lora` 条目 → 计划出现 Lora，不改代码 | ✅ |
+| 8-1.4 | loras 注册表 | `test_loras` | id 解析 / 缺字段 / 缺文件 / 坏 JSON | ✅ 6/6 |
+| 8-1.5 | Python 真加载 | 代码审阅 | `make_lora_hook` 懒 import；失败不抛 | ✅（待 GPU 复验） |
+| 8-1.6 | 无 GPU 负载 | 测试过程 | 未启动 Python / 未加载模型（Z29 / Z30） | ✅ |
+| 8-1.7 | Z8 | 改动文件 | 均 < 600 | ✅ |
+
+### Step 8-1 通过标准
+
+- 非 GPU 全量 **437 通过 / 0 失败**；Python `py_compile` + `test_loras` 通过。
+- 4 断点修复；数据驱动达成；不做项登记（model_id / 分辨率 / 物理划分 / outpaint LoRA / MagCache）。
+
+### Step 8-1 遗留说明（非阻断）
+
+- **Python LoRA 真加载待 GPU 复验**（Z29 / Z30）。
+- `QwenImage21OutpaintTool` 未透传 LoRA；MagCache 仍只登记。
+
+### Step 8-1 验收后动作
+
+1. 在「验收记录」追加“Step 8-1 通过，日期：____”（待签）
+
+---
+
+## Step 8-2 验收：模型身份契约化
+
+**目标**：加新模型 = 写 `models.json` 一条 + 契约一处 `model_id`，代码不动；附带 `LoraOptions`
+可空化（语义反转修复）。**无 GPU**（Z29 / Z30）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 构建 | Release 0 错误 0 警告 | ✅ |
+| G2 | 依赖方向 | 无新增反向 / 循环依赖 | ✅ |
+| G3 | 契约一致 | `ModelId` 仅追加可选字段；`LoraOptions` 可空化为**授权修改**（FROZEN Step 4 修订说明） | ✅ |
+| G4 | 未授权修改 | 除授权的 `LoraOptions` 类型外无冻结签名改动 | ✅ |
+| G5 | 文档已更新 | FROZEN（Step 8-2 + Step 4 修订 + 妥协清单）/ DEVLOG / ACCEPTANCE / `INTERFACES.md` | ✅ |
+| G6 | 便携性未破 | `models.json` / `loras.json` 随程序目录；无注册表 | ✅ |
+| G7 | 推理进程隔离未破 | C# 仍只经 `EditRequest` → IPC；未直连 Python | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未改 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 8-2.1 | `ModelId` 契约 | 构建 | 4 处追加可选字段 | ✅ |
+| 8-2.2 | `ModelId` 透传 | `ExecutorTests` / `QwenImage21EditToolTests` / `PlannerTests` / `IpcSubmitMapperTests` | planner→plan→ToolInput→EditRequest→IPC | ✅ |
+| 8-2.3 | 数据驱动 registry | `ModelProfileRegistryDataTests` | 加 `models.json` 一条 → 生效；缺失/损坏回退内置 Qwen | ✅ |
+| 8-2.4 | `LoraOptions` 可空化 | `CommandParserLoraTests` / `test_loras` | 显式 0 保留；缺键 → 1.0 / 注册表默认 | ✅ |
+| 8-2.5 | Python registry | `test_models` | env > models.json > 默认；未知 id 回退 | ✅ 5/5 |
+| 8-2.6 | Python 真加载 | 代码审阅 | `models.py` 纯 CPU；`engine` 按 id 加载 | ✅（待 GPU 复验） |
+| 8-2.7 | 无 GPU 负载 | 测试过程 | 未启动 Python / 未加载模型（Z29 / Z30） | ✅ |
+| 8-2.8 | Z8 | 改动文件 | 均 < 600（最大 `pipeline.py` 523） | ✅ |
+
+### Step 8-2 通过标准
+
+- 非 GPU 全量 **444 通过 / 0 失败**（`!~Ipc` 过滤不计 `IpcSubmitMapperTests`；C# 新增 7 例）。
+- Python `py_compile` + `test_loras`(10) + `test_models`(5) 通过。
+- 数据驱动达成；语义反转修复达成；不做项登记（分辨率 / 物理划分 / UI 选择器 / commands.json model）。
+
+### Step 8-2 遗留说明（非阻断）
+
+- **Z-002** Python LoRA 真加载待 GPU 复验；**Z-003** `ModelId` 生产无 UI（恒 null）；
+  **Z-004** Python env 覆盖过渡机制。见 FROZEN「妥协/挂账清单」。
+
+### Step 8-2 验收后动作
+
+1. 在「验收记录」追加“Step 8-2 通过，日期：____”（待签）
+
+---
+
+## Step 8-3 验收：分辨率档位数据化
+
+**目标**：档位标签 / 集合来自 `models.json`，代码不动；不引入任意数量档位。**无 GPU**（Z29 / Z30）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 构建 | Release 0 错误 0 警告 | ✅ |
+| G2 | 依赖方向 | 无新增反向 / 循环依赖 | ✅ |
+| G3 | 契约一致 | `ModelProfile.TierLabels` 为**授权追加**（init，默认空），原行不改 | ✅ |
+| G4 | 未授权修改 | 除授权追加外无冻结签名改动 | ✅ |
+| G5 | 文档已更新 | FROZEN 8-3 + 妥协 Z-005 / DEVLOG / ACCEPTANCE / INTERFACES | ✅ |
+| G6 | 便携性未破 | `models.json` 随程序目录 | ✅ |
+| G7 | 推理进程隔离未破 | 未改 python / IPC | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未改 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 8-3.1 | 数据键 | `models.json` | 每模型含 `tier_labels` | ✅ |
+| 8-3.2 | kernel 追加 | 构建 | `ModelProfile.TierLabels`（init，默认空） | ✅ |
+| 8-3.3 | 映射 | `ModelProfileRegistryDataTests` | `tier_labels` → `TierLabels`；仅已标注档位出现 | ✅ |
+| 8-3.4 | 档位集合数据驱动 | `ResolutionTierOptionsTests` | 排序 / Custom 末尾 / 缺档不显示 | ✅ |
+| 8-3.5 | 默认档 | `ResolutionTierOptionsTests` | Balanced 在 → Balanced；否则首个非 Custom | ✅ |
+| 8-3.6 | fallback 收紧 | `ResolutionTierOptionsTests` | 生产缺 label → enum 名；设计期 → 中文 | ✅ |
+| 8-3.7 | Display | `ResolutionTierOptionsTests` | 非 Custom 带 side；Custom 无 side | ✅ |
+| 8-3.8 | 无 GPU 负载 | 测试过程 | 未启动 Python / 未加载模型（Z29 / Z30） | ✅ |
+| 8-3.9 | Z8 | 改动文件 | 均 < 600 | ✅ |
+
+### Step 8-3 通过标准
+
+- 非 GPU 全量 **450 通过 / 0 失败**。
+- 数据驱动（标签 / 数值）达成；不引入任意数量档位（Z-005 登记）。
+
+### Step 8-3 遗留说明（非阻断）
+
+- **Z-005**：新增档位仍改代码（枚举 + `tier_sides`）。见 FROZEN「妥协/挂账清单」。
+
+### Step 8-3 验收后动作
+
+1. 在「验收记录」追加“Step 8-3 通过，日期：____”（待签）
+
+---
+
+## Step 8-4 验收：域物理划分（命名空间拆分）
+
+**目标**：纯搬迁（Contracts + Agent 按域拆命名空间），不改签名 / 行为。**无 GPU**（Z29 / Z30）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 构建 | Release 0 错误 0 警告 | ✅ |
+| G2 | 依赖方向 | 无新增反向 / 循环依赖（Project→Session 单向） | ✅ |
+| G3 | 契约一致 | 仅命名空间 / 位置变更；成员 / 签名零变化 | ✅ |
+| G4 | 未授权修改 | 无签名改动；位置变更按裁决登记 | ✅ |
+| G5 | 文档已更新 | FROZEN 8-4 / DEVLOG / ACCEPTANCE / INTERFACES | ✅ |
+| G6 | 便携性未破 | 未改文件系统 / 注册表契约 | ✅ |
+| G7 | 推理进程隔离未破 | 未改 python / IPC | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未改 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 8-4.1 | Contracts 布局 | 目录清点 | Session / Project / Execution 存在；Planning 移除 | ✅ |
+| 8-4.2 | Agent 布局 | 目录清点 | Session / Project / Execution{Command,Planner} 存在 | ✅ |
+| 8-4.3 | 命名空间匹配 | 抽检 | 文件命名空间 = 目标域 | ✅ |
+| 8-4.4 | 旧命名空间清零 | grep src | `Contracts.Planning` / `namespace ZivAiEditor.Agent;` = 0 | ✅ |
+| 8-4.5 | 纯搬迁 | `git diff -M` / rename | 100% rename；仅 namespace / using 行变化 | ✅（多步脏树下为推断，见 verifier 说明） |
+| 8-4.6 | 无 GPU 负载 | 测试过程 | 未启动 Python / 未加载模型（Z29 / Z30） | ✅ |
+| 8-4.7 | Z8 | 改动文件 | 均 < 600 | ✅ |
+
+### Step 8-4 通过标准
+
+- 非 GPU 全量 **450 通过 / 0 失败**；构建 0/0；旧命名空间 `grep` 全 0。
+
+### Step 8-4 遗留说明（非阻断）
+
+- **Z-006** Project→Session 具体依赖残留；`_test_step2/**` 未同步。见 FROZEN「妥协/挂账清单」。
+
+### Step 8-4 验收后动作
+
+1. 在「验收记录」追加“Step 8-4 通过，日期：____”（待签）

@@ -24,6 +24,7 @@ from datetime import datetime
 
 import config
 import model_loader
+import models
 import multi_image
 import outpaint
 import pipeline_hooks
@@ -79,6 +80,8 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
     # Step 6.5: an optional payload `resolution` overrides the config default;
     # absent -> the config default path (backward compatible with ipc 0.5).
     specs = _resolution_specs(request, image_path)
+    # Step 8-2: the sampler preset comes from the model registry (env > models.json > default).
+    sampler = models.resolve_sampler(request.get("model_id"))
     oom_types = _oom_types()
     last_error = None
     for index, spec in enumerate(specs):
@@ -89,7 +92,7 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
                 model, clip, vae, prompt, image_path, mask_path, output_path,
                 spec, steps, seed, denoise, started,
                 on_progress, on_preview, poll_cancel, mask_binary,
-                additional_images=additional_images,
+                additional_images=additional_images, sampler=sampler,
             )
         except oom_types as exc:
             last_error = exc
@@ -160,14 +163,18 @@ def _remove_tree(path):
 def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
               spec, steps, seed, denoise, started,
               on_progress, on_preview, poll_cancel, mask_binary=True,
-              additional_images=None):
+              additional_images=None, sampler=None):
     import comfy.model_management as mm
     import comfy.sample
     from comfy_extras.nodes_model_advanced import ModelSamplingAuraFlow
 
-    # Qwen-Image-2.1 uses the AuraFlow flow schedule (shift=3.1); patch a clone
-    # so the engine's resident model is never mutated.
-    model = ModelSamplingAuraFlow().patch_aura(model, config.AURAFLOW_SHIFT)[0]
+    sampler = sampler or {}
+    # Step 8-2: the schedule model + shift are data (models.json sampler block); AuraFlow
+    # remains the only supported schedule type. Patch a clone so the resident model is
+    # never mutated.
+    if sampler.get("type", "auraflow") == "auraflow":
+        shift = float(sampler.get("shift", config.AURAFLOW_SHIFT))
+        model = ModelSamplingAuraFlow().patch_aura(model, shift)[0]
 
     # Stage 2: encode the prompt + optional reference image (clip is patched).
     positive, negative, latent_image, mask = encode_prompt(
@@ -201,7 +208,12 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
                 on_preview(step, total, jpeg)
 
     noise = comfy.sample.prepare_noise(latent_image, seed)
-    samples = sample(model, positive, negative, latent_image, noise, steps, denoise, mask, seed, callback)
+    samples = sample(
+        model, positive, negative, latent_image, noise, steps, denoise, mask, seed, callback,
+        sampler_name=sampler.get("sampler_name"),
+        scheduler=sampler.get("scheduler"),
+        cfg=float(sampler.get("cfg", 1.0)),
+    )
 
     # A cancel that lands after the last sampling step still aborts here; the
     # VAE decode itself is not interruptible (it is short, see contract §3.3).
@@ -241,17 +253,22 @@ def encode_prompt(clip, vae, prompt, image_path, mask_path, resolution=None, mod
     )
 
 
-def sample(model, positive, negative, latent, noise, steps, denoise, mask, seed, callback):
-    """Pipeline stage: one sampler pass via ComfyUI's official ``comfy.sample.sample``."""
+def sample(model, positive, negative, latent, noise, steps, denoise, mask, seed, callback,
+           sampler_name=None, scheduler=None, cfg=1.0):
+    """Pipeline stage: one sampler pass via ComfyUI's official ``comfy.sample.sample``.
+
+    Step 8-2: ``sampler_name`` / ``scheduler`` / ``cfg`` come from the model registry
+    (falling back to the config defaults when absent).
+    """
     import comfy.sample
 
     return comfy.sample.sample(
         model,
         noise,
         steps,
-        1.0,
-        config.SAMPLER_NAME,
-        config.SCHEDULER_NAME,
+        cfg,
+        sampler_name or config.SAMPLER_NAME,
+        scheduler or config.SCHEDULER_NAME,
         positive,
         negative,
         latent,

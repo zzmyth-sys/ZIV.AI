@@ -16,7 +16,8 @@ internal sealed record SubmitPayload(
     OptimizationOptions? Optimizations,
     ResolutionPayload? Resolution,
     string? Anchor,
-    IReadOnlyList<string> AdditionalImages);
+    IReadOnlyList<string> AdditionalImages,
+    string? ModelId);
 
 /// <summary>Optional <c>submit.payload.resolution</c> (Step 6.5 / ipc_version 0.7).</summary>
 internal sealed record ResolutionPayload(

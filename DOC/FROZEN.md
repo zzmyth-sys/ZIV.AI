@@ -3521,3 +3521,335 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 
 - 不动 execution 域（Executor 仍写会话）；不动 shell / project / imaging；不瘦 views/Avalonia 控件；
   不改行为逻辑；`crop` / `mask` / `navigate` / `import` 流程留 VM；无新 NuGet。
+
+---
+
+## 模块边界迁移 · 第 7 步：剩余迁移 + 收尾 + 收口（日期：2026-09-24）
+
+> **收口 + 端口化 + 文档（只增不改）**
+>
+> 裁决：D1 execution 域**不搬文件**（登记遗留）；D2 project 域端口**做**；D3 RELEASE-CHECKLIST
+> 3 项**只列不改**；D4 flaky 测试窗口**授权修复**；D5 收窄 Executor 注入**不做**；
+> D6 删死代码**做**；7-D views 收尾**先判断再下沉**。全部无 GPU 验证（Z29 / Z30）。
+
+### 7A.1 收口（删除死引用 / 死代码 / 修注释）
+
+- `ZivAiEditor.UI.csproj` 删除 `Tools` / `Backend` ProjectReference（UI 代码零引用）。
+- 删除死代码 `Backend/HttpInferenceClient.cs`、`UI/UiPlaceholder.cs`。
+- 修正过期注释 `ResolutionPicker.axaml.cs` / `LaunchOptions.cs` / `ImageEditMode.cs`。
+- 行为不变。
+
+### 7C.1 契约新增（Contracts/Planning）
+
+| 成员 | 说明 |
+|---|---|
+| `IProjectService`（新） | `RootDirectory` / `GetDirectory` / `ListAsync` / `DeleteAsync` / `RenameAsync` / `GetLastProjectId` / `SetLastProjectIdAsync`，逐字对应 `ProjectService` 公开面 |
+| `ISessionPersistence`（新） | `LoadAsync` / `SaveAsync` / `ExportToAsync(IEditSession,…)` / `DeleteNodeArtifacts` |
+| `SessionLoadResult`（上提） | 从 `Agent/SessionLoader.cs` 迁至 `Contracts/Planning`；成员不变，仅 `Session` 属性 `EditSession → IEditSession` |
+
+### 7C.2 实现加接口（签名零变化）
+
+- `ProjectService : IProjectService`；`SessionStore : ISessionPersistence`。
+- `SessionStore.ExportToAsync(EditSession,…)` 保留为兼容重载，转发到 `ExportToAsync(IEditSession,…)`；
+  原逻辑落在 `IEditSession` 版本。
+
+### 7C.3 Q4 字面修订声明
+
+- 第 2 步 2.3「`SessionLoadResult.Session` 保留具体（Q4）」的**字面**以本段为准：`Session` 现为
+  只读端口 `IEditSession`。原行不改；`MainWindow` 既有表达式访问无需改动。
+
+### 7C.4 App 装配
+
+- `AppContext` 暴露 `ISessionPersistence SessionStore` / `IProjectService Projects`；具体类仅在
+  `AppContext.Create` 内 `new`。`MainWindow` 字段 / 构造改接口。
+- `grep "\bProjectService\b|\bSessionStore\b" src/ZivAiEditor.App` → 具体类仅 `AppContext.Create` 装配点。
+
+### 7D1.1 附件消费规则下沉（ChatFlowRules）
+
+- 新增纯规则 `ChatFlowRules.ResolveAttachmentSend(...)` + `AttachmentSendPlan`（record struct）；
+  `MainWindow.Send` 改调规则；三选一弹框 / `_vm.StartNewSessionFrom` / 取消回退留视图。
+- 判据：「附件→会话结构 / 管线输入」为真编排；其余为视图交互 / 薄调用。
+- 新增 `ChatFlowRulesTests`（6 例，非 GPU）。
+
+### 7D2.1 判断结果：MainWindow.Projects **不下沉**
+
+- 编目 / 保存 / 打开 / dirty 与「对话框 owner + `_projectName`/`_savedSignature`/`_opening`
+  （被 `OnClosing` / `ProjectList` 共享）+ 列表刷新 + 预览控件 flush」深度交织；下沉需注入 8+
+  回调并迁移 3 状态字段，风险 > 收尾收益 → 留原地。
+- **登记遗留 7-H「project 流程下沉」**，前置条件：
+  1. `RefreshProjectListAsync` 拆为「取数据（域）」+「渲染（视图）」；
+  2. 保存询问 owner 注入方式统一（`ShellService` 现为 `Window owner`）；
+  3. 明确 `OnClosing` 保存路径归属；
+  4. 迁移 `_projectName` / `_savedSignature` / `_opening` 并同步 `ProjectList` / `OnClosing`；
+  5. 先补该流程行为测试基线再下沉。
+
+### 7E.1 flaky 测试窗口修复（方案 A）
+
+- `IpcIdleUnloadTests.Idle_Timeout_Unloads_Then_Reloads_On_Next_Submit`：把「等 state 未加载（60s）」
+  与「等 VRAM 回落（独立 15s）」合并为单一轮询条件（同一 `CheckHealthAsync`），窗口 30s。
+- 阈值 `VramUsedMb < 3000` 沿用原用例；来源为 Step 3 空闲卸载实测回落（回基线 ~1 GB），
+  3000 MB 作为「明显回落」的保守上界。
+- 仅测试代码；**未 GPU 验证**，登记留待 GPU 环境复验。
+
+### 7.2 本步不做（登记遗留）
+
+- **D1**：execution 域物理划分（`Executor` / `ExecutionQueue` 搬文件夹 / 改命名空间 / 新建项目）
+  **不做**；`FROZEN.md` Z18 行与 Step 6 段冻结其归属与文件位置，需授权另立步。
+- **D3**：`RELEASE-CHECKLIST.md` 3 项（路径硬编码 / publish 打包 / `FindTemplate`）**只列不改**，
+  发布前单独一步。
+- **D5**：收窄 `Executor` 注入（`IEditSession` / `IEditSessionWriter` / `ICommandParser`）不做；
+  9C.8-A 已授权冻结。
+
+### 7.3 新增 Nit 登记（只登记不改）
+
+1. `AppContext.SessionStore` 属性名与类型名混淆（类型 = `ISessionPersistence`）→ 后续改名。
+2. `MainWindow.ProjectList.cs` / `MainWindow.Projects.cs` 仍以注释提及 `SessionStore` /
+   `ProjectService` → 后续清理。
+3. `UI → ZIV.Core / ZIV.Imaging` 疑为死引用（7-A 未删，涉及 FROZEN 1.1 项目表）→ 待授权评估。
+4. `SessionStore.ExportToAsync` 兼容重载属过渡态（保留时长待定）。
+
+### 7.4 验收（无 GPU，Z29 / Z30）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量：426（7-A / 7-C）→ **432**（7-D1，+6 `ChatFlowRulesTests`）；含 GPU 全量既有基线 448。
+- `UI.csproj` 仅引用 `Contracts` / `ZIV.Core` / `ZIV.Imaging`；无循环依赖。
+- **未跑 GPU 端到端**；7-E 用例留待 GPU 环境复验。
+
+### 7.5 遮罩不生效 遗留登记（只登记不改）
+
+- 现象：发送时遮罩不生效（实现在、行为缺）。
+- 关联 Step：9C.7 / 9C.7-B；对应验收项 **9C.7.16 / 9C.7B.16 当前状态 = 未通过（留后）**。
+- 根因：待查（第 7 步不查）。
+- 处置：用户裁决留后，另立步；**不改 9C.7 既有行**。
+
+---
+
+## Step 8-1：LoRA 数据驱动链路（日期：2026-09-25）
+
+> **契约追加 + 数据化（追加式，行为新增）**
+>
+> 目标：加一个 LoRA 模板 = 改数据（`Template/commands.json` + `Template/loras.json`），0 代码。
+> 裁决：优先级 8-1 LoRA → 8-2 模型 → 8-3 分辨率 → 8-4 物理划分（可选）；Q1 不拆程序集 /
+> Q9 端口放 Contracts / Q10 不允许 UI DTO / Q11 保留 Contracts 名。**Python 真加载待 GPU 复验**（Z29/Z30）。
+
+### 8-1.1 契约追加（复用 LoraOptions）
+
+| 类型 | 追加成员 | 说明 |
+|---|---|---|
+| `Contracts/Planning/CommandDefinition` | `LoraOptions? Lora`（JSON `lora`） | 命令声明的 LoRA；`Path` 可为 `loras.json` 的 id 或字面路径 |
+| `Contracts/Planning/EditStep` | `LoraOptions? Lora` | 由命令填入，随计划流转 |
+| `Contracts/Tools/ToolInput` | `LoraOptions? Lora` | Executor 注入，工具透传 |
+| `Contracts/Inference/LoraOptions` | `[JsonPropertyName]` path/strength_model/strength_clip | 复用既有类型；仅补序列化名（跨 IPC 与 commands.json 一致） |
+
+### 8-1.2 透传链（C#）
+
+- `commands.json`：命令条目可选 `"lora": { "path": "<id>", "strength_model": 1.0, "strength_clip": 1.0 }`。
+- `CommandParser`：解析命令的 LoRA → `EditStep.Lora`（`NormalizeLora`：源生成忽略 `double` 默认值，
+  缺 strength → 1.0；空 path → 丢弃）。
+- `Executor`：`step.Lora` → `ToolInput.Lora`。
+- `QwenImage21EditTool`：`input.Lora` → `EditRequest.Lora`（字段既有）。
+- `IpcSubmitMapper` / `IpcDtos` / `IpcJsonContext`：**已通，未改**。
+
+### 8-1.3 数据文件
+
+- 新增 `Template/loras.json`（`{ version, loras: [ {id, path, default_strength_model, default_strength_clip, description} ] }`）；
+  `ZivAiEditor.App` 拷贝到输出 `Template/`。
+
+### 8-1.4 Python（代码交付 · 待 GPU 复验）
+
+- `config.py`：`LORA_REGISTRY_PATH`（默认仓库根 `Template/loras.json`，`ZIV_AI_LORA_REGISTRY` 可覆盖）。
+- `loras.py`（新）：读注册表 + id / 字面路径解析（纯 CPU，可单测）。
+- `pipeline_hooks.py`：`make_lora_hook` 真加载（懒 import `comfy.sd.load_lora_for_models`；失败记 warning 不抛）。
+- `handlers.py`：`_configure_pre_sampling_hooks` 经 `loras.resolve_path` 解析后注册 hook。
+- `test_loras.py`（新）：6 例纯 CPU 单测。
+
+### 8-1.5 验收（无 GPU，Z29 / Z30）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 **437 通过 / 0 失败**（432 + 5：`CommandParserLoraTests` 3 + `ExecutorTests` 1 +
+  `QwenImage21EditToolTests` 1）。
+- Python：`py_compile` 通过；`test_loras` **6/6** 通过。
+- **端到端数据驱动**：改 temp `commands.json` 加 `lora` 条目 → 计划 `EditStep.Lora` 出现
+  （`CommandParserLoraTests`），不改代码。
+- **Python 真加载未 GPU 验证**，登记待 GPU 复验。
+
+### 8-1.6 本步不做
+
+- 不动 model_id（8-2）/ 分辨率档位（8-3）/ 物理划分（8-4）；不做工具 op 数据化（§11）；
+  `QwenImage21OutpaintTool` 暂不透传 LoRA（仅 `QwenImage21EditTool` 透传）。
+
+---
+
+## Step 8-2：模型身份契约化（日期：2026-09-25）
+
+> **契约追加 + 数据化 + 授权修订（1 处既有成员类型）**
+>
+> 目标：加一个新模型 = 写一份 `Template/models.json` 条目 + 契约一处 `model_id`，代码不动。
+> 裁决：优先级 8-1 LoRA → 8-2 模型 → 8-3 分辨率 → 8-4 物理划分（可选）；Q1 不拆程序集 /
+> Q9 端口放 Contracts / Q10 不允许 UI DTO / Q11 保留 Contracts 名。**Python 真加载待 GPU 复验**（Z29/Z30）。
+
+### 8-2.0 Step 4 修订说明（授权 · 语义反转修复）
+
+- **授权**：本轮裁决允许修改既有 `LoraOptions`：`StrengthModel` / `StrengthClip` 由 `double`
+  改为 `double?`（默认 `null`）。
+- **原因**：源生成器在缺键时对非可空 `double` 填 `0.0`；8-1 的 `NormalizeLora` 以
+  `== 0d ? 1.0` 修正，却把「显式 0」也改成 1.0（语义反转）。
+- **新语义**：`null` = 未设置（回退 1.0 / 注册表默认）；`0` = 全抑制该侧。
+- **影响面**：`LoraOptions`（kernel）、`CommandParser.NormalizeLora`、Python `loras.resolve_strength` /
+  `handlers` / `pipeline_hooks`、相关测试。原 Step 4 行不改。
+
+### 8-2.1 契约追加（ModelId）
+
+| 类型 | 追加成员 | 说明 |
+|---|---|---|
+| `Contracts/Inference/EditRequest` | `string? ModelId` | null / 未知 = 默认模型 |
+| `Contracts/Planning/PlanRequest` | `string? ModelId` | planner 输入 |
+| `Contracts/Planning/EditPlan` | `string? ModelId` | plan 级模型 id |
+| `Contracts/Tools/ToolInput` | `string? ModelId` | 工具透传 |
+
+### 8-2.2 透传链（C#）
+
+- `FallbackPlanner` / `LlmPlanner`：`request.ModelId` → `EditPlan.ModelId`。
+- `Executor`：`plan.ModelId` → `ToolInput.ModelId`；`WithAdditionalImages` 保留 `ModelId`。
+- `ChatFlowRules.WithAdditionalImages` 保留 `ModelId`。
+- `QwenImage21EditTool` / `QwenImage21OutpaintTool`：`input.ModelId` → `EditRequest.ModelId`。
+- IPC：`SubmitPayload.ModelId` + `IpcSubmitMapper`；`SubmitInpaintAsync`（无 ModelId）置 null。
+
+### 8-2.3 数据驱动注册表（Backend 机制 / models.json 数据）
+
+- 新增 `Template/models.json`（`models[]`：id / display_name / 路径 / 分辨率元数据 / tier_sides /
+  presets / sampler / default）。
+- 新增 Backend 局部 `ModelProfileFileDto` + `ModelProfileJsonContext`（`[JsonPropertyName]` 不进
+  kernel）；`ModelProfile` 零改动。
+- `ModelProfileRegistry` 改读 `models.json`（构造可传路径）；文件缺失 / 损坏 → 内置 Qwen-Image-2.1；
+  `default:true` 选默认；`AppContext` 传 `Template/models.json`；App 拷贝该文件到输出。
+
+### 8-2.4 Python（代码交付 · 待 GPU 复验）
+
+- `config.MODELS_REGISTRY_PATH`（env `ZIV_AI_MODELS_REGISTRY` 可覆盖）。
+- `models.py`（新）：读注册表 + `resolve` / `resolve_paths` / `resolve_sampler`；优先级
+  **env > models.json > config 默认**。
+- `engine.ensure_loaded(model_id, notify)`：按 id 解析路径；切换模型先卸载（单模型进程）。
+- `pipeline`：`run` 解析 sampler，`_run_once` / `sample` 使用注册表 sampler（env 覆盖仍最高）。
+- `handlers`：`payload.get("model_id")` 传入 `ensure_loaded`。
+
+### 8-2.5 验收（无 GPU，Z29 / Z30）
+
+- 构建 0/0；非 GPU 全量 **444 通过**（既有 `!~Ipc` 过滤不计 `IpcSubmitMapperTests`；C# 新增共 7 例）。
+- Python `py_compile` 0；`test_loras` 10/10、`test_models` 5/5。
+- 数据驱动：加 `models.json` 一条 → `ModelProfileRegistry` 生效（`ModelProfileRegistryDataTests`），不改代码。
+- **Python 真加载未 GPU 验证**，登记待 GPU 复验。
+
+### 8-2.6 本步不做
+
+- 未动分辨率档位数据化（8-3）；未动物理划分（8-4）；未做 UI 模型选择器；未加 `commands.json` 的
+  model 字段；未碰遮罩 / outpaint / 7-H。
+
+---
+
+## 妥协/挂账清单（只增 · 自 Step 8-2 起生效）
+
+> 记录**明知不理想但当前接受**的妥协；每条给出回归触发条件与时机。
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-001 | `LoraOptions` 显式 0 被误改 1.0 | Step 4 冻结 + 源生成器缺键填 0.0 | 本次 8-2 修复（可空化） | 8-2（本轮关闭） |
+| Z-002 | Python LoRA 真加载未 GPU 复验 | Z29/Z30 不跑 GPU | 用户确认 GPU 空闲 + 明确同意 | 后续 GPU 步 |
+| Z-003 | `ModelId` 生产路径恒 null（无 UI） | 本步不做 UI 模型选择器 | 用户需要切换模型 | 后续 UI 步 |
+| Z-004 | Python env 覆盖保留为过渡机制 | 测试基础设施依赖 | 测试基础设施改造完成 | 未定 |
+
+---
+
+## Step 8-3：分辨率档位数据化（日期：2026-09-25）
+
+> **契约追加（kernel 值对象自然扩展）+ 数据化（标签 / 档位集合）**
+>
+> 目标：档位**标签**与**集合**来自数据（`Template/models.json`），代码不动；数值 8-2 起已在
+> `tier_sides`。范围仅此两件，不引入任意数量档位（Z-005）。无 GPU（Z29/Z30）。
+
+### 8-3.1 契约追加（授权 · 追加式）
+
+| 类型 | 追加成员 | 说明 |
+|---|---|---|
+| `Contracts/Models/ModelProfile` | `IReadOnlyDictionary<ResolutionTier, string> TierLabels`（init，默认空） | 档位显示标签；空 → 回退 enum 名（生产）/ 中文（设计期） |
+
+> 授权依据：UI 只能见 `Contracts`，`ModelProfileFileDto` 为 Backend internal（Q10 不允许 UI DTO），
+> 故标签**必须**经 kernel 值对象承载。原行不改。
+
+### 8-3.2 数据（`Template/models.json`）
+- 每模型追加独立键 `tier_labels`（与 `tier_sides` 并列）：`{ "fast": "快速", "balanced": "均衡", "high_quality": "高质" }`。
+- 数值仍在 `tier_sides`；`ModelProfileFileDto` 新增 `tier_labels` → `ModelProfileRegistry.ToProfile` 映射；
+  `BuiltInDefault()` 带默认标签。
+
+### 8-3.3 UI（机制）
+- 新增纯 helper `ZivAiEditor.UI/Editing/ResolutionTierOptions`（无 Avalonia，可单测）：
+  - `Options(profile)`：`TierSides.Keys` 按 `(int)tier` 升序 + `Custom` 末尾（缺 side 不显示）。
+  - `DefaultTier(profile)`：`Balanced` 在则用之，否则首个非 Custom，否则 Custom。
+  - `Label(profile, tier)`：有 `TierLabels` → 用之；**生产**缺 label → enum 名（**不静默回退中文**）；
+    **设计期**（profile == null）→ 内置中文表；`Custom` 恒「自定义」。
+  - `Display(profile, tier)`：Label + side（Custom 无 side）。
+- `ResolutionPicker`：`BuildMenu` 用 `Options`、`Header` 用 `Display`、`Attach` 时 `Tier = DefaultTier(profile)`；
+  删除硬编码 `Tiers` 数组与 `LabelFor` switch。
+
+### 8-3.4 验收（无 GPU，Z29 / Z30）
+- 构建 0/0；非 GPU 全量 **450 通过**（8-2 基线 444 + `ResolutionTierOptionsTests` 6）。
+- 数据驱动：改 `models.json` 的 `tier_labels` / `tier_sides` → 不改代码，标签 / 数值生效
+  （`ResolutionTierOptionsTests` + `ModelProfileRegistryDataTests`）。
+
+### 8-3.5 本步不做
+- 不引入任意数量档位（新增档位仍改枚举 + `tier_sides`）→ **Z-005**；
+- 未动 8-4 物理划分 / UI 模型选择器 / 遮罩 / outpaint / 7-H。
+
+### 妥协/挂账清单 · 追加（8-3）
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-005 | 新增分辨率档位仍改代码（`ResolutionTier` 枚举 + `tier_sides`） | 保持固定 3 档 + Custom；动态档位集合超 8-3 范围 | 需要任意数量 / 动态档位 | 未定 |
+
+---
+
+## Step 8-4：域物理划分（命名空间拆分）（日期：2026-09-25）
+
+> **纯搬迁（位置 / 命名空间变更，不改任何类型 / 签名 / 成员 / 行为；Q1 不拆程序集）**
+>
+> 授权依据：本轮裁决（D-2/key）——位置变更需登记，本段为「8-4 位置变更说明」。原冻结行不改。
+
+### 8-4.1 Contracts 命名空间拆分（Planning → 域）
+
+| 旧 | 新 | 文件 |
+|---|---|---|
+| `ZivAiEditor.Contracts.Planning` | `ZivAiEditor.Contracts.Session` | IEditSession, IEditSessionWriter, IEditNode, CropSpec, RerunSpec, ISessionPersistence, SessionLoadResult |
+| 同上 | `ZivAiEditor.Contracts.Project` | IProjectService, ProjectSummary |
+| 同上 | `ZivAiEditor.Contracts.Execution` | ICommandParser, CommandDefinition, ParseResult, IPlanner, EditPlan, EditStep, PlanRequest |
+
+- 文件位置：`src/ZivAiEditor.Contracts/{Session,Project,Execution}/`；`Planning/` **已移除**。
+- `Contracts.Execution` 既有 IExecutor / TaskState / StepState / TaskProgress 不变（同命名空间合并，无同名冲突）。
+
+### 8-4.2 Agent 命名空间拆分（平铺 3 域）
+
+| 旧 | 新 | 文件 / 文件夹 |
+|---|---|---|
+| `ZivAiEditor.Agent` | `ZivAiEditor.Agent.Session` | `Agent/Session/`：EditSession*, SessionStore*, SessionLoader, SessionFileRerun, SessionSignature |
+| 同上 | `ZivAiEditor.Agent.Project` | `Agent/Project/`：ProjectService, ProjectNaming |
+| 同上 | `ZivAiEditor.Agent.Execution` | `Agent/Execution/`：Executor, ExecutionQueue；`Execution/Command/`：CommandParser；`Execution/Planner/`：LlmPlanner, FallbackPlanner, ResilientPlanner, PromptExpander（子文件夹命名空间扁平为 `.Execution`） |
+
+- 已知跨命名空间引用：`ProjectService → SessionStore`（`using ZivAiEditor.Agent.Session`）；`CommandParser → FallbackPlanner`（同 `.Execution`）。
+- **位置冻结行不改**：`FROZEN.md` 的 Z18 表行、Step 6（`ExecutionQueue`/`Executor` 路径）、Step 6.5、9C.8-A 原行保留；
+  其路径字面（`ZivAiEditor.Agent/Executor.cs` 等）以本段为准（现位于 `Agent/Execution/`）。
+- **契约/程序集不变**：仍为 `ZivAiEditor.Contracts` / `ZivAiEditor.Agent` 程序集（Q1 / Q11）。
+
+### 8-4.3 验收（无 GPU，Z29 / Z30）
+
+- 构建 0/0；非 GPU 全量 **450 通过 / 0 失败**；`grep` 旧命名空间 0 命中。
+- 纯搬迁：仅 `namespace` / `using` 行变化（`git mv` 100% rename）。
+
+### 8-4.4 本步不做
+
+- 不拆程序集（Q1）；不改任何签名 / 成员 / 行为；不动 Backend / Tools / Imaging；不动 Executor 注入（D5）；
+  不碰遮罩 / outpaint / 7-H / python / GPU。`_test_step2/**`（sln 外临时工程）未同步（不在范围）。
+
+### 妥协/挂账清单 · 追加（8-4）
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-006 | `ProjectService` 仍注入具体 `SessionStore`（Project→Session 具体依赖） | 7-C 未实现 `IProjectMetadataStore`（元数据原语端口）；8-4 为纯搬迁不动注入 | 需要彻底解耦 project/session 域 | 后续域解耦步 |

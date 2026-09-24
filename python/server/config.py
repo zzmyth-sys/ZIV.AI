@@ -78,6 +78,23 @@ OUTPUT_DIR = os.environ.get(
     os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "output"),
 )
 
+# ---- LoRA 注册表（Step 8-1）----
+# 数据文件 Template/loras.json：commands.json 的 lora.path 用 id 引用它，Python 侧解析为权重路径。
+# 默认仓库根 Template/loras.json；可用环境变量 ZIV_AI_LORA_REGISTRY 覆盖。
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+LORA_REGISTRY_PATH = os.environ.get(
+    "ZIV_AI_LORA_REGISTRY",
+    os.path.join(REPO_ROOT, "Template", "loras.json"),
+)
+
+# ---- 模型注册表（Step 8-2）----
+# 数据文件 Template/models.json：每模型含路径 / 分辨率档位 / 采样预设；加模型 = 加一条。
+# 优先级：环境变量 > models.json > 本文件的代码默认。默认仓库根 Template/models.json。
+MODELS_REGISTRY_PATH = os.environ.get(
+    "ZIV_AI_MODELS_REGISTRY",
+    os.path.join(REPO_ROOT, "Template", "models.json"),
+)
+
 # ---- 显存策略（Z21 空闲卸载：Step 3 实现）----
 # auto = 交给 ComfyUI 的 model_management 决定权重驻留（CPU/GPU/offload）
 VRAM_MODE = "auto"

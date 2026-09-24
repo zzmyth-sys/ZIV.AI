@@ -1,6 +1,6 @@
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Inference;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Tools;
 using ZivAiEditor.Tools;
 using Xunit;
@@ -335,6 +335,44 @@ public class QwenImage21EditToolTests
         Assert.Same(tool, registry.Get("QW21edit"));
         Assert.Null(registry.Get("inpaint"));
         Assert.Null(registry.Get("img2img"));
+    }
+
+    [Fact]
+    public async Task Lora_Is_Forwarded_To_EditRequest()
+    {
+        var client = new FakeInferenceClient();
+        var tool = new QwenImage21EditTool(client);
+        var lora = new LoraOptions { Path = "anime_v2", StrengthModel = 0.8, StrengthClip = 0.7 };
+        var input = new ToolInput
+        {
+            StepId = "s1",
+            MainImagePath = @"C:\img\a.png",
+            Lora = lora,
+            Parameters = new Dictionary<string, string> { ["prompt"] = "x" },
+        };
+
+        await tool.ExecuteAsync(input);
+
+        var request = Assert.IsType<EditRequest>(client.LastRequest);
+        Assert.Same(lora, request.Lora);
+    }
+
+    [Fact]
+    public async Task ModelId_Is_Forwarded_To_EditRequest()
+    {
+        var client = new FakeInferenceClient();
+        var tool = new QwenImage21EditTool(client);
+        var input = new ToolInput
+        {
+            StepId = "s1",
+            MainImagePath = @"C:\img\a.png",
+            ModelId = "beta",
+            Parameters = new Dictionary<string, string> { ["prompt"] = "x" },
+        };
+
+        await tool.ExecuteAsync(input);
+
+        Assert.Equal("beta", Assert.IsType<EditRequest>(client.LastRequest).ModelId);
     }
 
     private sealed class FakeInferenceClient : IInferenceClient

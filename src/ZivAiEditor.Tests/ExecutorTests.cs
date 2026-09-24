@@ -1,8 +1,10 @@
-using ZivAiEditor.Agent;
+using ZivAiEditor.Agent.Execution;
+using ZivAiEditor.Agent.Session;
 using ZivAiEditor.Contracts.Enums;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Imaging;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Inference;
+using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.Contracts.Tools;
 using ZivAiEditor.Tools;
 using Xunit;
@@ -317,6 +319,53 @@ public class ExecutorTests
             new FakeTool("a", (input, _) => Task.FromResult(Ok(input.StepId, "x"))));
 
         await Assert.ThrowsAsync<ArgumentException>(() => executor.RerunAsync("missing"));
+    }
+
+    [Fact]
+    public async Task Step_Lora_Is_Passed_To_ToolInput()
+    {
+        var tool = new FakeTool("QW21edit", (input, _) => Task.FromResult(
+            Ok(input.StepId, @"C:\out\lora.png")));
+        var executor = CreateExecutor(tool);
+        var lora = new LoraOptions { Path = "anime_v2", StrengthModel = 0.5, StrengthClip = 0.5 };
+        var plan = new EditPlan
+        {
+            MainImagePath = Main,
+            Steps = new[]
+            {
+                new EditStep
+                {
+                    StepId = "s1",
+                    Order = 1,
+                    ToolName = "QW21edit",
+                    Lora = lora,
+                    Parameters = new Dictionary<string, string> { ["prompt"] = "x" },
+                },
+            },
+        };
+
+        await executor.ExecuteAsync(plan);
+
+        var input = Assert.Single(tool.Received);
+        Assert.Same(lora, input.Lora);
+    }
+
+    [Fact]
+    public async Task Plan_ModelId_Is_Passed_To_ToolInput()
+    {
+        var tool = new FakeTool("QW21edit", (input, _) => Task.FromResult(
+            Ok(input.StepId, @"C:\out\model.png")));
+        var executor = CreateExecutor(tool);
+        var plan = new EditPlan
+        {
+            MainImagePath = Main,
+            ModelId = "beta",
+            Steps = new[] { Step("s1", 1, "QW21edit") },
+        };
+
+        await executor.ExecuteAsync(plan);
+
+        Assert.Equal("beta", Assert.Single(tool.Received).ModelId);
     }
 
     private static Executor CreateExecutor(params IEditTool[] tools)

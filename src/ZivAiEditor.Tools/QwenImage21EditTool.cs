@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using ZivAiEditor.Contracts.Inference;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Tools;
 using TaskStatus = ZivAiEditor.Contracts.Enums.TaskStatus;
 
@@ -94,6 +94,10 @@ public sealed class QwenImage21EditTool : IEditTool
             // R3 (Step 9C.5-D): the legacy reference slot is image2, followed by the
             // ordered additional references. Single owner of that ordering.
             AdditionalImages = BuildAdditionalImages(input.ReferenceImagePath, input.AdditionalImages),
+            // Step 8-1: forward the step's LoRA (id / path + strengths) to the backend.
+            Lora = input.Lora,
+            // Step 8-2: forward the plan's model id to the backend.
+            ModelId = input.ModelId,
         };
 
         var stepProgress = progress is null

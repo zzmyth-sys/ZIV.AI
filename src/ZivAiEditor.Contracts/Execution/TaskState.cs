@@ -1,4 +1,3 @@
-using ZivAiEditor.Contracts.Planning;
 using TaskStatus = ZivAiEditor.Contracts.Enums.TaskStatus;
 
 namespace ZivAiEditor.Contracts.Execution;

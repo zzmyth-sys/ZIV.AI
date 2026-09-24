@@ -1,7 +1,8 @@
 using System.Text.Json;
-using ZivAiEditor.Agent;
+using ZivAiEditor.Agent.Project;
+using ZivAiEditor.Agent.Session;
 using ZivAiEditor.Contracts.Imaging;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Session;
 using Xunit;
 
 namespace ZivAiEditor.Tests;

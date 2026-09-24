@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using ZivAiEditor.App.Flows;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Imaging;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.UI.Chat;
 
 namespace ZivAiEditor.Tests;

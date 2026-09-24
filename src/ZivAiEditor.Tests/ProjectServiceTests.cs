@@ -1,4 +1,5 @@
-using ZivAiEditor.Agent;
+using ZivAiEditor.Agent.Project;
+using ZivAiEditor.Agent.Session;
 using Xunit;
 
 namespace ZivAiEditor.Tests;

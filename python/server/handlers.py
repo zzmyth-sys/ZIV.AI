@@ -7,6 +7,7 @@ import uuid
 import config
 import engine as engine_module
 import ipc
+import loras
 import model_loader
 import pipeline
 import pipeline_hooks
@@ -154,7 +155,10 @@ def _run_submit(frame_io, task_id, payload, op="inpaint"):
             _LOG.info("submit resolution payload: %s", payload.get("resolution"))
 
         try:
-            _ENGINE.ensure_loaded(_make_progress_pusher(frame_io, task_id))
+            # Step 8-2: the requested model id (None / unknown -> default) selects the registry entry.
+            _ENGINE.ensure_loaded(
+                payload.get("model_id"), _make_progress_pusher(frame_io, task_id)
+            )
         except Exception as exc:
             _write_error(frame_io, task_id, "model_load_failed", exc)
             return
@@ -227,27 +231,32 @@ def _configure_pre_sampling_hooks(payload):
       - ``lora``: ``{path, strength_model, strength_clip}``
       - ``optimizations``: ``{magcache, magcache_thresh}``
 
-    Only the registration seam is implemented here; the concrete LoRA /
-    MagCache transforms are out of Step 4 scope (see DOC/OPTIMIZATION.md).
+    ``lora.path`` is a registry id (resolved via :mod:`loras` against
+    ``Template/loras.json``) or a literal weight path (Step 8-1). The MagCache
+    transform stays a reserved seam (out of scope; see DOC/OPTIMIZATION.md).
     """
     pipeline_hooks.clear_pre_sampling_hooks()
     lora = payload.get("lora")
     if isinstance(lora, dict) and lora.get("path"):
-        pipeline_hooks.register_pre_sampling_hook(_build_lora_hook(lora))
+        entry = loras.resolve(lora.get("path"))
+        lora_path = loras.resolve_path(lora.get("path"))
+        if lora_path:
+            pipeline_hooks.register_pre_sampling_hook(
+                pipeline_hooks.make_lora_hook(
+                    lora_path,
+                    loras.resolve_strength(
+                        lora.get("strength_model"), entry, "default_strength_model"
+                    ),
+                    loras.resolve_strength(
+                        lora.get("strength_clip"), entry, "default_strength_clip"
+                    ),
+                )
+            )
+        else:
+            _LOG.warning("LoRA id/path could not be resolved: %s", lora.get("path"))
     optimizations = payload.get("optimizations")
     if isinstance(optimizations, dict) and optimizations.get("magcache"):
         pipeline_hooks.register_pre_sampling_hook(_build_magcache_hook(optimizations))
-
-
-def _build_lora_hook(lora):
-    def hook(model, clip, params):
-        _LOG.info(
-            "pre-sampling LoRA hook reserved (path=%s, not implemented)",
-            lora.get("path"),
-        )
-        return model, clip
-
-    return hook
 
 
 def _build_magcache_hook(optimizations):

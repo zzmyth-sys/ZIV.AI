@@ -1,7 +1,8 @@
-using ZivAiEditor.Agent;
+using ZivAiEditor.Agent.Execution;
+using ZivAiEditor.Agent.Session;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Imaging;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.UI;
 using ZivAiEditor.UI.Chat;
 using ZivAiEditor.UI.Editing;

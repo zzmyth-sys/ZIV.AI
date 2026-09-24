@@ -1,7 +1,7 @@
-using ZivAiEditor.Agent;
+using ZivAiEditor.Agent.Execution;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Inference;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Tools;
 using Xunit;
 
@@ -24,6 +24,21 @@ public class PlannerTests
             Mask = mask is null ? null : new MaskSpec { MaskImagePath = mask },
             Prompt = "replace the sky with a sunset",
         };
+    }
+
+    [Fact]
+    public async Task FallbackPlanner_Carries_ModelId()
+    {
+        var request = new PlanRequest
+        {
+            MainImagePath = @"C:\img\main.png",
+            Prompt = "x",
+            ModelId = "beta",
+        };
+
+        var plan = await new FallbackPlanner().PlanAsync(request);
+
+        Assert.Equal("beta", plan.ModelId);
     }
 
     [Fact]

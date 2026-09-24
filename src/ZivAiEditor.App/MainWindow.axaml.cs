@@ -14,14 +14,16 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
-using ZivAiEditor.Agent;
+using ZivAiEditor.Agent.Execution;
+using ZivAiEditor.Agent.Session;
 using ZivAiEditor.App.Controls;
 using ZivAiEditor.App.Flows;
 using ZivAiEditor.Backend;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Models;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Project;
+using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.UI;
 using ZivAiEditor.UI.Chat;
 
@@ -45,8 +47,8 @@ public partial class MainWindow : Window
 
     private SessionViewModel _vm = null!;
     private FlowRunner _flow = null!;
-    private SessionStore _store = null!;
-    private ProjectService _projects = null!;
+    private ISessionPersistence _store = null!;
+    private IProjectService _projects = null!;
     private IImagingService _imaging = null!;
     private ShellService _shell = null!;
     private IModelProfileRegistry _modelProfiles = null!;
@@ -76,8 +78,8 @@ public partial class MainWindow : Window
         IEditSessionWriter sessionWriter,
         ICommandParser commandParser,
         IExecutor executor,
-        SessionStore sessionStore,
-        ProjectService projects,
+        ISessionPersistence sessionStore,
+        IProjectService projects,
         IImagingService imaging,
         ShellService shell,
         IModelProfileRegistry modelProfiles,

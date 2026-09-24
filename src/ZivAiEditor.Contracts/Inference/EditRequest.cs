@@ -58,6 +58,12 @@ public sealed class EditRequest
     /// <summary>Optional output resolution (Step 6.5); null = backend default.</summary>
     public ResolutionPolicy? Resolution { get; init; }
 
+    /// <summary>
+    /// Optional model id (Step 8-2). <c>null</c> / unknown = the backend's default model
+    /// (<c>Template/models.json</c> entry with <c>default: true</c>, else the built-in fallback).
+    /// </summary>
+    public string? ModelId { get; init; }
+
     public LoraOptions? Lora { get; init; }
 
     public OptimizationOptions? Optimizations { get; init; }

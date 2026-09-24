@@ -1,4 +1,4 @@
-using ZivAiEditor.Agent;
+using ZivAiEditor.Agent.Session;
 using ZivAiEditor.Contracts.Imaging;
 using Xunit;
 

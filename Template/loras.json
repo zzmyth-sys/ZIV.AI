@@ -1,0 +1,13 @@
+{
+  "version": "1",
+  "_comment": "LoRA registry (Step 8-1). Reference an entry by id from Template/commands.json as \"lora\": { \"path\": \"<id>\", \"strength_model\": 1.0, \"strength_clip\": 1.0 }. The Python backend resolves the id to a weight path via python/server/loras.py. Adding a LoRA template is data-only: edit this file + commands.json.",
+  "loras": [
+    {
+      "id": "example_lora",
+      "path": "D:\\path\\to\\your\\lora.safetensors",
+      "default_strength_model": 1.0,
+      "default_strength_clip": 1.0,
+      "description": "示例条目（占位路径，请替换为新 LoRA 权重；commands.json 未引用它）"
+    }
+  ]
+}

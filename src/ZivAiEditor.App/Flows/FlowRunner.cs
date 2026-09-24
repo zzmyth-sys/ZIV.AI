@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using ZivAiEditor.Agent;
+using ZivAiEditor.Agent.Execution;
 using ZivAiEditor.Contracts.Execution;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.UI.Chat;
 
 namespace ZivAiEditor.App.Flows;

@@ -38,17 +38,20 @@ public class IpcIdleUnloadTests
         Assert.Equal(TaskStatus.Succeeded, handle.Status);
         Assert.True(File.Exists(output), "first submit should produce output");
 
-        // The idle watcher should unload the model without killing the process.
+        // The idle watcher should unload the model without killing the process. Model state and
+        // VRAM are polled together because NVML/WDDM accounting lags the actual unload; the
+        // former split (60 s state wait, then a fixed 15 s VRAM-only wait) raced that lag and made
+        // this case flaky (Step 3 legacy; widened in Step 7-E). Not GPU-verified (Z29/Z30) —
+        // re-verify on the GPU host.
         await WaitUntilAsync(
-            async () => (await client.CheckHealthAsync(timeout.Token)).ModelStatus == "not_loaded",
-            TimeSpan.FromSeconds(60));
+            async () =>
+            {
+                var health = await client.CheckHealthAsync(timeout.Token);
+                return health.ModelStatus == "not_loaded" && health.VramUsedMb < 3000;
+            },
+            TimeSpan.FromSeconds(30),
+            "model should unload and VRAM should fall back");
         Assert.True(manager.IsProcessRunning, "process must survive an idle unload");
-
-        // VRAM falls back after the unload (NVML; WDDM lags briefly).
-        await WaitUntilAsync(
-            async () => (await client.CheckHealthAsync(timeout.Token)).VramUsedMb < 3000,
-            TimeSpan.FromSeconds(15),
-            "VRAM should fall back after idle unload");
 
         // The next submit reloads lazily and succeeds.
         var output2 = NewTempPath("zivai_step3_reload");

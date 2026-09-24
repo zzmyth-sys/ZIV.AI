@@ -150,6 +150,8 @@ public sealed partial class IpcInferenceClient : IInferenceClient
             Lora = request.Lora,
             Optimizations = request.Optimizations,
             Anchor = null,
+            // InpaintRequest has no model id (Step 8-2); the legacy path uses the default model.
+            ModelId = null,
         };
 
         return SubmitEditAsync(edit, progress, ct);

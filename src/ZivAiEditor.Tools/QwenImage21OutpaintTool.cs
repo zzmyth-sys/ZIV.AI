@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Inference;
-using ZivAiEditor.Contracts.Planning;
+using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Tools;
 using TaskStatus = ZivAiEditor.Contracts.Enums.TaskStatus;
 
@@ -90,6 +90,8 @@ public sealed class QwenImage21OutpaintTool : IEditTool
             OutputPath = outputPath,
             Resolution = resolution,
             Anchor = anchor,
+            // Step 8-2: carry the plan's model id (null = backend default).
+            ModelId = input.ModelId,
         };
 
         var stepProgress = progress is null

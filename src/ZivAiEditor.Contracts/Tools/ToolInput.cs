@@ -1,4 +1,5 @@
 using ZivAiEditor.Contracts.Imaging;
+using ZivAiEditor.Contracts.Inference;
 
 namespace ZivAiEditor.Contracts.Tools;
 
@@ -17,4 +18,10 @@ public sealed class ToolInput
 
     /// <summary>Optional output resolution (Step 6.5); null = backend default.</summary>
     public ResolutionPolicy? Resolution { get; init; }
+
+    /// <summary>Optional LoRA for this step (Step 8-1); null = none. Carried to the tool.</summary>
+    public LoraOptions? Lora { get; init; }
+
+    /// <summary>Optional model id (Step 8-2); <c>null</c> = the default model.</summary>
+    public string? ModelId { get; init; }
 }

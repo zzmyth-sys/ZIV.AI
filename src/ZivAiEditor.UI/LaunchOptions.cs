@@ -20,7 +20,7 @@ public sealed class LaunchOptions
     /// <summary>Initial prompt to prefill the input box.</summary>
     public string? Prompt { get; init; }
 
-    /// <summary>Optional mask path (reserved; masking UI is a later step).</summary>
+    /// <summary>Optional mask path (CLI <c>--mask</c>; the mask UI landed in Step 9C.7).</summary>
     public string? MaskPath { get; init; }
 
     /// <summary>True when no field carries a value.</summary>

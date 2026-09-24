@@ -160,8 +160,9 @@ public partial class MainWindow
         // Step 9C.5-D: the first pipeline image is the main; the remaining attachments are
         // references. The DAG is reset only on "新会话"; "参考图" keeps the current node
         // (the main is the current node's pipeline image) and makes every attachment a
-        // reference.
-        IReadOnlyList<string> references = Array.Empty<string>();
+        // reference. The three-way dialog is a view interaction, so it stays here; the
+        // attachment-consumption rule lives in ChatFlowRules (module-boundary step 7-D1).
+        var startNewSession = false;
         if (preparation == AttachmentPreparation.NeedsDecision)
         {
             var choice = await MultiImagePromptDialog.ShowAsync(this);
@@ -170,28 +171,23 @@ public partial class MainWindow
                 return;
             }
 
-            if (choice == MultiImageChoice.Reference)
-            {
-                // Copy: `attachments` is the live strip backing list, cleared below.
-                references = attachments!.ToArray();
-            }
-            else
-            {
-                _vm.StartNewSessionFrom(attachments!);
-                references = attachments!.Skip(1).ToArray();
-                if (references.Count > 0)
-                {
-                    // Must follow StartNewSessionFrom, which rebuilds / clears Messages.
-                    _vm.AddHint("图 2/3 作为参考图");
-                }
-            }
+            startNewSession = choice == MultiImageChoice.NewSession;
         }
-        else if (attachments is { Count: > 1 })
+
+        var sendPlan = ChatFlowRules.ResolveAttachmentSend(
+            preparation, attachments ?? Array.Empty<string>(), startNewSession);
+        if (sendPlan.StartNewSession)
         {
-            // No root: PrepareAttachments already promoted the first attachment to the
-            // root, so the remaining attachments are references.
-            references = attachments.Skip(1).ToArray();
+            // Must run before the hint: StartNewSessionFrom rebuilds / clears Messages.
+            _vm.StartNewSessionFrom(attachments!);
         }
+
+        if (sendPlan.ShowReferenceHint)
+        {
+            _vm.AddHint("图 2/3 作为参考图");
+        }
+
+        var references = sendPlan.References;
 
         // Step 9C.6-D: the strip is consumed at send time — clear it now, before the
         // (possibly long) generation, so the input row resets immediately. A canceled
