@@ -119,7 +119,8 @@ public sealed partial class SessionViewModel
         string input,
         IProgress<TaskProgress>? progress = null,
         CancellationToken ct = default,
-        IReadOnlyList<string>? additionalImages = null)
+        IReadOnlyList<string>? additionalImages = null,
+        string? displayText = null)
     {
         var text = (input ?? "").Trim();
         if (text.Length == 0 || IsBusy)
@@ -148,9 +149,24 @@ public sealed partial class SessionViewModel
 
         try
         {
-            Messages.Add(new ChatMessage { Role = ChatRole.User, Text = text });
+            Messages.Add(new ChatMessage { Role = ChatRole.User, Text = displayText ?? text });
 
-            var parsed = await _parser.ParseAsync(text, _session, Resolution, cts.Token);
+            // Step 9C.5-D: the UI passes the reference images (main excluded). Cap at 3 extras
+            // (max 4 pipeline images, D4) and surface an over-limit hint right after the user
+            // message; the send is never refused. The parser interface stays untouched, so the
+            // plan is rebuilt (init-only) mirroring CommandParser.ApplyResolution.
+            var extras = NormalizeAdditionalImages(additionalImages);
+            if (extras.Count > MaxAdditionalImages)
+            {
+                AddHint("最多支持 3 张参考图，多余的已忽略");
+                extras = extras.Take(MaxAdditionalImages).ToArray();
+            }
+
+            // The image count drives single / multi template selection in the parser: the
+            // current pipeline image (if any) plus the references that will be attached.
+            var imageCount = (string.IsNullOrWhiteSpace(_session.GetCurrentPipelineImagePath()) ? 0 : 1)
+                + extras.Count;
+            var parsed = await _parser.ParseAsync(text, _session, imageCount, Resolution, cts.Token);
             if (!parsed.Success || parsed.Plan is null)
             {
                 Messages.Add(new ChatMessage
@@ -162,18 +178,7 @@ public sealed partial class SessionViewModel
                 return false;
             }
 
-            // Step 9C.5-D: the UI passes the reference images (main excluded). Cap at 3 extras
-            // (max 4 pipeline images, D4) and surface an over-limit hint right after the user
-            // message; the send is never refused. The parser interface stays untouched, so the
-            // plan is rebuilt (init-only) mirroring CommandParser.ApplyResolution.
             var plan = parsed.Plan;
-            var extras = NormalizeAdditionalImages(additionalImages);
-            if (extras.Count > MaxAdditionalImages)
-            {
-                AddHint("最多支持 3 张参考图，多余的已忽略");
-                extras = extras.Take(MaxAdditionalImages).ToArray();
-            }
-
             if (extras.Count > 0)
             {
                 plan = WithAdditionalImages(plan, extras);

@@ -32,9 +32,12 @@ internal sealed class AppContext : IDisposable
         IExecutor executor,
         ExecutionQueue executionQueue,
         IModelProfileRegistry modelProfiles,
-        ICommandParser commandParser,
+        CommandParser commandParser,
         EditSession session,
-        SessionStore sessionStore)
+        SessionStore sessionStore,
+        LocalLlmClient rewriterLlm,
+        IPromptExpander promptExpander,
+        ILlmPreflight llmPreflight)
     {
         Backend = backend;
         Client = client;
@@ -49,13 +52,18 @@ internal sealed class AppContext : IDisposable
         Executor = executor;
         _executionQueue = executionQueue;
         ModelProfiles = modelProfiles;
-        CommandParser = commandParser;
+        _commandParser = commandParser;
         Session = session;
         SessionStore = sessionStore;
+        _rewriterLlm = rewriterLlm;
+        PromptExpander = promptExpander;
+        LlmPreflight = llmPreflight;
     }
 
     private readonly HttpClient _llmHttp;
     private readonly ExecutionQueue _executionQueue;
+    private readonly CommandParser _commandParser;
+    private readonly LocalLlmClient _rewriterLlm;
 
     public PythonProcessManager Backend { get; }
 
@@ -76,7 +84,16 @@ internal sealed class AppContext : IDisposable
     public IModelProfileRegistry ModelProfiles { get; }
 
     /// <summary>Deterministic slash-command / prompt parser (Step 8).</summary>
-    public ICommandParser CommandParser { get; }
+    public ICommandParser CommandParser => _commandParser;
+
+    /// <summary>The loaded command set (single / multi template variants), for the /生成 flow.</summary>
+    public IReadOnlyList<CommandDefinition> Commands => _commandParser.Commands;
+
+    /// <summary>Prompt rewriter for <c>/生成</c> (prompt-rewriter flow).</summary>
+    public IPromptExpander PromptExpander { get; }
+
+    /// <summary>LLM reachability / VRAM preflight for <c>/生成</c> (prompt-rewriter flow).</summary>
+    public ILlmPreflight LlmPreflight { get; }
 
     /// <summary>The single in-memory edit session (Step 8); persisted as a project on save.</summary>
     public EditSession Session { get; }
@@ -149,13 +166,34 @@ internal sealed class AppContext : IDisposable
             new FallbackPlanner(),
             ex => Debug.WriteLine($"[planner] degraded to fallback: {ex.Message}"));
 
+        // Prompt-rewriter flow: a second client over the shared HttpClient, its own options
+        // (higher temperature), the /生成 expander and the LLM/VRAM preflight.
+        var rewriterOptions = new LlmClientOptions
+        {
+            Endpoint = settings.LlmRewriter.Endpoint,
+            Model = string.IsNullOrWhiteSpace(settings.LlmRewriter.Model) ? null : settings.LlmRewriter.Model,
+            Timeout = TimeSpan.FromSeconds(settings.LlmRewriter.TimeoutSeconds),
+            Temperature = settings.LlmRewriter.Temperature,
+            MaxTokens = settings.LlmRewriter.MaxTokens,
+            EnableThinking = settings.LlmRewriter.EnableThinking,
+        };
+
+        var rewriterLlm = new LocalLlmClient(llmHttp, rewriterOptions, ownsHttpClient: false);
+        var promptExpander = new PromptExpander(rewriterLlm);
+        var llmPreflight = new LlmPreflight(
+            client,
+            settings.LlmRewriter.Endpoint,
+            settings.LlmRewriter.VramTotalMb,
+            settings.LlmRewriter.VramNeedMb);
+
         // Step 8: one in-memory session; Step 9C.6-E: a project store. The UI drives the
         // session (already built above, before the executor).
         var sessionStore = new SessionStore();
 
         return new AppContext(
             backend, client, llmHttp, plannerLlm, planner, tools, executor, executionQueue,
-            modelProfiles, commandParser, session, sessionStore);
+            modelProfiles, commandParser, session, sessionStore,
+            rewriterLlm, promptExpander, llmPreflight);
     }
 
     /// <summary>
@@ -196,6 +234,7 @@ internal sealed class AppContext : IDisposable
 
         _disposed = true;
         LlmClient.Dispose();
+        _rewriterLlm.Dispose();
         _llmHttp.Dispose();
         Client.Dispose();
         Backend.Dispose();

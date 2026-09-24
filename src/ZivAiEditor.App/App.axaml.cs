@@ -29,7 +29,10 @@ public partial class App : Application
                 _context.Executor,
                 _context.SessionStore,
                 _context.ModelProfiles,
-                options);
+                options,
+                _context.Commands,
+                _context.PromptExpander,
+                _context.LlmPreflight);
             desktop.MainWindow = window;
 
             // Backend preview frames (0x02) → pending bubble, marshalled to the UI thread.

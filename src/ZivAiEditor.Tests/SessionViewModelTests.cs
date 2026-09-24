@@ -1014,6 +1014,22 @@ public class SessionViewModelTests
     }
 
     [Fact]
+    public async Task Submit_DisplayText_Shows_Original_But_Stores_Expanded()
+    {
+        var session = new EditSession();
+        var vm = new SessionViewModel(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        const string expanded = "/生成 一只发光的森林精灵";
+
+        var ok = await vm.SubmitAsync(expanded, displayText: "原始");
+
+        Assert.True(ok);
+        Assert.Contains(vm.Messages, m => m.Role == ChatRole.User && m.Text == "原始");
+        Assert.DoesNotContain(vm.Messages, m => m.Role == ChatRole.User && m.Text == expanded);
+        Assert.Equal(expanded, session.Nodes[session.CurrentNodeId!].Command);
+    }
+
+    [Fact]
     public void CancelCurrent_With_No_InFlight_Returns_False()
     {
         var session = new EditSession();

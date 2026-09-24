@@ -44,6 +44,9 @@ public partial class MainWindow : Window
     private SessionStore _store = null!;
     private IModelProfileRegistry _modelProfiles = null!;
     private EditSession _session = null!;
+    private readonly IReadOnlyList<CommandDefinition> _commands = Array.Empty<CommandDefinition>();
+    private readonly IPromptExpander? _promptExpander;
+    private readonly ILlmPreflight? _llmPreflight;
     private ImagePreview? _imagePreview;
     private bool _closing;
     private bool _suppressHistorySelection;
@@ -66,11 +69,17 @@ public partial class MainWindow : Window
         IExecutor executor,
         SessionStore sessionStore,
         IModelProfileRegistry modelProfiles,
-        LaunchOptions? launchOptions = null)
+        LaunchOptions? launchOptions = null,
+        IReadOnlyList<CommandDefinition>? commands = null,
+        IPromptExpander? promptExpander = null,
+        ILlmPreflight? llmPreflight = null)
     {
         _store = sessionStore ?? throw new ArgumentNullException(nameof(sessionStore));
         _modelProfiles = modelProfiles ?? throw new ArgumentNullException(nameof(modelProfiles));
         _session = session ?? throw new ArgumentNullException(nameof(session));
+        _commands = commands ?? Array.Empty<CommandDefinition>();
+        _promptExpander = promptExpander;
+        _llmPreflight = llmPreflight;
 
         // Step 9C.5: the same EditSession instance is passed as both the read-only
         // session view and the writer (it implements IEditSession / IEditSessionWriter);

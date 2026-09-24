@@ -81,7 +81,26 @@ public partial class MainWindow
         }
 
         var count = _importBar?.Count ?? 0;
-        send.IsEnabled = !_busy && _vm.CanSend(FindInput()?.Text, count);
+        var text = FindInput()?.Text;
+        var requirement = CheckCommandImageRequirement(text, count);
+        if (requirement.Blocked && requirement.Hint is { Length: > 0 })
+        {
+            ShowModeHint(requirement.Hint);
+        }
+
+        send.IsEnabled = !_busy && !requirement.Blocked && _vm.CanSend(text, count);
+    }
+
+    /// <summary>
+    /// Step 9C.9-A1 (D3): a multi-only command (e.g. <c>/合照</c>, whose variants lack a
+    /// "single" template) needs at least two pipeline images. Delegates to the pure
+    /// <see cref="CommandRequirements"/> helper and returns a blocking flag plus a hint.
+    /// </summary>
+    private (bool Blocked, string? Hint) CheckCommandImageRequirement(string? text, int attachmentCount)
+    {
+        var blocked = CommandRequirements.RequiresMoreImages(
+            _commands, text, _vm.HasRootImage, attachmentCount, out var hint);
+        return (blocked, hint);
     }
 
     private void ShowModeHint(string text)
@@ -108,6 +127,23 @@ public partial class MainWindow
         var count = _importBar?.Count ?? 0;
         if (!_vm.CanSend(text, count) || _vm.IsBusy)
         {
+            return;
+        }
+
+        // Step 9C.9-A1 (D3): block a multi-only command before sending (e.g. /合照 with
+        // fewer than two images) and surface the requirement as an inline hint.
+        var requirement = CheckCommandImageRequirement(text, count);
+        if (requirement.Blocked)
+        {
+            ShowModeHint(requirement.Hint ?? "该命令需要更多图片");
+            ScrollToEnd();
+            return;
+        }
+
+        // /生成 (T2I): rewrite the description through the LLM, confirm, then submit.
+        if (IsGenerateCommand(text))
+        {
+            await RunGenerateFlowAsync(text, input);
             return;
         }
 

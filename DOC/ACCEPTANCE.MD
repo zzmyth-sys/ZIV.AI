@@ -2311,3 +2311,107 @@ UI（D6 遗留）。
 
 1. 追加 `DEVLOG.md` / `FROZEN.md` 的 9C.8-B 记录（本步已完成）
 2. 在「验收记录」追加“Step 9C.8-B 通过，日期：____”（待签）
+
+---
+
+## Step 9C.9-A1 验收：命令自动分支 + `/生成`（LLM 扩写）
+
+**目标**：同一命令名按附件数自动选 single / multi 模板；新增 `/生成`（T2I + 大模型扩写 +
+确定/重写/取消对话框 + LLM/显存预检）。**不含** 批量 / WD14 / VLM / `@图引用` UI / 命令列表 UI。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ |
+| G2 | 依赖方向没破 | 改动仅 Agent / UI / App；`Contracts` 零变更 | ✅ |
+| G3 | 契约与 FROZEN 一致 | `ICommandParser` 新重载 + `CommandDefinition` 新字段走 FROZEN 尾部登记 | ✅ |
+| G4 | 未授权修改检查 | Step 0–9C.8-B2 冻结行未改；新增重载已授权 | ✅ |
+| G5 | 文档已更新 | `FROZEN` / `DEVLOG` / `ACCEPTANCE` / `INTERACTION` 追加 9C.9-A1 | ✅ |
+| G6 | 便携性未破 | `[llm.rewriter]` 在程序目录 `settings.ini`；无注册表改动 | ✅ |
+| G7 | AI 推理进程隔离未破 | LLM 经 `ILlmClient`（HTTP）；C# 不加载 LLM 运行时（Z17） | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.9A1.1 | 变体选择 | `CommandParserTests` | `/换背景` `/换装` 1 图→single、2 图→multi | ✅ |
+| 9C.9A1.2 | 仅 multi 命令 | `CommandParserTests` / `CommandRequirementsTests` | `/合照` <2 图报错 + UI 预门控 | ✅ |
+| 9C.9A1.3 | variadic | `CommandParserTests` | 多词描述折叠为末位参数；空 → 报错 | ✅ |
+| 9C.9A1.4 | `/生成` T2I | `CommandParserTests` | 有 root 仍空 `MainImagePath` | ✅ |
+| 9C.9A1.5 | 真实 JSON 路径 | `CommandParserTests.Real_CommandsJson_Loads_Variants_And_Flags` | 源生成反序列化含 variants/t2i | ✅ |
+| 9C.9A1.6 | 重跑图数 | `ExecutorTests` | 有参考图 → multi 变体重建 | ✅ |
+| 9C.9A1.7 | `displayText` | `SessionViewModelTests` | 气泡=原始输入；`node.Command`=完整命令 | ✅ |
+| 9C.9A1.8 | LLM 扩写器 | `PromptExpanderTests` | Fake `ILlmClient`；用内置 system prompt | ✅ |
+| 9C.9A1.9 | 预检 | `PreflightTests` | 不可达→阻断；free<9800→警告；后端读失败→Ready | ✅ |
+| 9C.9A1.10 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0 错误；受影响类 **98 通过**；非 GPU 全量 **398 通过** | ✅ |
+| 9C.9A1.11 | Z8 | 查改动文件 | 源文件均 < 600 | ✅ |
+| 9C.9A1.12 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.9A1.13 | 手动：变体 | 用户真机 | `/换背景 森林`+1 图→single；+2 图→multi；`/换装 红裙` 同 | ⏳ 待用户确认 |
+| 9C.9A1.14 | 手动：`/生成` | 用户真机 | 弹扩写对话框；确定 / 重写 / 取消均生效 | ⏳ 待用户确认 |
+| 9C.9A1.15 | 手动：LLM 未启动 | 用户真机 | 提示「请先启动 LLM 服务」 | ⏳ 待用户确认 |
+| 9C.9A1.16 | 手动：显存不足 | 用户真机 | 低显存提示（非阻断），仍可继续 | ⏳ 待用户确认（若可模拟） |
+
+### Step 9C.9-A1 通过标准
+
+- 通用 G1–G8 全过。
+- 专属 9C.9A1.1–9C.9A1.12 全过；9C.9A1.13–9C.9A1.16 由用户真机确认。
+
+### Step 9C.9-A1 遗留说明（非阻断）
+
+- **批量（N 图 → N 结果）** → 后续。
+- **命令列表 UI 补全（`/` 自动补全）** → 后置。
+- **`/生成` 气泡在会话重载后显示扩写文本**（与实时气泡不一致）→ 后置。
+- **WD14 打标（9C.9-B）/ VLM 反推（9C.9-C）/ `@图引用` UI** → 后置。
+- **未跑 GPU 端到端**（Z29 / Z30）；LLM 扩写 / 预检由 Fake 覆盖。
+
+### Step 9C.9-A1 验收后动作
+
+1. 追加 `DEVLOG.md` / `FROZEN.md` 的 9C.9-A1 记录（本步已完成）
+2. 在「验收记录」追加“Step 9C.9-A1 通过，日期：____”（待签）
+
+---
+
+## Step 9C.9-A1-fix 验收：variadic 错误信息修正
+
+**目标**：`/合照` 缺描述时给出可操作提示（示例），而非误导的「declares no parameter」。
+**不含** 命令定义 / 行为变更；**无契约变化**（`FROZEN` 不改）。
+
+### 通用清单（G1–G8）
+
+| # | 检查项 | 通过标准 | 结果 |
+|---|---|---|---|
+| G1 | 代码能编译 | `dotnet build src\ZIV.AI.sln -c Release` 0 错误 0 警告 | ✅ |
+| G2 | 依赖方向没破 | 仅改 `CommandParser.cs` + 测试 | ✅ |
+| G3 | 契约与 FROZEN 一致 | 无契约变化（`ICommandParser` 签名不变） | ✅ |
+| G4 | 未授权修改检查 | 未改冻结行 | ✅ |
+| G5 | 文档已更新 | `DEVLOG` / `ACCEPTANCE` 追加 9C.9-A1-fix | ✅ |
+| G6 | 便携性未破 | 无文件系统 / 注册表改动 | ✅ |
+| G7 | AI 推理进程隔离未破 | 无后端 / 推理改动 | ✅ |
+| G8 | 独立运行不依赖 ZIV | 未新增依赖 | ✅ |
+
+### 专属清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.9A1f.1 | `/合照` 缺描述 | `CommandParserTests` | 错误含 `Try: /合照 两人在森林握手` | ✅ |
+| 9C.9A1f.2 | `/换背景` 缺描述 | `CommandParserTests` | 错误含 `Try: /换背景 森林` | ✅ |
+| 9C.9A1f.3 | 真配置错误 | `CommandParserTests`（伪命令 variadic+`params:[]`） | 错误含 `declares no parameter` | ✅ |
+| 9C.9A1f.4 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0 错误；受影响类 **93 通过 / 0 失败** | ✅ |
+| 9C.9A1f.5 | 无 GPU 负载 | 测试过程 | 未启动 Python、未加载模型（Z29 / Z30） | ✅ |
+| 9C.9A1f.6 | 手动：`/合照` 缺描述 | 用户真机 | 气泡显示带示例的提示 | ⏳ 待用户确认 |
+
+### Step 9C.9-A1-fix 通过标准
+
+- 通用 G1–G8 全过；专属 9C.9A1f.1–9C.9A1f.5 全过；9C.9A1f.6 由用户真机确认。
+
+### Step 9C.9-A1-fix 遗留说明（非阻断）
+
+- `/合照` **仍要求描述**（模板 `{description}` 语义；R1「variadic 空 → 报错」不变）。
+- **未跑 GPU 端到端**（Z29 / Z30）。
+
+### Step 9C.9-A1-fix 验收后动作
+
+1. 追加 `DEVLOG.md` 的 9C.9-A1-fix 记录（本步已完成）
+2. 在「验收记录」追加“Step 9C.9-A1-fix 通过，日期：____”（待签）

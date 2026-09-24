@@ -2960,3 +2960,102 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **无根会话取消**：首个附件被 `PrepareAttachments` 提升为 root 时，取消**不回退该 root**
   （仅恢复输入 / 附件）；属边界场景。
 - **多任务并发取消** / **GPU 端到端**（同 9C.8B.6）。
+
+---
+
+## Step 9C.9-A1（日期：2026-09-24）
+
+> **修订说明（Step 9C.9-A1 · 命令自动分支 + `/生成`（LLM 扩写））**
+>
+> 本段为 Step 9C.9-A1 **只增**记录。目标：① 同一命令名按附件数自动选模板（single / multi）
+> ② 新增 `/生成`（T2I + 大模型扩写）③ `/生成` 前 LLM 可达性 + 显存预检。**不改动 Step 0–9C.8-B2
+> 已冻结行的既有成员**；契约变更为**新增重载 / 新增字段 / 新类型**（走本段追加，已授权）。
+
+### 9C.9-A1.1 `ICommandParser` 新增重载（冻结 · 契约新增，已授权）
+
+| 成员 | 文件 | 说明 |
+|---|---|---|
+| `ICommandParser.ParseAsync(string, IEditSession, int imageCount, ResolutionPolicy?, CancellationToken)` | `ZivAiEditor.Agent/CommandParser.cs` | `imageCount` = 管线图数（主图 + 参考图）；`-1` = 未知（回退 `defaultVariant`） |
+
+- 既有两重载**保留不动**，均委托新重载并传 `-1`。变体选择在 `CommandParser` 内。
+- `Executor.BuildRerunPlanAsync` 改传 `1 + (node.Rerun?.AdditionalImages.Count ?? 0)`（R7）。
+- `SessionViewModel.SubmitAsync` 计算 `imageCount = (当前管线图?1:0) + 参考图数` 并传入。
+- **`Contracts` 零变更**（`RerunSpec` 不动，图数可从 `AdditionalImages` 推导）。
+
+### 9C.9-A1.2 `CommandDefinition` 新增字段（冻结 · Agent 层）
+
+| 字段 | JSON 键 | 说明 |
+|---|---|---|
+| `Variants` | `variants` | `{ "single": "...", "multi": "..." }`；为空时用扁平 `Template` |
+| `DefaultVariant` | `defaultVariant` | `imageCount < 0` 时选用 |
+| `Variadic` | `variadic` | 末位参数吸收整段剩余文本（多词描述）；空 → 报错 |
+| `T2i` | `t2i` | 文生图：计划恒为空 `MainImagePath`（即便有 root） |
+
+- `Variants` 在源生成反序列化下**可能为 `null`**（JSON 缺键时），代码按 `is not { Count: > 0 }` 容错。
+
+### 9C.9-A1.3 `Template/commands.json` 结构（冻结 · version 1.1）
+
+- 命令集：`/换背景`(variants single+multi)、`/换装`(variants single+multi)、`/合照`(仅 multi)、
+  `/生成`(t2i)、`/去水印`、`/去物体`、`/扩图`。
+- `template` 与 `variants` **共存**：无 `variants` 的命令仍用扁平 `template`（去水印 / 去物体 / 扩图）。
+- **行为变更（登记）**：`/换背景` 参数由 `target` 改名 `description` 且 `variadic: true`；
+  原模板文本移入 `variants.single`（**逐字不变**），新增 `variants.multi`。
+- 变体选择规则：`T2i` → `single`；否则 `imageCount >= 2 ? "multi" : "single"`；已知图数而缺该键 →
+  **报错**（不回退）；`imageCount < 0` → `defaultVariant`。仅 multi 变体的命令在 `imageCount < 2`
+  时报「requires at least 2 images」。
+- `BuiltInCommands()` 同步为 7 条（含新字段），文件缺失时行为一致。
+
+### 9C.9-A1.4 新增类型（冻结 · 非契约）
+
+| 类型 | 文件 | 归属 | 说明 |
+|---|---|---|---|
+| `IPromptExpander` / `PromptExpander` | `ZivAiEditor.Agent/PromptExpander.cs` | Agent | 注入 `ILlmClient`；内置 `/生成` system prompt；Fake 可测 |
+| `LlmPreflightStatus` / `LlmPreflightResult` / `ILlmPreflight` / `LlmPreflight` | `ZivAiEditor.App/LlmPreflight.cs` | App | LLM `/health` 探测 + `IInferenceClient.CheckHealthAsync().VramUsedMb` 预检 |
+| `PromptChoice` / `PromptConfirmDialog` | `ZivAiEditor.App/PromptConfirmDialog.axaml(.cs)` | App | 确定 / 重写 / 取消；可滚动只读扩写结果 |
+| `CommandRequirements` | `ZivAiEditor.App/CommandRequirements.cs` | App | D3 发送前门控（纯函数，可测） |
+
+### 9C.9-A1.5 预检语义（冻结 · 非契约）
+
+- **LLM 可达性**：裸 HTTP `GET {endpoint 去 /v1/chat/completions}/health`（超时 1.5s）；不可达 →
+  **硬阻断**「请先启动 LLM 服务」。
+- **显存**：`free = VramTotalMb - VramUsedMb`（`vram_used_mb` 为 NVML **设备级**占用，含 LLM 进程）；
+  `free < VramNeedMb` → **警告**（非阻断，D7）。默认 `16376` / `9800` MB。
+- LLM 可达但后端显存读取失败 → `Ready`（不阻断；正常提交流程会暴露后端错误）。
+
+### 9C.9-A1.6 配置（冻结 · 非契约）
+
+- `settings.ini` / `settings.ini.template` 新增 `[llm.rewriter]`（endpoint / model / temperature=0.7 /
+  max_tokens / enable_thinking / timeout_seconds / vram_total_mb / vram_need_mb）。
+  **取代** Step 5 补完登记的预留段注释 `[llm.prompt_rewriter]` / `[llm.multi_image]`（段名以本段为准）。
+
+### 9C.9-A1.7 外部规范声明（冻结）
+
+- `/生成` 的 system prompt 按**用户提供的官方 Qwen-Image-2.1 T2I 8 步观察者散文规范**落地为
+  **内置常量**；本仓库内**无该规范原文**（`Comfyui/blueprints/*.json` 与 `DOC/OPTIMIZATION.md`
+  均未含），无法在仓库内交叉验证，属**外部规范引用**。
+
+### 9C.9-A1.8 `/生成` 流程（冻结 · 非契约）
+
+- 发送 `/生成 <描述>` → 预检 → LLM 扩写 → `PromptConfirmDialog`（确定 / 重写 / 取消）→
+  确定后提交 `/生成 <扩写>`，`displayText` = 原始输入。
+- `node.Command` = `/生成 <扩写>`；`SessionViewModel.SubmitAsync` 新增可选 `displayText`
+  （气泡显示原始输入，`node.Command` 仍存完整命令）。
+- **重跑**：重新解析 `node.Command`（`{description}` = 扩写）→ T2I；**不再次调用 LLM**，确定性。
+- `/生成` 不使用附件；有附件时提示「文生图不使用附件，已忽略」并清空附件条。
+
+### 9C.9-A1.9 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：受影响类（`CommandParserTests` / `SessionViewModelTests` /
+  `ExecutorTests` / `PromptExpanderTests` / `PreflightTests` / `CommandRequirementsTests`）
+  → **98 通过 / 0 失败**；非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **398 通过 / 0 失败**
+  （9C.8-B2 基线 377，本步 +21）。
+- **Z8**：改动源文件均 < 600（最大 `CommandParser.cs` 523 / `SessionViewModel.cs` 520）。
+- **未跑 GPU 端到端**（Z29 / Z30）；LLM 扩写 / 预检由 Fake 覆盖。
+
+### 9C.9-A1.10 遗留项（冻结）
+
+- **批量（N 图 → N 结果）** → 后续。
+- **命令列表 UI 补全（`/` 自动补全）** → 后置。
+- **`/生成` 气泡在会话重载后显示 `node.Command`（扩写文本）**，与实时气泡（原始输入）不一致 → 后置。
+- **WD14 打标（9C.9-B）/ VLM 反推（9C.9-C）/ `@图引用` UI** → 后置。

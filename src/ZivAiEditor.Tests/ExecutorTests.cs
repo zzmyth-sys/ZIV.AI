@@ -275,6 +275,29 @@ public class ExecutorTests
     }
 
     [Fact]
+    public async Task Rerun_Uses_MultiVariant_When_References_Present()
+    {
+        var tool = new FakeTool("QW21edit", (input, _) => Task.FromResult(Ok(input.StepId, @"C:\out\r.png")));
+        var session = new EditSession();
+        var executor = CreateExecutor(session, TempParser(), tool);
+
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        var node = session.AppendNode(rootId, @"C:\img\out.png", "/换背景 一片森林");
+        session.SetNodeRerun(node.NodeId, new RerunSpec
+        {
+            AdditionalImages = new[] { @"C:\img\ref.png" },
+        });
+
+        var state = await executor.RerunAsync(node.NodeId);
+
+        Assert.Equal(TaskStatus.Succeeded, state.Status);
+        var input = Assert.Single(tool.Received);
+        Assert.Contains("<image2>", input.Parameters["prompt"]);
+        Assert.Contains("一片森林", input.Parameters["prompt"]);
+    }
+
+    [Fact]
     public async Task Rerun_Parentless_Node_Throws()
     {
         var session = new EditSession();

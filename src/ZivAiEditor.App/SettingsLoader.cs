@@ -14,6 +14,8 @@ internal sealed class BackendSettings
     public string Script { get; init; } = @"D:\devlop\ZIV.AI\python\server\main.py";
 
     public LlmPlannerSettings LlmPlanner { get; init; } = new();
+
+    public LlmRewriterSettings LlmRewriter { get; init; } = new();
 }
 
 /// <summary>
@@ -37,6 +39,30 @@ internal sealed class LlmPlannerSettings
 }
 
 /// <summary>
+/// Prompt-rewriter LLM settings (<c>[llm.rewriter]</c>). Shares the <c>LlmClientOptions</c>
+/// shape with the planner but keeps higher temperature / its own VRAM budget for the
+/// <c>/生成</c> preflight.
+/// </summary>
+internal sealed class LlmRewriterSettings
+{
+    public string Endpoint { get; init; } = "http://127.0.0.1:8080/v1/chat/completions";
+
+    public string? Model { get; init; }
+
+    public double Temperature { get; init; } = 0.7;
+
+    public int MaxTokens { get; init; } = 2048;
+
+    public bool EnableThinking { get; init; }
+
+    public int TimeoutSeconds { get; init; } = 60;
+
+    public double VramTotalMb { get; init; } = 16376;
+
+    public double VramNeedMb { get; init; } = 9800;
+}
+
+/// <summary>
 /// Reads the program-directory <c>settings.ini</c> (Z14). When the file is
 /// missing it is seeded from the repository-root template if one can be found;
 /// otherwise the built-in defaults are used (Z28: no external dependency).
@@ -54,9 +80,11 @@ internal static class SettingsLoader
         var sections = ParseSections(File.Exists(path) ? path : null);
         var backend = Section(sections, "backend");
         var planner = Section(sections, "llm.planner");
+        var rewriter = Section(sections, "llm.rewriter");
 
         var defaults = new BackendSettings();
         var plannerDefaults = defaults.LlmPlanner;
+        var rewriterDefaults = defaults.LlmRewriter;
         return new BackendSettings
         {
             PipeName = Get(backend, "pipe_name", defaults.PipeName),
@@ -70,6 +98,17 @@ internal static class SettingsLoader
                 MaxTokens = GetInt(planner, "max_tokens", plannerDefaults.MaxTokens),
                 EnableThinking = GetBool(planner, "enable_thinking", plannerDefaults.EnableThinking),
                 TimeoutSeconds = GetInt(planner, "timeout_seconds", plannerDefaults.TimeoutSeconds),
+            },
+            LlmRewriter = new LlmRewriterSettings
+            {
+                Endpoint = Get(rewriter, "endpoint", rewriterDefaults.Endpoint),
+                Model = GetOptional(rewriter, "model") ?? rewriterDefaults.Model,
+                Temperature = GetDouble(rewriter, "temperature", rewriterDefaults.Temperature),
+                MaxTokens = GetInt(rewriter, "max_tokens", rewriterDefaults.MaxTokens),
+                EnableThinking = GetBool(rewriter, "enable_thinking", rewriterDefaults.EnableThinking),
+                TimeoutSeconds = GetInt(rewriter, "timeout_seconds", rewriterDefaults.TimeoutSeconds),
+                VramTotalMb = GetDouble(rewriter, "vram_total_mb", rewriterDefaults.VramTotalMb),
+                VramNeedMb = GetDouble(rewriter, "vram_need_mb", rewriterDefaults.VramNeedMb),
             },
         };
     }

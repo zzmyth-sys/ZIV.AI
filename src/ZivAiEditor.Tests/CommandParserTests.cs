@@ -266,4 +266,199 @@ public class CommandParserTests
         Assert.True(result.Success);
         Assert.Null(result.Plan!.Mask);
     }
+
+    /// <summary>
+    /// Loads the real <c>Template/commands.json</c> the App uses (not the built-in fallback)
+    /// and exercises the variant / T2I / variadic fields through the source-generated JSON path.
+    /// </summary>
+    [Fact]
+    public async Task Real_CommandsJson_Loads_Variants_And_Flags()
+    {
+        var path = FindCommandsFile();
+        Assert.NotNull(path);
+        var parser = new CommandParser(path!);
+
+        var huan = Assert.Single(parser.Commands, command => command.Name == "/换背景");
+        Assert.True(huan.Variadic);
+        Assert.True(huan.Variants.ContainsKey("single"));
+        Assert.True(huan.Variants.ContainsKey("multi"));
+
+        var single = await parser.ParseAsync("/换背景 森林", SessionWithImage(), 1, resolution: null);
+        var multi = await parser.ParseAsync("/换背景 森林", SessionWithImage(), 2, resolution: null);
+        Assert.Contains("Replace the background", single.Plan!.Steps[0].Parameters["prompt"]);
+        Assert.Contains("<image2>", multi.Plan!.Steps[0].Parameters["prompt"]);
+
+        var generate = await parser.ParseAsync("/生成 森林精灵", SessionWithImage(), 1, resolution: null);
+        Assert.Equal("", generate.Plan!.MainImagePath);
+        Assert.Equal("森林精灵", generate.Plan.Steps[0].Parameters["prompt"]);
+
+        var multiOnly = await parser.ParseAsync("/合照 两个人", SessionWithImage(), 1, resolution: null);
+        Assert.False(multiOnly.Success);
+        Assert.Contains("at least 2 images", multiOnly.ErrorMessage);
+    }
+
+    /// <summary>Walks up from the test bin directory to the repository root's commands file.</summary>
+    private static string? FindCommandsFile()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(directory.FullName, "Template", "commands.json");
+            if (File.Exists(candidate) && File.Exists(Path.Combine(directory.FullName, "DOC", "FROZEN.md")))
+            {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return null;
+    }
+
+    [Fact]
+    public async Task SlashCommand_SingleVariant_When_OneImage()
+    {
+        var parser = ParserWithoutFile();
+
+        var result = await parser.ParseAsync("/换背景 热带海滩", SessionWithImage(), 1, resolution: null);
+
+        Assert.True(result.Success);
+        var prompt = Assert.Single(result.Plan!.Steps).Parameters["prompt"];
+        Assert.Contains("Replace the background", prompt);
+        Assert.Contains("热带海滩", prompt);
+    }
+
+    [Fact]
+    public async Task SlashCommand_MultiVariant_When_TwoImages()
+    {
+        var parser = ParserWithoutFile();
+
+        var result = await parser.ParseAsync("/换背景 一片森林", SessionWithImage(), 2, resolution: null);
+
+        Assert.True(result.Success);
+        var prompt = Assert.Single(result.Plan!.Steps).Parameters["prompt"];
+        Assert.Contains("<image2>", prompt);
+        Assert.Contains("一片森林", prompt);
+    }
+
+    [Fact]
+    public async Task SlashCommand_ChangeClothing_Both_Variants()
+    {
+        var parser = ParserWithoutFile();
+
+        var single = await parser.ParseAsync("/换装 红色毛衣", SessionWithImage(), 1, resolution: null);
+        var multi = await parser.ParseAsync("/换装 红色毛衣", SessionWithImage(), 2, resolution: null);
+
+        Assert.True(single.Success);
+        Assert.Contains("Change the clothing", Assert.Single(single.Plan!.Steps).Parameters["prompt"]);
+        Assert.Contains("红色毛衣", Assert.Single(single.Plan.Steps).Parameters["prompt"]);
+
+        Assert.True(multi.Success);
+        Assert.Contains("garment from <image2>", Assert.Single(multi.Plan!.Steps).Parameters["prompt"]);
+    }
+
+    [Fact]
+    public async Task SlashCommand_GroupPhoto_Needs_TwoImages()
+    {
+        var parser = ParserWithoutFile();
+
+        var multi = await parser.ParseAsync("/合照 一起比心", SessionWithImage(), 2, resolution: null);
+        var single = await parser.ParseAsync("/合照 一起比心", SessionWithImage(), 1, resolution: null);
+
+        Assert.True(multi.Success);
+        var prompt = Assert.Single(multi.Plan!.Steps).Parameters["prompt"];
+        Assert.Contains("<image2>", prompt);
+        Assert.Contains("一起比心", prompt);
+
+        Assert.False(single.Success);
+        Assert.Contains("at least 2 images", single.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SlashCommand_Generate_Forces_Empty_MainImage()
+    {
+        var parser = ParserWithoutFile();
+
+        var result = await parser.ParseAsync("/生成 森林精灵", SessionWithImage(), 1, resolution: null);
+
+        Assert.True(result.Success);
+        Assert.Equal("", result.Plan!.MainImagePath);
+        Assert.Equal("森林精灵", Assert.Single(result.Plan.Steps).Parameters["prompt"]);
+    }
+
+    [Fact]
+    public async Task SlashCommand_Variadic_Folds_MultiWord_Description()
+    {
+        var parser = ParserWithoutFile();
+
+        var result = await parser.ParseAsync("/换背景 一片 森林", SessionWithImage(), 1, resolution: null);
+
+        Assert.True(result.Success);
+        Assert.Contains("一片 森林", Assert.Single(result.Plan!.Steps).Parameters["prompt"]);
+    }
+
+    [Fact]
+    public async Task SlashCommand_Variadic_Empty_Returns_Error()
+    {
+        var parser = ParserWithoutFile();
+
+        var result = await parser.ParseAsync("/换背景", SessionWithImage(), 1, resolution: null);
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SlashCommand_GroupPhoto_Without_Description_Hints_Example()
+    {
+        var parser = ParserWithoutFile();
+
+        var result = await parser.ParseAsync("/合照", SessionWithImage(), 2, resolution: null);
+
+        Assert.False(result.Success);
+        Assert.Contains("Try: /合照 两人在森林握手", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SlashCommand_ChangeBackground_Without_Description_Hints_Example()
+    {
+        var parser = ParserWithoutFile();
+
+        var result = await parser.ParseAsync("/换背景", SessionWithImage(), 1, resolution: null);
+
+        Assert.False(result.Success);
+        Assert.Contains("Try: /换背景 森林", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Variadic_Command_Without_Params_Reports_Config_Error()
+    {
+        // A malformed command (variadic but declares no parameter) must keep the config-error
+        // wording instead of the "Try: ..." hint.
+        var directory = Path.Combine(Path.GetTempPath(), "zivai_cmd_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "commands.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "version": "1.1",
+              "commands": [
+                { "name": "/坏", "params": [], "variadic": true, "tool": "QW21edit", "template": "x" }
+              ]
+            }
+            """);
+
+        try
+        {
+            var parser = new CommandParser(path);
+
+            var result = await parser.ParseAsync("/坏", SessionWithImage(), 1, resolution: null);
+
+            Assert.False(result.Success);
+            Assert.Contains("declares no parameter", result.ErrorMessage);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
 }

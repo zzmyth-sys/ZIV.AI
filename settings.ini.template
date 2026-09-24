@@ -17,15 +17,15 @@ max_tokens = 2048
 enable_thinking = false
 timeout_seconds = 30
 
-; --- 预留段（本步不解析，仅说明后期用途）---
-; 后期「提示词重写 / 多图任务」场景复用同一个 LocalLlmClient，
-; 只需在 AppContext 中按场景构造不同的 LlmClientOptions（temperature / max_tokens 等），
-; 无需新建客户端类。详见 DOC/OPTIMIZATION.md §2.1。
-;
-; [llm.prompt_rewriter]
-; endpoint = http://127.0.0.1:8080/v1/chat/completions
-; temperature = 0.7
-;
-; [llm.multi_image]
-; endpoint = http://127.0.0.1:8080/v1/chat/completions
-; temperature = 0.2
+; 提示词重写（/生成）使用的本地 LLM；与规划器共用一个 llama-server 也可。
+; vram_total_mb = 显卡总显存；vram_need_mb = 跑图所需空闲显存（低于此值时报低显存）。
+; vram_used_mb 来自 NVML（整卡占用，含已加载的 LLM 进程）。
+[llm.rewriter]
+endpoint = http://127.0.0.1:8080/v1/chat/completions
+model =
+temperature = 0.7
+max_tokens = 2048
+enable_thinking = false
+timeout_seconds = 60
+vram_total_mb = 16376
+vram_need_mb = 9800

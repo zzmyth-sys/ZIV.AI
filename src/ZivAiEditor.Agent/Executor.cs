@@ -128,8 +128,9 @@ public sealed class Executor : IExecutor
         try
         {
             _writer.NavigateTo(node.ParentNodeId!);
+            var imageCount = 1 + (node.Rerun?.AdditionalImages.Count ?? 0);
             var parsed = await _parser
-                .ParseAsync(node.Command, _session, node.Rerun?.Resolution, ct)
+                .ParseAsync(node.Command, _session, imageCount, node.Rerun?.Resolution, ct)
                 .ConfigureAwait(false);
             if (!parsed.Success || parsed.Plan is null)
             {

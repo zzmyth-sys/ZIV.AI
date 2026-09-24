@@ -4066,3 +4066,125 @@ D4=状态恢复。
 
 - 未改 `Contracts` / `python/server/*` / `ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；无新 NuGet；
   未改 chrome / 项目列表 / 分辨率选择器 / 图片导入 / 多图管线 / 裁切 / 遮罩。
+
+---
+
+## [Step 9C.9-A1] - 2026-09-24（命令自动分支 + `/生成` LLM 扩写）
+
+### 目标
+
+把「命令模板体系」落地：① 同一命令名按附件数自动选 single / multi 模板；② 新增 `/生成`
+（T2I + 大模型扩写，复用 `LocalLlmClient`）；③ `/生成` 前 LLM 可达性 + 显存预检 + 确认对话框。
+范围外：批量、WD14 打标（9C.9-B）、VLM 反推（9C.9-C）、`@图引用` UI、命令列表 UI 补全、
+用户自定义模板导入导出、多语言切换。
+
+### 做了什么
+
+- **Agent 层**：
+  - `CommandParser.cs`：`CommandDefinition` 追加 `Variants` / `DefaultVariant` / `Variadic` / `T2i`；
+    `ICommandParser` 新增 `ParseAsync(..., int imageCount, ResolutionPolicy?, ct)` 重载（`-1` 哨兵，
+    既有两重载委托）；`TryBuildArgs`（variadic 折叠末位参数 + 空值报错）、`TrySelectTemplate`
+    （`T2i`→single；`>=2`→multi；已知图数缺键报错；仅 multi 命令报「requires at least 2 images」）；
+    `ApplyTemplate` 改签名；`BuiltInCommands()` 同步 7 条。
+  - `PromptExpander.cs`（新）：`IPromptExpander` + `PromptExpander`，注入 `ILlmClient`，内置
+    `/生成` system prompt（官方 T2I 8 步观察者散文规范）。
+  - `Executor.cs`：`BuildRerunPlanAsync` 传 `1 + (node.Rerun?.AdditionalImages.Count ?? 0)`。
+- **UI 层**：`SessionViewModel.SubmitAsync` 追加可选 `displayText`；参考图先归一化，再算
+  `imageCount` 传 parser；User 气泡显示 `displayText`，`AppendNode` 仍存完整输入。
+- **App 层**：
+  - `SettingsLoader.cs` 新增 `[llm.rewriter]`（`LlmRewriterSettings` + vram 阈值）；
+    `settings.ini` / `settings.ini.template` 同步。
+  - `LlmPreflight.cs`（新）：LLM `/health`（裸 HTTP，1.5s）不可达 → 硬阻断；可达 → 读
+    `CheckHealthAsync().VramUsedMb`，`free = 16376 - used < 9800` → 警告（非阻断）；后端读显存
+    失败 → `Ready`。
+  - `PromptConfirmDialog.axaml(.cs)`（新）：`PromptChoice` + 确定 / 重写 / 取消 + 可滚动只读文本。
+  - `CommandRequirements.cs`（新）：D3 发送前门控纯函数。
+  - `MainWindow.Generate.cs`（新）：`/生成` 预检 → 扩写 → 对话框 → 提交（`displayText`）；
+    `MainWindow.Send.cs` 接线门控 + `/生成` 拦截；`MainWindow.axaml.cs` 注入 `commands` /
+    `promptExpander` / `llmPreflight`；`AppContext` 暴露 `Commands` / `PromptExpander` / `LlmPreflight`
+    并构造第二个 `LocalLlmClient`；`App.axaml.cs` 更新调用点。
+- **配置**：`Template/commands.json` version 1.1（7 条；`/换背景` `/换装` 双变体，`/合照` 仅 multi，
+  `/生成` t2i，其余 3 条不变）。
+- **测试**：`CommandParserTests`（变体 / `/生成` / variadic / 真实 JSON）、`PromptExpanderTests`（新）、
+  `PreflightTests`（新）、`CommandRequirementsTests`（新）、`ExecutorTests` / `SessionViewModelTests` 扩展。
+
+### 关键决策
+
+1. **D1=A（parser 收 `imageCount`）**：变体解析集中在 parser，确定性、可测；重跑由 `Executor` 从
+   `RerunSpec.AdditionalImages` 推导图数（`1 + Count`），**无需持久化 variant、无需改 Contracts**。
+2. **变体 key 即 mode（D3）**：不新增 `mode` 字段；UI 用 `CommandRequirements` 按图数预门控
+   （仅 multi 命令 + <2 图 → 禁用发送 + 提示），parser 兜底报错。
+3. **`/生成` 重跑确定性**：`node.Command` 存 `/生成 <扩写>`，重跑重新解析即得同一 T2I 提示词，
+   **不再调用 LLM**；`displayText` 仅影响实时气泡。
+4. **预检两段式（D5/R4）**：LLM 可达性（硬阻断）与显存（软警告）分开；`vram_used_mb` 为 NVML
+   设备级占用，故 `free = 总 - 用` 语义成立。
+5. **变体选择不回退**：已知图数而缺键必须报错（避免 `/合照` 1 图时静默用 multi 产生悬空 `<image2>`）。
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，**无 GPU**）：受影响类 **98 通过 / 0 失败**；非 GPU 全量（排除 `Ipc*` /
+  `PlannerIntegration`）→ **398 通过 / 0 失败**（9C.8-B2 基线 377，本步 +21）。
+- **未跑 GPU 端到端**（Z29 / Z30）；LLM 扩写 / 预检由 Fake 覆盖。
+
+### 遇到的问题与解决
+
+1. **源生成反序列化下 `Variants` 为 `null`**：JSON 缺 `variants` 键时 `Dictionary` 字段可能为 null，
+   导致 `TrySelectTemplate` NRE。改为 `command.Variants is not { Count: > 0 }` 容错（行为等价）。
+2. **`/合照` 1 图错误文案**：初版 `<2` 分支给「no template for this image count」（不可达的
+   「at least 2 images」在 `>=2` 分支）。改为按「仅 multi 变体」判定，`<2` 给「requires at least 2 images」；
+   对应测试同步更新。
+3. **测试文件花括号**：主会话补测时误插一个 `}` 切断类体（CS1519）→ 删除多余括号修复。
+4. **预检后端失败误判为 LLM 不可达**：初版把 `CheckHealthAsync` 异常也映射为 `LlmUnreachable`（硬阻断）。
+   按 D7 改为 `Ready`，硬阻断只留给 LLM `/health` 探测失败。
+
+### 遗留项
+
+- **批量（N 图 → N 结果）** → 后续。
+- **命令列表 UI 补全（`/` 自动补全）** → 后置。
+- **`/生成` 重载后气泡显示 `node.Command`（扩写）**，与实时气泡（原始）不一致 → 后置。
+- **WD14（9C.9-B）/ VLM（9C.9-C）/ `@图引用`** → 后置。
+
+### 备注
+
+- 未改 `Contracts` 既有成员 / `python/server/*` / `ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；无新 NuGet；
+  未改 chrome / 项目列表 / 分辨率选择器 / 图片导入 / 多图管线 / 裁切 / 遮罩 / 重跑 / 取消。
+- `/生成` system prompt 为**外部规范**（仓库内无原文），见 `FROZEN.md` 9C.9-A1.7。
+
+---
+
+## [Step 9C.9-A1-fix] - 2026-09-24（variadic 错误信息修正）
+
+### 问题
+
+`/合照`（不带描述）报「Command '/合照' variadic but declares no parameter.」——经调查，命令**定义正确**
+（`params:["description"]` + `variadic:true`），实为**错误信息误导**：`ParseSlashCommand` 对
+「缺参数」与「variadic 未声明参数」两种失败打印同一句。4 个 variadic 命令（`/合照` `/换背景`
+`/换装` `/生成`）缺描述时均误报。
+
+### 做了什么
+
+- `CommandParser.ParseSlashCommand` 拆分 variadic 错误分支：真配置错误（`Variadic && Params.Count < 1`）
+  保留「is variadic but declares no parameter」；其余缺 / 错参数给具体示例 `Try: <命令 示例>`。
+- 4 个 variadic 命令统一生效；非 variadic 命令也给示例兜底（空参数列表时退化为命令名）。
+- 测试：`CommandParserTests` 新增 3 例（`/合照` 无描述含示例、`/换背景` 无描述含示例、
+  伪命令 variadic + `params:[]` 报配置错误）。
+
+### 错误信息样例（修复后）
+
+- `/合照`（无描述）→ `Command '/合照' expects 1 argument(s) (description). Try: /合照 两人在森林握手`
+- `/换背景`（无描述）→ `Command '/换背景' expects 1 argument(s) (description). Try: /换背景 森林`
+- `/换装`（无描述）→ `... Try: /换装 红色连衣裙`
+- `/生成`（无描述）→ `... Try: /生成 森林里的精灵`
+- 真配置错误 → `Command '/坏' is variadic but declares no parameter.`
+
+### 实测
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 受影响类 `CommandParserTests` / `CommandRequirementsTests` / `SessionViewModelTests` /
+  `ExecutorTests` → **93 通过 / 0 失败**。
+- **无 GPU**（Z29 / Z30）；仅改 `CommandParser.cs` 一处 + 测试。
+
+### 备注
+
+- **不改任何命令定义 / 行为**；`FROZEN` 无变化（无契约变化）。

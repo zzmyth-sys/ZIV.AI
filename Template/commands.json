@@ -1,12 +1,52 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "commands": [
     {
       "name": "/换背景",
-      "params": ["target"],
+      "params": ["description"],
+      "variadic": true,
       "tool": "QW21edit",
-      "template": "Keep the character and pose in <image1> unchanged. Replace the background with {target}. Preserve the original facial identity, hair, body shape and pose.",
-      "description": "替换图像背景"
+      "defaultVariant": "single",
+      "variants": {
+        "single": "Keep the character and pose in <image1> unchanged. Replace the background with {description}. Preserve the original facial identity, hair, body shape and pose.",
+        "multi": "Keep the character and pose in <image1> unchanged. Use the scene from <image2> as the new background. {description}. Preserve the original facial identity, hair, body shape and pose."
+      },
+      "description": "替换背景（1 图直接换 / 2 图参考场景）"
+    },
+    {
+      "name": "/换装",
+      "params": ["description"],
+      "variadic": true,
+      "tool": "QW21edit",
+      "defaultVariant": "single",
+      "variants": {
+        "single": "Change the clothing of the person in <image1> to: {description}. Keep the facial identity, hair, body shape and pose unchanged, and keep the original background and lighting.",
+        "multi": "Use the garment from <image2> to dress the person in <image1>. {description}. Preserve the facial identity, body shape and pose, and keep the original background."
+      },
+      "description": "更换服装（1 图文字描述 / 2 图参考服装）"
+    },
+    {
+      "name": "/合照",
+      "params": ["description"],
+      "variadic": true,
+      "tool": "QW21edit",
+      "defaultVariant": "multi",
+      "variants": {
+        "multi": "Create a new scene using the reference identities. The person from <image1> and the person from <image2> stand together. {description}. Preserve each person's identity independently; do not merge facial features or clothing between them."
+      },
+      "description": "多主体合照（需至少 2 张图）"
+    },
+    {
+      "name": "/生成",
+      "params": ["description"],
+      "variadic": true,
+      "tool": "QW21edit",
+      "t2i": true,
+      "defaultVariant": "single",
+      "variants": {
+        "single": "{description}"
+      },
+      "description": "文生图（大模型扩写提示词）"
     },
     {
       "name": "/去水印",

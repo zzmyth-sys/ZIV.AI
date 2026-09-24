@@ -195,3 +195,36 @@
 > `SessionViewModel.SubmitAsync(additionalImages)`、`MainWindow.Send.cs` 分支、
 > `MultiImagePromptDialog`「参考图」按钮（App）已落地。契约与冻结记录见 `FROZEN.md` Step 9C.5-D。
 > GPU 3 场景验证由用户执行；`commands.json` 的 `mode` 字段仍后置。
+
+## 11. 命令变体与 `/生成`（Step 9C.9-A1）
+
+> 本节为 **Step 9C.9-A1 追加**（只增不改）。落实 §2 命令层的「模板体系」：同一命令名按图数
+> 自动选模板 + `/生成` 的 LLM 扩写流程。
+
+- **命令集**（`Template/commands.json` version 1.1）：
+  - 单/多图自动分支：`/换背景`、`/换装`（`variants: {single, multi}`）。
+  - 仅多图：`/合照`（`variants: {multi}`，需 ≥2 图）。
+  - 文生图：`/生成`（`t2i: true` + LLM 扩写）。
+  - 保留不变：`/去水印`、`/去物体`、`/扩图`（扁平 `template`）。
+- **变体选择**：`T2i` → `single`；否则 `imageCount >= 2 ? "multi" : "single"`；已知图数而缺该键
+  → **报错**（不回退 `defaultVariant`）。`imageCount` 由调用方给出（`-1` = 未知 → `defaultVariant`）：
+  - `SessionViewModel.SubmitAsync`：`(当前管线图?1:0) + 参考图数`。
+  - `Executor.RerunAsync`：`1 + node.Rerun.AdditionalImages.Count`（重跑复现同一变体）。
+- **发送门控（D3）**：App 层 `CommandRequirements` 在发送前判定——仅 multi 变体的命令（如 `/合照`）
+  而有效图数 <2 → **禁用发送 + 内联提示**「命令 X 需要至少 2 张图」；parser 兜底报错。
+- **`/生成` 流程**：
+  1. 发送 `/生成 <描述>` → **预检**（LLM `/health` 不可达 → 阻断「请先启动 LLM 服务」；
+     `free = 16376 - VramUsedMb < 9800` → 警告，非阻断）。
+  2. `IPromptExpander`（Agent，注入 `ILlmClient`）按内置 system prompt 扩写描述。
+  3. `PromptConfirmDialog`：**确定 / 重写 / 取消**（可滚动只读扩写结果）。
+  4. 确定 → 提交 `/生成 <扩写>`；`displayText` = 原始输入（气泡显示原始，`node.Command` 存完整命令）。
+  5. `/生成` 不使用附件；有附件时提示并清空附件条。
+- **重跑**：重新解析 `node.Command`（`{description}` = 扩写）→ T2I；**不再调用 LLM**，确定性。
+- **配置**：`[llm.rewriter]`（endpoint / model / temperature / max_tokens / enable_thinking /
+  timeout_seconds / vram_total_mb / vram_need_mb）；**取代** §2 后期预留的
+  `[llm.prompt_rewriter]` / `[llm.multi_image]` 段名。
+
+> **实现状态（Step 9C.9-A1）**：`CommandParser`（新重载 + 变体/`variadic`/`t2i`）、
+> `PromptExpander`（Agent）、`LlmPreflight` / `PromptConfirmDialog` / `CommandRequirements`（App）、
+> `MainWindow.Generate.cs`、`SessionViewModel.SubmitAsync(displayText)` 已落地。契约与冻结记录见
+> `FROZEN.md` Step 9C.9-A1。批量、命令列表 UI 补全、`@图引用` 仍后置。
