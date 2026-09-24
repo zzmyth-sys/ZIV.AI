@@ -10,10 +10,23 @@ namespace ZivAiEditor.App.Controls;
 /// </summary>
 internal static class MaskDiagnostics
 {
+    /// <summary>
+    /// Diagnostics are opt-in (R4): production stays silent unless <c>ZIV_AI_MASK_DIAG=1</c>.
+    /// </summary>
+    private static readonly bool Enabled = string.Equals(
+        Environment.GetEnvironmentVariable("ZIV_AI_MASK_DIAG"),
+        "1",
+        StringComparison.Ordinal);
+
     private static readonly object Gate = new();
 
     public static void Log(string message)
     {
+        if (!Enabled)
+        {
+            return;
+        }
+
         try
         {
             var directory = Path.Combine(System.AppContext.BaseDirectory, "_cache");

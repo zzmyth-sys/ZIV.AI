@@ -5023,3 +5023,42 @@ Q1 不拆程序集。
 - 无契约签名变化；未动 `python/server/*` / `ipc-protocol.md` / `C:\AI\ComfyUI_PIC` / 裁切 / outpaint /
   `FindNodeByImagePath` / 主窗口遮罩编辑；无新 NuGet；文件均 < 600（Z8）。
 - `FROZEN.md` 尾部追加 9C.7-C + Z-009；`ACCEPTANCE.MD` 追加 9C.7-C；`INTERFACES.md` 追加 §10。
+
+---
+
+## [Step 9C.7-C 修补 R2–R4] - 2026-09-25：遮罩真机反馈收尾
+
+### 目标
+
+9C.7-C 真机反馈逐项收尾：R2 光标、R3 叠加保真 / 死代码 / 上限注释、R3.1 关窗刷新、R3.2 抑制深度（根因）、R3.3 显示解耦、R4 持久化硬化。**无 GPU**（Z29 / Z30）。
+
+### 做了什么
+
+- **R2**：`ImagePreview.UpdateCursor` 遮罩画笔 / 橡皮 → `StandardCursorType.None`；裁切保留 `Cross`。
+- **R3**：`MaskOverlayBitmap` 预乘半透明红（alpha ≤ 50%）；删 `ImagePreview.FlushMaskAsync`；`MaskFeather.MaxRadiusPx` 加注（算法 25 / 产品 15）。
+- **R3.1**：`preview.Closed` 且有遮罩编辑 → `RebuildContext` 一次；`SetNodeMask` 不再重建聊天流；`_maskEditedInPreview` 标志。
+- **R3.2**：`_suppressMaskExport` `bool → int _suppressMaskExportDepth`（4 处赋值点全改 `++/--`）；修关窗泄漏 `spec=null` 提交清空遮罩。
+- **R3.3**：新增 `UpdateMaskOverlayVisibility()`（7 处调用）；`RefreshMaskCanvas` 早退放宽（`&& _nodeMask is null`）。
+- **R4**：`CopyIfNeeded` / `CopyNodeImage` `void → bool`；`WriteProjectAsync` 的 crop / mask 分支仅在拷贝成功时写 DTO；失败记 `Debug.WriteLine`。`MaskDiagnostics.Log` env 门控 `ZIV_AI_MASK_DIAG=1`；删除归档日志。
+- **测试**：`SessionStoreTests` +2（源缺失不留悬空 mask / crop）。
+
+### 关键决策
+
+1. **根因优先**：R3.2 定位并修掉关窗清空遮罩的 `_suppressMaskExport` 嵌套失效（bool 不抗嵌套）。
+2. **写入即真**：R4 让拷贝可感知，源缺失不写悬空引用（crop / mask 同根因一次修完）。
+3. **诊断可关**：`MaskDiagnostics` env 门控，生产零输出。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- 构建 0/0；非 GPU 全量 **460 通过 / 0 失败**（458 + 2）。
+- **未跑 GPU 端到端**；R4 全链回填（画 → 保存 → 关 → 重开）待用户真机确认。
+
+### 遗留
+
+- **Z-015**：打包 / 参考 / 用图同模式（悬空）未改。
+- **Z-009**：气泡叠加无缓存 / 对齐单向。
+
+### 备注
+
+- 无契约签名变化；未改 `python/server/*` / `ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；无新 NuGet；文件均 < 600（Z8）。
+- `FROZEN.md` 尾部追加「9C.7-C 修补（R2–R4）」+ Z-015；`ACCEPTANCE.MD` 追加对应验收段。

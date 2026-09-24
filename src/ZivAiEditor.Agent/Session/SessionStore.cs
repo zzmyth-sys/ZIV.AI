@@ -214,15 +214,22 @@ public sealed partial class SessionStore : ISessionPersistence, IProjectMetadata
             if (node.Crop is { } spec)
             {
                 var cropName = node.NodeId + "_crop.png";
-                CopyNodeImage(directory, copied, spec.ResultImagePath, cropName);
-                crop = new SessionFileCrop
+                if (CopyNodeImage(directory, copied, spec.ResultImagePath, cropName))
                 {
-                    X = spec.X,
-                    Y = spec.Y,
-                    Width = spec.Width,
-                    Height = spec.Height,
-                    ResultImagePath = cropName,
-                };
+                    crop = new SessionFileCrop
+                    {
+                        X = spec.X,
+                        Y = spec.Y,
+                        Width = spec.Width,
+                        Height = spec.Height,
+                        ResultImagePath = cropName,
+                    };
+                }
+                else
+                {
+                    // R4: the source is gone — do not write a dangling crop reference.
+                    Debug.WriteLine($"[session] crop dropped (source missing) for node {node.NodeId}: src={spec.ResultImagePath}");
+                }
             }
 
             SessionFileRerun? rerun = null;
@@ -240,16 +247,23 @@ public sealed partial class SessionStore : ISessionPersistence, IProjectMetadata
             if (node.Mask is { } maskSpec && !string.IsNullOrWhiteSpace(maskSpec.MaskImagePath))
             {
                 var maskName = node.NodeId + "_mask.png";
-                CopyNodeImage(directory, copied, maskSpec.MaskImagePath, maskName);
-                mask = new SessionFileMask
+                if (CopyNodeImage(directory, copied, maskSpec.MaskImagePath, maskName))
                 {
-                    ImagePath = maskName,
-                    Width = maskSpec.Width,
-                    Height = maskSpec.Height,
-                    IsBinary = maskSpec.IsBinary,
-                    Invert = maskSpec.Invert,
-                    FeatherPx = maskSpec.FeatherPx,
-                };
+                    mask = new SessionFileMask
+                    {
+                        ImagePath = maskName,
+                        Width = maskSpec.Width,
+                        Height = maskSpec.Height,
+                        IsBinary = maskSpec.IsBinary,
+                        Invert = maskSpec.Invert,
+                        FeatherPx = maskSpec.FeatherPx,
+                    };
+                }
+                else
+                {
+                    // R4: the source PNG is gone — do not write a dangling mask reference.
+                    Debug.WriteLine($"[session] mask dropped (source missing) for node {node.NodeId}: src={maskSpec.MaskImagePath}");
+                }
             }
 
             nodes.Add(new SessionFileNode
@@ -294,26 +308,45 @@ public sealed partial class SessionStore : ISessionPersistence, IProjectMetadata
                 MaxPixels = policy.MaxPixels,
             };
 
-    private static void CopyIfNeeded(string? source, string destination)
+    /// <summary>
+    /// Copies <paramref name="source"/> to <paramref name="destination"/> when it is a distinct,
+    /// existing file. Returns <c>true</c> only when the destination file is present afterwards
+    /// (copied, or the source already <i>is</i> the destination). A blank / missing source, a
+    /// path-compare failure or a copy failure returns <c>false</c> and logs the reason (R4: never
+    /// silently reports a copy that did not happen).
+    /// </summary>
+    private static bool CopyIfNeeded(string? source, string destination)
     {
         if (string.IsNullOrWhiteSpace(source) || !File.Exists(source))
         {
-            return;
+            Debug.WriteLine($"[session] copy skipped (source missing): src={source} dst={destination}");
+            return false;
         }
 
         try
         {
             if (string.Equals(Path.GetFullPath(source), Path.GetFullPath(destination), StringComparison.OrdinalIgnoreCase))
             {
-                return;
+                // The source already lives at the destination (e.g. re-saving a project).
+                return File.Exists(destination);
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            return;
+            Debug.WriteLine($"[session] copy skipped (path compare failed): src={source} dst={destination}: {ex.Message}");
+            return false;
         }
 
-        File.Copy(source, destination, overwrite: true);
+        try
+        {
+            File.Copy(source, destination, overwrite: true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[session] copy failed: src={source} dst={destination}: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>

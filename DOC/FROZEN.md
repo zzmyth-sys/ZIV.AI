@@ -3953,3 +3953,30 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 | 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
 |---|---|---|---|---|
 | Z-009 | 遮罩气泡叠加为 UI 层实时合成（每次渲染重新解码 + 羽化 + 构位图，不缓存）；预览窗 ↔ 当前节点的对齐仅在进入遮罩模式时单向发生（历史导航不反向同步预览） | 落盘 / 缓存会增加中间产物与失效管理；双向同步超出本轮范围 | 气泡数量大导致渲染开销 / 用户反馈预览与当前节点漂移 | 后续专项 |
+
+---
+
+## Step 9C.7-C 修补（R2–R4）（日期：2026-09-25）
+
+> 本段为 9C.7-C 真机反馈后的收尾修补记录（**只增不改**）。**无契约签名变化**；改动均在 UI / App / Agent 实现层。**不改动 Step 0–9C.7-C 已冻结行**。
+
+### 9C.7D.1 行为（冻结 · 非契约）
+
+- **R2 光标**：遮罩画笔 / 橡皮隐藏系统光标（`StandardCursorType.None`），只保留自绘圆圈；裁切保留 `Cross`。
+- **R3 叠加保真**：`MaskOverlayBitmap` 改为真正的预乘半透明红（alpha 上限 50%）；删除死代码 `ImagePreview.FlushMaskAsync`；`MaskFeather.MaxRadiusPx`（25，算法）与 `MaskState.MaxFeatherPx`（15，产品）加注说明，数值不变。
+- **R3.1 关窗刷新**：气泡叠加改在**关闭预览窗**时刷新一次（不再松手即刷新）；`SessionViewModel.SetNodeMask` 不再重建聊天流。
+- **R3.2 抑制深度**：`_suppressMaskExport` 由 `bool` 改 `int` 深度计数——原 bool 被嵌套的 `RefreshMaskCanvas.finally` 提前解除，导致关窗时泄漏一条 `spec=null` 提交并清空节点遮罩。
+- **R3.3 显示解耦**：叠加显示不再依赖工具激活（节点有遮罩即显示）；`RefreshMaskCanvas` 在工具未激活时也载入存量遮罩。
+- **R4 持久化硬化**：`CopyIfNeeded` / `CopyNodeImage` 返回 `bool`；源文件缺失 / 拷贝失败时 **crop / mask 不写 DTO 字段**（不留悬空引用）并记 `Debug.WriteLine`（源 + 目标 + 原因）。`SessionLoader` 缺文件丢弃 + 警告逻辑不变。诊断日志 `MaskDiagnostics.Log` 加 env 门控 `ZIV_AI_MASK_DIAG=1`（默认静默）。
+
+### 9C.7D.2 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，无 GPU，排除 `Ipc*` / `PlannerIntegration`）→ **460 通过 / 0 失败**（458 + 2：`Save_Drops_Mask_When_Source_Missing` / `Save_Drops_Crop_When_Source_Missing`）。
+- **未跑 GPU 端到端**（Z29 / Z30）；R4 全链回填由用户真机确认。
+
+### 9C.7D.3 妥协/挂账清单 · 追加（R4）
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-015 | 打包图 / 参考图 / 用图的拷贝仍是「静默失败 + 无条件记名」的同一模式（可能产生悬空引用） | R4 按裁决仅修 crop / mask（同一根因的两个用户可见面） | 打包 / 参考 / 用图源缺失导致加载丢图 | 后续专项 |

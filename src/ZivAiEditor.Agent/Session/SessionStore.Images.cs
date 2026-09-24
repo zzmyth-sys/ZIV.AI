@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using ZivAiEditor.Contracts.Session;
 
@@ -52,7 +53,14 @@ public sealed partial class SessionStore
     /// the source → relative mapping, so a later use of the same source reuses the file
     /// instead of duplicating it (Step 9C.10). A blank / missing source is skipped.
     /// </summary>
-    private static void CopyNodeImage(
+    /// <summary>
+    /// Copies one image into the project under <paramref name="relativeName"/> and records the
+    /// source → relative mapping so a later use of the same source reuses the file. Returns
+    /// <c>true</c> only when the destination file is present afterwards; a blank / missing source
+    /// or a copy failure returns <c>false</c> and is <b>not</b> remembered (R4: the caller must
+    /// not persist a dangling reference).
+    /// </summary>
+    private static bool CopyNodeImage(
         string directory,
         Dictionary<string, string> copied,
         string? source,
@@ -60,7 +68,7 @@ public sealed partial class SessionStore
     {
         if (string.IsNullOrWhiteSpace(source))
         {
-            return;
+            return false;
         }
 
         var destination = Path.Combine(directory, relativeName.Replace('/', Path.DirectorySeparatorChar));
@@ -70,8 +78,14 @@ public sealed partial class SessionStore
             Directory.CreateDirectory(parent);
         }
 
-        CopyIfNeeded(source, destination);
+        if (!CopyIfNeeded(source, destination))
+        {
+            Debug.WriteLine($"[session] image not copied, dropping reference: src={source} dst={destination}");
+            return false;
+        }
+
         Remember(copied, source, relativeName);
+        return true;
     }
 
     /// <summary>

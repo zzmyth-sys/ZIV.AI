@@ -110,6 +110,77 @@ public class SessionStoreTests
     }
 
     [Fact]
+    public async Task Save_Drops_Mask_When_Source_Missing()
+    {
+        var root = NewRoot();
+
+        try
+        {
+            var store = new SessionStore(root);
+            var session = new EditSession();
+            // The node image must exist (its copy gates the node); the mask path never does.
+            session.SetRoot(WriteFile(root, "root.png"));
+            var rootNode = session.GetHistory()[0];
+
+            session.SetNodeMask(rootNode.NodeId, new MaskSpec
+            {
+                MaskImagePath = Path.Combine(root, "missing_mask.png"),
+                Width = 8,
+                Height = 8,
+            });
+
+            await store.SaveAsync(session, "p");
+
+            var json = await File.ReadAllTextAsync(Path.Combine(root, session.SessionId, "session.json"));
+            Assert.DoesNotContain("_mask.png", json);
+
+            var loaded = await store.LoadAsync(session.SessionId);
+            Assert.Null(loaded.Session.GetHistory().Single(n => n.NodeId == rootNode.NodeId).Mask);
+            Assert.Empty(loaded.Warnings);
+        }
+        finally
+        {
+            Cleanup(root);
+        }
+    }
+
+    [Fact]
+    public async Task Save_Drops_Crop_When_Source_Missing()
+    {
+        var root = NewRoot();
+
+        try
+        {
+            var store = new SessionStore(root);
+            var session = new EditSession();
+            session.SetRoot(WriteFile(root, "root.png"));
+            var rootNode = session.GetHistory()[0];
+
+            session.SetNodeCrop(rootNode.NodeId, new CropSpec
+            {
+                X = 1,
+                Y = 2,
+                Width = 10,
+                Height = 10,
+                ResultImagePath = Path.Combine(root, "missing_crop.png"),
+            });
+
+            await store.SaveAsync(session, "p");
+
+            var json = await File.ReadAllTextAsync(Path.Combine(root, session.SessionId, "session.json"));
+            Assert.DoesNotContain("_crop.png", json);
+
+            var loaded = await store.LoadAsync(session.SessionId);
+            Assert.Null(loaded.Session.GetHistory().Single(n => n.NodeId == rootNode.NodeId).Crop);
+            Assert.Empty(loaded.Warnings);
+        }
+        finally
+        {
+            Cleanup(root);
+        }
+    }
+
+    [Fact]
     public async Task Save_Then_Load_RoundTrips_Negative_Crop_Origin()
     {
         var root = NewRoot();
