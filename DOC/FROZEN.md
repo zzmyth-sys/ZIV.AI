@@ -3980,3 +3980,29 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 | 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
 |---|---|---|---|---|
 | Z-015 | 打包图 / 参考图 / 用图的拷贝仍是「静默失败 + 无条件记名」的同一模式（可能产生悬空引用） | R4 按裁决仅修 crop / mask（同一根因的两个用户可见面） | 打包 / 参考 / 用图源缺失导致加载丢图 | 后续专项 |
+
+---
+
+## Step 9C.7-C 修补（R5 · 边界 M-4）（日期：2026-09-25）
+
+> 本段为 M-4 修复记录（**只增不改**）。**无契约签名变化**；改动仅在 App 层。
+
+### 9C.7E.1 行为（冻结 · 非契约）
+
+- **M-4 修复**：`MainWindow.OnHistorySelectionChanged` 的 dispatcher 回调中，`_vm.NavigateTo(nodeId)` **之前**：若预览窗遮罩工具激活（`MaskBrush` / `Eraser`）→ `SetTool(ToolMode.None)`。切历史 = 上下文切换，自动退出遮罩，避免「画在预览旧节点、发送读当前节点」的错配。
+- **不动** `SessionViewModel.NavigateTo`（保 `AlignForMask` 进入遮罩时的对齐语义）；**不动** `FlowRunner.Rerun.cs`（重跑路径另议）。
+- 不加 chat hint；预览窗不关闭 / 不切换（Z-017）。
+
+### 9C.7E.2 测试结果（冻结）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test`（Z29，无 GPU，排除 `Ipc*` / `PlannerIntegration`）→ **460 通过 / 0 失败**（App 层改动，测试数不变）。
+- **未跑 GPU 端到端**（Z29 / Z30）；M-4 真机由用户确认。
+
+### 9C.7E.3 妥协/挂账清单 · 追加（R5）
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-011 | 多图 root 次要缩略图遮罩静默丢弃（M-3，保持） | 涉及 `FindNodeByImagePath` 扩展，E3 明确不做 | 用户在多图 root 次要缩略图上绘制遮罩 | 未定 |
+| Z-016 | `ReplaceNodeImage` 后 mask 尺寸潜在错配（G3，观察项） | 当前仅重跑路径会同时清 mask，未暴露 | 图像被替换而 mask 尺寸变 | 观察 |
+| Z-017 | 导航时遮罩工具自动退出，但预览窗仍显示旧节点（不同步）（R5 观察项） | 最小改动；同步预览窗超出 M-4 范围 | 用户导航后误以为预览窗 = 当前节点 | 观察 |

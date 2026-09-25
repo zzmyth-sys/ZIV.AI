@@ -5062,3 +5062,32 @@ Q1 不拆程序集。
 
 - 无契约签名变化；未改 `python/server/*` / `ipc-protocol.md` / `C:\AI\ComfyUI_PIC`；无新 NuGet；文件均 < 600（Z8）。
 - `FROZEN.md` 尾部追加「9C.7-C 修补（R2–R4）」+ Z-015；`ACCEPTANCE.MD` 追加对应验收段。
+
+---
+
+## [Step 9C.7-C 修补 R5] - 2026-09-25：边界 M-4（导航退出遮罩工具）
+
+### 目标
+
+修 M-4：进入遮罩模式后切历史节点，画遮罩写在旧预览节点、发送读当前节点 → 错配静默失效。方案 A：导航时若遮罩工具激活 → 自动退出。**无 GPU**（Z29 / Z30）。
+
+### 做了什么
+
+- **M-4**：`MainWindow.OnHistorySelectionChanged` 的 dispatcher 回调内，`_vm.NavigateTo(nodeId)` **之前**：`if (_imagePreview?.ToolState.CurrentTool is ToolMode.MaskBrush or ToolMode.Eraser) _imagePreview.ToolState.SetTool(ToolMode.None);`。补 `using ZivAiEditor.UI.Editing;`。
+- **不动** `SessionViewModel.NavigateTo`（保 `AlignForMask` 语义）；**不动** `FlowRunner.Rerun.cs`（登记另议）。
+- **登记**：Z-011（M-3 保持）/ Z-016（G3 观察）/ Z-017（导航后预览窗不同步，观察）。
+
+### 关键决策
+
+1. 落点选 **历史点击路径**，而非 `SessionViewModel.NavigateTo`：后者被 `AlignForMask` 复用，若在此重置会误杀刚激活的遮罩工具。
+2. 自动退出（而非重新对齐）——上下文切换直观、无隐藏状态；要画新节点重新激活即可。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- 构建 0/0；非 GPU全量 **460 通过 / 0 失败**（App 层改动，测试数不变）。
+- **未跑 GPU 端到端**；M-4 真机由用户确认。
+
+### 备注
+
+- 无契约签名变化；未改 `python/server/*` / `ipc-protocol.md` / `C:\AI\ComfyUI_PIC` / 裁切；无新 NuGet；文件 < 600（Z8）。
+- `FROZEN.md` 尾部追加「9C.7-C 修补（R5）」+ Z-011 / Z-016 / Z-017；`ACCEPTANCE.MD` 追加对应验收段。

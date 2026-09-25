@@ -26,6 +26,7 @@ using ZivAiEditor.Contracts.Project;
 using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.UI;
 using ZivAiEditor.UI.Chat;
+using ZivAiEditor.UI.Editing;
 
 namespace ZivAiEditor.App;
 
@@ -251,6 +252,15 @@ public partial class MainWindow : Window
                 if (_vm is null)
                 {
                     return;
+                }
+
+                // R5 (M-4): switching history is a context change — exit the mask tool so a
+                // later stroke cannot land on the stale preview node while the parser reads the
+                // newly-current node. AlignForMask's own NavigateTo is unaffected (this reset
+                // lives only on the history-click path, not in SessionViewModel.NavigateTo).
+                if (_imagePreview?.ToolState.CurrentTool is ToolMode.MaskBrush or ToolMode.Eraser)
+                {
+                    _imagePreview.ToolState.SetTool(ToolMode.None);
                 }
 
                 _vm.NavigateTo(nodeId);
