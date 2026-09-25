@@ -3259,3 +3259,71 @@ B 类登记 Z-007 / Z-008。**无 GPU**（Z29 / Z30）。
 
 - **Z-024**：Outpaint LoRA 透传未实现；**Z-025**：多 LoRA 叠加语义未 GPU 验证（观察）。
 - T4 / T5 / 组合命令（Z-023）未做。
+
+---
+
+## P1 验收：`/扩图` 重定位（裁切外扩跟随动作）
+
+**目标**：`/扩图` 改为裁切外扩后的跟随动作（名称触发 / 需外扩裁切 / 临时掩膜 / 分辨率随 UI）。
+Step 1 已完成，本步 Step 2–5 + 文档。**无 GPU**（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| P1.1 | 数据一致 | `Template/commands.json` + BuiltIn | `/扩图` = Edit / params [] / QW21edit / 新 template | ✅ |
+| P1.2 | 掩膜几何 | `OutpaintMaskTests` | 尺寸 / 新区域亮 / 深源暗 / 裁剪源 / 未知源全 255 | ✅ |
+| P1.3 | 解析成功 | `CommandOutpaintTests` | 外扩裁切 → 成功，`plan.Mask` 尺寸 = canvas、写盘、tool = QW21edit | ✅ |
+| P1.4 | 无裁切报错 | `CommandOutpaintTests` | 无外扩裁切 → 失败「需先做裁切外扩」 | ✅ |
+| P1.5 | 参数移除 | `CommandOutpaintTests` | `/扩图 2048 1280` → 解析失败 | ✅ |
+| P1.6 | 门控 | `CommandRequirementsTests` | `RequiresOutpaintCrop` 阻断 / 放行（+2） | ✅ |
+| P1.7 | 对齐 | `SessionViewModelTests` | `AlignForCrop` 移动 / no-op（+2） | ✅ |
+| P1.8 | 构建 / 测试 | `dotnet build` / `dotnet test` | 0/0；非 GPU **519 通过 / 0 失败** | ✅ |
+| P1.9 | 分辨率 | `CommandParserTests` / `CommandRealDataTests` | `/全景` 固定分辨率优先；`/扩图` 无自带分辨率 | ✅ |
+| P1.10 | Z8 | 查改动文件 | 均 < 600 | ✅ |
+| P1.11 | 无 GPU 负载 | 构建 / 测试 | 未启动 Python / 未加载模型（Z29 / Z30） | ✅ |
+
+### 通过标准
+
+- 构建 0/0；非 GPU 519 通过 / 0 失败；P1.1–P1.11 通过。
+
+### 遗留说明（非阻断）
+
+- **Z-028**：`/扩图` 行为变更（去 width/height + Outpaint handler、需外扩裁切、掩膜临时、分辨率随 UI）。
+- 未跑 GPU 端到端（Z29 / Z30）。
+
+### 验收后动作
+
+1. 在「验收记录」追加“P1 · `/扩图` 重定位 通过，日期：____”（待签）。
+
+---
+
+## P1 收尾验收：`/扩图` 原生尺寸 + 无掩膜（2026-09-26）
+
+**目标**：`/扩图` 改为无掩膜 + 原生画布尺寸（对齐参考工作流），并修边缘。**无 GPU**（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么做 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| P1-C.1 | 原生尺寸 | `/扩图`（有外扩裁切）解析 | `plan.Resolution = Explicit{crop.W,crop.H}` | ✅ |
+| P1-C.2 | 不覆盖 | 注入 UI `Side` | 仍为 Explicit 画布尺寸 | ✅ |
+| P1-C.3 | 无掩膜 | `/扩图` 解析 | `plan.Mask == null` | ✅ |
+| P1-C.4 | 模板 | commands.json + BuiltIn | 均为扩图语义 template | ✅ |
+| P1-C.5 | 回退 | 查 `CommandParser` / `AppContext` | 无 `IImagingService` 注入；`ParseSlashCommand` 同步 | ✅ |
+| P1-C.6 | 边缘修复 | `_resize_mask` / guard / blur | 软 bilinear、二值 nearest；guard；blur 31 | ✅ |
+| P1-C.7 | 构建 / 测试 | build + 非 GPU 全量 | 0/0；521 通过 / 0 失败 | ✅ |
+| P1-C.8 | 无 GPU 负载 | 本轮 | 未启动 Python 推理 / 未加载模型 | ✅ |
+
+### 通过标准
+
+- 构建 0/0；非 GPU 521 通过 / 0 失败；P1-C.1–P1-C.8 通过。
+
+### 遗留 / 待真机
+
+- **Z-029**：掩膜策略 A/B（`_test_step2/outpaint_ab.py`）待用户真机裁决。
+- 未跑 GPU 端到端（Z29 / Z30）。
+
+### 验收后动作
+
+1. 真机 A/B 后，在「验收记录」追加“P1 收尾（/扩图 原生尺寸 + 无掩膜）通过，日期：____”（待签）。

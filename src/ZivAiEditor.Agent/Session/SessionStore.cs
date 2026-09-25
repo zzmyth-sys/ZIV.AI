@@ -222,6 +222,8 @@ public sealed partial class SessionStore : ISessionPersistence, IProjectMetadata
                         Y = spec.Y,
                         Width = spec.Width,
                         Height = spec.Height,
+                        SourceWidth = spec.SourceWidth,
+                        SourceHeight = spec.SourceHeight,
                         ResultImagePath = cropName,
                     };
                 }
@@ -481,6 +483,13 @@ internal sealed class SessionFileCrop
 
     [JsonPropertyName("height")]
     public int Height { get; init; }
+
+    /// <summary>Source-image size the rectangle is relative to; <c>0</c> = legacy (unknown).</summary>
+    [JsonPropertyName("source_width")]
+    public int SourceWidth { get; init; }
+
+    [JsonPropertyName("source_height")]
+    public int SourceHeight { get; init; }
 
     [JsonPropertyName("result_image_path")]
     public string ResultImagePath { get; init; } = "";

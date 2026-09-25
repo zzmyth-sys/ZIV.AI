@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Inference;
 
 namespace ZivAiEditor.Contracts.Execution;
@@ -39,6 +40,16 @@ public sealed class CommandDefinition
 
     [JsonPropertyName("description")]
     public string Description { get; init; } = "";
+
+    /// <summary>
+    /// Command-owned fixed output resolution (P1a; JSON <c>fixed_resolution</c>). When set it
+    /// wins over <c>width</c>/<c>height</c> arguments and over the UI-selected tier, so a
+    /// command can pin a ratio (e.g. <c>/全景</c> pins 2048x1024 for a 2:1 panorama).
+    /// <c>null</c> = no fixed resolution. Serialized by name.
+    /// </summary>
+    [JsonPropertyName("fixed_resolution")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ResolutionPolicy? FixedResolution { get; init; }
 
     /// <summary>
     /// Backend path for this command (T2). Defaults to <see cref="CommandHandler.Edit"/> when a

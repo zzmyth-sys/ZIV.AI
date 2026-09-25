@@ -62,6 +62,43 @@ internal static class CommandRequirements
         return true;
     }
 
+    /// <summary>
+    /// P1 · <c>/扩图</c> relocation: returns <c>true</c> (with a user-facing <paramref name="hint"/>)
+    /// when <paramref name="text"/> names <c>/扩图</c> but the current node has no crop-tool outpaint
+    /// crop. The parser gate remains authoritative; this only pre-blocks the send.
+    /// </summary>
+    public static bool RequiresOutpaintCrop(
+        IReadOnlyList<CommandDefinition> commands,
+        string? text,
+        bool hasOutpaintCrop,
+        out string? hint)
+    {
+        hint = null;
+        var name = FirstToken(text);
+        if (name is null || name.Length == 0 || name[0] != '/')
+        {
+            return false;
+        }
+
+        CommandDefinition? command = null;
+        foreach (var candidate in commands)
+        {
+            if (string.Equals(candidate.Name, name, StringComparison.Ordinal))
+            {
+                command = candidate;
+                break;
+            }
+        }
+
+        if (!string.Equals(command?.Name, "/扩图", StringComparison.Ordinal) || hasOutpaintCrop)
+        {
+            return false;
+        }
+
+        hint = "「/扩图」需先做裁切外扩";
+        return true;
+    }
+
     private static string? FirstToken(string? text)
     {
         var parts = (text ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);

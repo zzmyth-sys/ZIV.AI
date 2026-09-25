@@ -47,6 +47,23 @@ internal sealed partial class FlowRunner
             return false;
         }
 
+        // P1 · /扩图 relocation: a re-run needs the parent node's crop-tool outpaint crop (the
+        // parser gate remains authoritative). Fail early with a hint when the source lost it.
+        var command = node.Command;
+        var firstToken = (command ?? "")
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+        if (string.Equals(firstToken, "/扩图", StringComparison.Ordinal))
+        {
+            var parentCrop = _session.GetHistory()
+                .FirstOrDefault(n => n.NodeId == node.ParentNodeId)?.Crop;
+            if (parentCrop is null || !parentCrop.IsOutpaint())
+            {
+                _vm.AddHint("「/扩图」重跑失败：源节点已无外扩裁切");
+                return false;
+            }
+        }
+
         // Step 9C.8-B: arm the in-flight CTS so CancelCurrent() can interrupt the re-run.
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _inFlightCts = cts;

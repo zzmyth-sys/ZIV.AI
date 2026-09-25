@@ -4440,3 +4440,106 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 |---|---|---|---|---|
 | Z-024 | Outpaint（`QW21outpaint`）的 LoRA 透传未实现 | 本轮只做 3 契约；outpaint 工具不透传 | 需要 outpaint 局部叠 LoRA | 后续轮 |
 | Z-025 | 多 LoRA 叠加语义（同 key patch 的顺序 / 覆盖）未 GPU 验证 | Z29 / Z30 不跑 GPU（需真机验证） | 真机多 LoRA 结果异常 | 观察 |
+
+---
+
+## P1 · `/扩图` 重定位（裁切外扩跟随动作）（日期：2026-09-25）
+
+> **契约追加（Step 1 · `CropSpec`）+ 行为迁移（Step 2–5）**。`/扩图` 从「通用外扩命令」改为
+> 「裁切外扩（灰底画布）之后的跟随动作」：按名称触发、需当前节点有外扩裁切、掩膜为临时（不落节点）。
+> **无 GPU**（Z29 / Z30）；不改 python / IPC / `QW21outpaint`。
+
+### P1.1 契约追加（Step 1 · 已完成，不改）
+
+| 类型 | 追加成员 | 说明 |
+|---|---|---|
+| `CropSpec` | `int SourceWidth` / `int SourceHeight`（JSON `source_width` / `source_height`） | 源图尺寸；`0` = 未知（旧裁切） |
+| `CropSpec` | `bool IsOutpaint()` | `X<-ε ∥ Y<-ε ∥ X+W>SrcW+ε ∥ Y+H>SrcH+ε`；源尺寸未知 → `false` |
+
+### P1.2 数据与命令（Step 2）
+
+- `Template/commands.json` 与 `CommandParser.BuiltInCommands` 的 `/扩图`：`handler=Edit`、
+  `params=[]`、`tool=QW21edit`、template「Fill the gray area…」、description「填充裁切外扩的灰底区域」。
+- 移除旧的 `width`/`height` 参数与 `QW21outpaint` 绑定（数据文件与内置回退同步）。
+
+### P1.3 掩膜几何 + 解析（Step 3）
+
+- 新增 `ZivAiEditor.Agent/Session/OutpaintMask.cs`：纯 `byte[]` 几何，镜像 `python/server/outpaint.py`
+  的 `build_mask` / `_dilate`（feathering=40 / grow=20 / 3 趟 box blur 近似 `GaussianBlur(31)`），带源裁剪；
+  255=灰底/新，0=源；不引入 Imaging / Skia 依赖。
+- `CommandParser`：ctor 增可选 `IImagingService? imaging`；`ParseSlashCommand` 改 `async`。
+  `/扩图` **按名称**触发：需当前节点 `Crop.IsOutpaint()`（否则报错），以 canvas = `crop.Width`×`crop.Height`
+  生成掩膜并经 `ExportMaskAsync` 导出，`plan.Mask` 用临时 `MaskSpec`（`IsBinary=false`、`FeatherPx=0`）；
+  其余命令保持 `session.GetCurrentMaskSpec()`。分辨率改随 UI 档位（命令不再自带显式分辨率）。
+
+### P1.4 发送门控 / 对齐 / 重跑（Step 4–5）
+
+- `CommandRequirements.RequiresOutpaintCrop(...)`（独立于 `RequiresMoreImages`）；`MainWindow.Send` 在
+  `UpdateSendEnabled` / `SubmitAsync` 预阻断并 hint。
+- `SessionViewModel.AlignForCrop`（镜像 `AlignForMask`）；`MainWindow.OnPreviewCropCompleted` 调
+  `SetNodeCrop` → `AlignForCrop` → `UpdateSendEnabled`。
+- `FlowRunner.RerunNodeAsync`：`/扩图` 重跑前校验父节点仍为外扩裁切，否则 hint 并返回 false（解析器门仍权威）。
+
+### P1.5 AppContext 接线
+
+- `BuildImaging()` 前移到 `BuildAgent(...)` 之前，imaging 端口注入 `new CommandParser(path, imaging)`。
+
+### P1.6 验收（无 GPU，Z29 / Z30）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 **519 通过 / 0 失败**（基线 508 + 11：`OutpaintMaskTests` 4 / `CommandOutpaintTests` 3 /
+  `CommandRequirementsTests` 2 / `SessionViewModelTests` 2）。
+- 新增/更新测试：`OutpaintMaskTests` / `CommandOutpaintTests`；`CommandParserTests` / `CommandRealDataTests` /
+  `CommandHandlerRoutingTests`（temp 命令改名 `/外扩`）/ `CommandFixedResolutionTests` /
+  `CommandRequirementsTests` / `SessionViewModelTests`。
+
+### P1.7 妥协/挂账清单 · 追加（P1）
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-028 | `/扩图` 行为变更：去掉 width/height + Outpaint handler；需当前节点有外扩裁切；掩膜为临时（不落节点）；分辨率随 UI 档位 | 迁移到「裁切外扩跟随动作」的既定方向；旧显式画布外扩由 crop 工具 + 灰底承担 | 需要纯命令式指定画布外扩（无裁切） | 未定 |
+
+---
+
+## P1 收尾修正：`/扩图` 原生尺寸 + 无掩膜（对齐参考工作流）（日期：2026-09-26）
+
+> **追加 + 更正（只增不改）**。P1.3 / P1.5 的「软掩膜 + `IImagingService` 注入 + async + 分辨率随 UI 档位」
+> 在本轮**被取代**，以本节为准。**无 GPU**（Z29 / Z30）。
+
+### P1-收尾.1 `/扩图` 最终行为
+
+- `CommandParser`（**按名称**触发）：仍要求当前节点 `Crop.IsOutpaint()`（否则报错），但
+  - **原生尺寸**：`plan.Resolution = ResolutionPolicy{ Mode=Explicit, Width=crop.Width, Height=crop.Height }`
+    （**不再随 UI 档位**；`ApplyResolution` 仅在 `plan.Resolution == null` 时注入 UI tier，故不覆盖）；
+  - **无掩膜**：`plan.Mask = null`（`QW21edit` 走 Qwen 参考条件编辑，整幅补全；其余命令仍用
+    `session.GetCurrentMaskSpec()`）；
+  - template 改扩图语义：`Extend the image to fill the blank canvas seamlessly and continue the scene; keep the existing image content unchanged.`
+    （`Template/commands.json` + `CommandParser.BuiltIn.cs` 同步）。
+
+### P1-收尾.2 回退（取代 P1.3 / P1.5）
+
+- `CommandParser`：移除 `IImagingService? imaging` ctor 参数与字段；`ParseSlashCommand` **恢复同步**（无 await）。
+- `AppContext`：`BuildAgent` 不再接收 imaging；构造顺序恢复（backend → tools → agent → llm → persistence → imaging）。
+- `OutpaintMask.cs` / `OutpaintMaskTests` **保留**（供 B 策略与实验）。
+
+### P1-收尾.3 边缘修复（确定性）
+
+- `python/server/pipeline.py`：`_resize_mask(mask,w,h,mode="nearest")` + `_mask_is_binary`；`_encode` 对**软掩膜**
+  用 `bilinear`（对齐官方 `VAEEncodeForInpaint`），**二值掩膜**保持 `nearest`（Z19 对二值不变）。
+- `OutpaintMask.cs`：补官方 guard（`feathering*2 < sh && < sw` 才羽化）；`BlurRadius 30 → 31`（对齐 blueprint）。
+- 影响面：手绘掩膜与 B 策略；A（无掩膜）不受影响。
+
+### P1-收尾.4 Z-028 更正 + 新增挂账
+
+- **Z-028 更正**（不改 P1.7 原行）：`/扩图` 现为**无掩膜** + **原生画布尺寸（Explicit）**；原文「分辨率随 UI 档位」作废。
+- 新增：
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-029 | `/扩图` 掩膜策略未定（产品现 A=无掩膜；B=二值掩膜经 `_test_step2/outpaint_ab.py` 真机 A/B 后裁决） | Z29 / Z30 不跑 GPU | A/B 出结果 | 真机后 |
+
+### P1-收尾.5 验收（无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 **521 通过 / 0 失败**（`CommandOutpaintTests` 3 → 4：新增 `Outpaint_Pins_Canvas_Size_Over_Injected_Tier`）。
+- Python `py_compile`（`pipeline.py` / `outpaint_ab.py`）通过。

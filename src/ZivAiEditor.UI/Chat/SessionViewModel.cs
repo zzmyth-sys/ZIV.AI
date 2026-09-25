@@ -269,6 +269,33 @@ public sealed partial class SessionViewModel
         return true;
     }
 
+    /// <summary>
+    /// Aligns the working node to the node the preview is showing after a confirmed crop-tool
+    /// outpaint (P1). The parser reads the <b>current</b> node's crop for <c>/扩图</c>, so the
+    /// previewed node must become current or the crop would not reach the pipeline. Returns
+    /// <c>true</c> when the selection moved; a no-op (<c>false</c>) when the id is empty /
+    /// unknown or already current. On a move a chat hint tells the user which node is now the
+    /// outpaint target.
+    /// </summary>
+    public bool AlignForCrop(string? previewNodeId)
+    {
+        if (string.IsNullOrEmpty(previewNodeId)
+            || string.Equals(previewNodeId, _session.CurrentNodeId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // NavigateTo rebuilds the chat (root → node path) and returns false for an unknown id.
+        if (!NavigateTo(previewNodeId))
+        {
+            return false;
+        }
+
+        var shortId = previewNodeId.Length <= 8 ? previewNodeId : previewNodeId[..8];
+        AddHint($"已切换到节点 {shortId} 以进行裁切外扩");
+        return true;
+    }
+
     private MaskSpec? FindNodeMask(string nodeId)
     {
         foreach (var node in _session.GetHistory())

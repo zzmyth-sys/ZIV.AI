@@ -28,23 +28,30 @@ internal partial class CommandJsonContext : JsonSerializerContext
 /// built-in default set is used, so the app works with no external files (Z28).
 ///
 /// Command matching is ordinal (case-sensitive). Parameter substitution is a
-/// plain <c>{name}</c> string replace — no type conversion. The only structural
-/// extra is for <c>/扩图</c>: the <c>QW21outpaint</c> tool requires an explicit
-/// resolution (FROZEN 7.5), so <c>width</c>/<c>height</c> arguments are also
-/// translated into an <see cref="ResolutionPolicy"/>.
+/// plain <c>{name}</c> string replace — no type conversion. Two structural extras
+/// supply an explicit resolution (P1a): a command's own
+/// <see cref="CommandDefinition.FixedResolution"/> wins; otherwise numeric
+/// <c>width</c>/<c>height</c> arguments become an explicit
+/// <see cref="ResolutionPolicy"/>. The UI-selected tier applies only when neither
+/// is present. The name <c>/扩图</c> is special-cased (P1) to the crop-tool
+/// outpaint: it requires the current node's outpaint crop and pins the plan to
+/// that crop canvas's native size (Explicit), so nothing is rescaled; it runs
+/// Qwen's reference-conditioned edit with no mask, aligned with the reference
+/// outpainting workflows.
 /// </summary>
-public sealed class CommandParser : ICommandParser
+public sealed partial class CommandParser : ICommandParser
 {
     /// <summary>Default commands file, resolved relative to the process working directory.</summary>
     public const string DefaultCommandsPath = "Template/commands.json";
-
-    private const string OutpaintToolName = "QW21outpaint";
 
     /// <summary>Capability marker returned for <see cref="CommandHandler.Tag"/> (T3.1; T4 executes).</summary>
     public const string TagCapability = "tag";
 
     /// <summary>Sentinel image count used when the caller does not know the pipeline size.</summary>
     private const int UnknownImageCount = -1;
+
+    /// <summary>Name-based trigger for the crop-tool outpaint follow-up (never handler/tool based).</summary>
+    private const string OutpaintCommandName = "/扩图";
 
     private readonly IReadOnlyList<CommandDefinition> _commands;
 
@@ -91,10 +98,11 @@ public sealed class CommandParser : ICommandParser
 
     /// <summary>
     /// Stamps the UI-selected <paramref name="resolution"/> onto a plan that does not
-    /// carry one of its own (V3). The parser-produced resolution (explicit
-    /// <c>/扩图</c> width / height) always wins; a <c>null</c> resolution or a failed /
-    /// planless parse is returned unchanged. <see cref="EditPlan"/> is init-only, so
-    /// this rebuilds the plan to set the field.
+    /// carry one of its own (V3); the parser-produced resolution (a command's
+    /// <see cref="CommandDefinition.FixedResolution"/> or explicit <c>width</c>/<c>height</c>
+    /// arguments) always wins. A <c>null</c> resolution or a failed / planless parse is
+    /// returned unchanged. <see cref="EditPlan"/> is init-only, so this rebuilds the plan
+    /// to set the field.
     /// </summary>
     private static ParseResult ApplyResolution(ParseResult result, ResolutionPolicy? resolution)
     {
@@ -123,7 +131,10 @@ public sealed class CommandParser : ICommandParser
         };
     }
 
-    private ParseResult ParseSlashCommand(string text, IEditSession session, int imageCount)
+    private ParseResult ParseSlashCommand(
+        string text,
+        IEditSession session,
+        int imageCount)
     {
         var parts = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         var name = parts[0];
@@ -165,6 +176,29 @@ public sealed class CommandParser : ICommandParser
         if (command.Loras is { Count: > 0 } rawLoras && command.EffectiveLoras.Count < rawLoras.Count)
         {
             warnings.Add($"命令 '{command.Name}' 的 loras 含重复 path，已按首次去重（保留首次）。");
+        }
+
+        // P1 · /扩图 relocation: the follow-up after a crop-tool outpaint. Keyed by name (never by
+        // handler / tool). Aligned with the reference outpainting workflows: it runs Qwen's
+        // reference-conditioned edit on the padded canvas with NO mask, at the canvas's native
+        // size (Explicit) so nothing is rescaled. The crop gate is the authoritative rule.
+        var isOutpaint = string.Equals(command.Name, OutpaintCommandName, StringComparison.Ordinal);
+        ResolutionPolicy? outpaintResolution = null;
+        if (isOutpaint)
+        {
+            var currentNode = session.GetHistory().FirstOrDefault(n => n.NodeId == session.CurrentNodeId);
+            var crop = currentNode?.Crop;
+            if (crop is null || !crop.IsOutpaint())
+            {
+                return Error("「/扩图」需先做裁切外扩（当前节点没有外扩裁切）。", warnings);
+            }
+
+            outpaintResolution = new ResolutionPolicy
+            {
+                Mode = ResolutionMode.Explicit,
+                Width = Math.Max(1, crop.Width),
+                Height = Math.Max(1, crop.Height),
+            };
         }
 
         if (ValidateImageCount(command, handler, imageCount) is { } countError)
@@ -215,9 +249,11 @@ public sealed class CommandParser : ICommandParser
         {
             SourcePrompt = text,
             MainImagePath = mainImage ?? "",
-            Mask = session.GetCurrentMaskSpec(),
+            // /扩图 runs maskless on the padded canvas (the crop gate above); every other
+            // command keeps the node's hand-drawn mask.
+            Mask = isOutpaint ? null : session.GetCurrentMaskSpec(),
             Steps = new[] { step },
-            Resolution = BuildResolution(command, effectiveArgs),
+            Resolution = outpaintResolution ?? ResolveResolution(command, effectiveArgs),
         };
 
         return new ParseResult
@@ -374,20 +410,24 @@ public sealed class CommandParser : ICommandParser
     }
 
     /// <summary>
-    /// <c>QW21outpaint</c> requires <see cref="ResolutionMode.Explicit"/> (FROZEN 7.5).
-    /// Commands targeting it must carry <c>width</c>/<c>height</c> parameters; when
-    /// present and numeric they are lifted into the plan's resolution.
+    /// P1a resolution precedence: a command's own <see cref="CommandDefinition.FixedResolution"/>
+    /// wins; otherwise valid <c>width</c>/<c>height</c> arguments become an explicit policy;
+    /// otherwise <c>null</c> so the UI-selected tier is injected later.
+    /// </summary>
+    private static ResolutionPolicy? ResolveResolution(CommandDefinition command, IReadOnlyList<string> args)
+        => command.FixedResolution ?? BuildResolution(command, args);
+
+    /// <summary>
+    /// Lifts numeric <c>width</c>/<c>height</c> arguments into an explicit policy. Any command
+    /// that declares those parameters qualifies (P1a; no longer tied to any single tool, and
+    /// unused by the built-in set after the <c>/扩图</c> relocation). Invalid / missing values
+    /// return <c>null</c>.
     /// </summary>
     private static ResolutionPolicy? BuildResolution(CommandDefinition command, IReadOnlyList<string> args)
     {
-        if (!string.Equals(command.Tool, OutpaintToolName, StringComparison.Ordinal))
-        {
-            return null;
-        }
-
         var widthIndex = command.Params.IndexOf("width");
         var heightIndex = command.Params.IndexOf("height");
-        if (widthIndex < 0 || heightIndex < 0)
+        if (widthIndex < 0 || heightIndex < 0 || widthIndex >= args.Count || heightIndex >= args.Count)
         {
             return null;
         }
@@ -443,6 +483,11 @@ public sealed class CommandParser : ICommandParser
             if (command.EffectiveLoras.Count > 0)
             {
                 warnings.Add($"handler=Tag 不支持 loras（已忽略）：'{command.Name}'。");
+            }
+
+            if (command.FixedResolution is not null)
+            {
+                warnings.Add($"handler=Tag 不支持 fixed_resolution（已忽略）：'{command.Name}'。");
             }
         }
         else if (command.T2i && command.Handler != CommandHandler.Edit)
@@ -500,86 +545,4 @@ public sealed class CommandParser : ICommandParser
         return BuiltInCommands();
     }
 
-    internal static IReadOnlyList<CommandDefinition> BuiltInCommands() => new[]
-    {
-        new CommandDefinition
-        {
-            Name = "/换背景",
-            Params = new List<string> { "description" },
-            Variadic = true,
-            Tool = "QW21edit",
-            DefaultVariant = "single",
-            Variants = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["single"] = "Keep the character and pose in <image1> unchanged. Replace the background with {description}. Preserve the original facial identity, hair, body shape and pose.",
-                ["multi"] = "Keep the character and pose in <image1> unchanged. Use the scene from <image2> as the new background. {description}. Preserve the original facial identity, hair, body shape and pose.",
-            },
-            Description = "替换背景（1 图直接换 / 2 图参考场景）",
-        },
-        new CommandDefinition
-        {
-            Name = "/换装",
-            Params = new List<string> { "description" },
-            Variadic = true,
-            Tool = "QW21edit",
-            DefaultVariant = "single",
-            Variants = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["single"] = "Change the clothing of the person in <image1> to: {description}. Keep the facial identity, hair, body shape and pose unchanged, and keep the original background and lighting.",
-                ["multi"] = "Use the garment from <image2> to dress the person in <image1>. {description}. Preserve the facial identity, body shape and pose, and keep the original background.",
-            },
-            Description = "更换服装（1 图文字描述 / 2 图参考服装）",
-        },
-        new CommandDefinition
-        {
-            Name = "/合照",
-            Params = new List<string> { "description" },
-            Variadic = true,
-            Tool = "QW21edit",
-            DefaultVariant = "multi",
-            Variants = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["multi"] = "Create a new scene using the reference identities. The person from <image1> and the person from <image2> stand together. {description}. Preserve each person's identity independently; do not merge facial features or clothing between them.",
-            },
-            Description = "多主体合照（需至少 2 张图）",
-        },
-        new CommandDefinition
-        {
-            Name = "/生成",
-            Params = new List<string> { "description" },
-            Variadic = true,
-            Tool = "QW21edit",
-            T2i = true,
-            DefaultVariant = "single",
-            Variants = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["single"] = "{description}",
-            },
-            Description = "文生图（大模型扩写提示词）",
-        },
-        new CommandDefinition
-        {
-            Name = "/去水印",
-            Params = new List<string>(),
-            Tool = "QW21edit",
-            Template = "Remove all watermarks, logos, and subtitles from the image. Keep all other content unchanged.",
-            Description = "去除水印",
-        },
-        new CommandDefinition
-        {
-            Name = "/去物体",
-            Params = new List<string> { "object" },
-            Tool = "QW21edit",
-            Template = "Remove the {object} from <image1>. Fill the removed area naturally to match the surrounding context. Keep all other content unchanged.",
-            Description = "移除指定物体",
-        },
-        new CommandDefinition
-        {
-            Name = "/扩图",
-            Params = new List<string> { "width", "height" },
-            Tool = "QW21outpaint",
-            Template = "Extend the canvas to {width}x{height}. Fill the extended area with content consistent with <image1>.",
-            Description = "扩展画布",
-        },
-    };
 }

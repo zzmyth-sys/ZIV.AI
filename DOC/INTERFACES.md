@@ -161,3 +161,27 @@
   `IpcSubmitMapper` → `SubmitPayload.Loras`；`config.PROTOCOL_VERSION = "0.9"`。
 - **透传链（T3.2）**：`CommandParser` / `Executor` / `QwenImage21EditTool` / `IpcSubmitMapper` 全用
   `EffectiveLoras`；`QwenImage21OutpaintTool` 不透传（Z-024）。
+
+## 12. 追加说明（P1 · `/扩图` 重定位）
+
+> 本节为**追加**（只增不改）。
+
+- **契约追加（Step 1）**：`ZivAiEditor.Contracts.Session.CropSpec` 增 `int SourceWidth` / `int SourceHeight`
+  （JSON `source_width` / `source_height`；`0` = 未知）与实例方法 `bool IsOutpaint()`（源尺寸未知 → `false`）。
+- **契约（P1a）**：`CommandDefinition.FixedResolution`（`ResolutionPolicy?`，JSON `fixed_resolution`，
+  命令自带固定分辨率，优先于 `width`/`height` 参数与 UI 档位）。
+- **行为（Step 2–5，非契约）**：`/扩图` 由通用外扩改为「裁切外扩跟随动作」——按名称触发，需当前节点
+  `Crop.IsOutpaint()`；`CommandParser` ctor 增可选 `IImagingService?`（`ParseSlashCommand` 改 async）；
+  `plan.Mask` 为临时 `MaskSpec`（不写节点）；`CommandRequirements.RequiresOutpaintCrop` /
+  `SessionViewModel.AlignForCrop` 为新增 UI 门控；`FlowRunner.RerunNodeAsync` 增 `/扩图` 重跑预检。
+
+## 13. 追加/更正说明（P1 收尾 · 原生尺寸 + 无掩膜）
+
+> 本节为**追加**（只增不改）；**更正 §12** 中「/扩图 软掩膜 + imaging 注入 + async + 分辨率随 UI 档位」。
+
+- `/扩图`（`CommandParser`，按名称）：**无掩膜**（`plan.Mask = null`）+ **原生尺寸**
+  `ResolutionPolicy{Explicit, crop.Width, crop.Height}`；非 `/扩图` 命令仍用节点手绘掩膜与 UI 档位。
+- `CommandParser` ctor 恢复 `(string commandsJsonPath = ...)`；`ParseSlashCommand` 恢复同步（无 await）。
+- `CommandDefinition.FixedResolution`（P1a）保留（`/全景` 用）。
+- `OutpaintMask`（`ZivAiEditor.Agent.Session`）保留，供 B 策略 / 实验。
+- `python/server/pipeline.py::_resize_mask(mask,w,h,mode)`：软掩膜 `bilinear` / 二值 `nearest`。

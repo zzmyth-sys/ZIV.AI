@@ -25,8 +25,8 @@ namespace ZivAiEditor.App;
 ///
 /// <para>R-4 (module-boundaries closure): <see cref="Create"/> is grouped by domain
 /// (<c>BuildBackend</c> / <c>BuildTools</c> / <c>BuildAgent</c> / <c>BuildLlm</c> /
-/// <c>BuildPersistence</c> / <c>BuildImaging</c>). Construction order and the
-/// <see cref="AppContext"/> shape are unchanged; each group stays small.</para>
+/// <c>BuildPersistence</c> / <c>BuildImaging</c>). The <see cref="AppContext"/> shape is
+/// unchanged; each group stays small.</para>
 /// </summary>
 internal sealed class AppContext : IDisposable
 {
@@ -147,8 +147,7 @@ internal sealed class AppContext : IDisposable
     {
         var settings = shell.LoadSettings();
 
-        // R-4: grouped by domain. Construction order is unchanged (backend → tools → agent →
-        // profiles → llm → persistence → imaging); only the grouping is new.
+        // R-4: grouped by domain (backend → tools → agent → llm → persistence → imaging).
         var (backend, client) = BuildBackend(settings);
         var (tools, executionQueue) = BuildTools(client);
         var (commandParser, session, executor, modelProfiles) =
@@ -196,7 +195,10 @@ internal sealed class AppContext : IDisposable
 
     /// <summary>Agent domain: the parser, the in-memory session, the executor and the model profiles.</summary>
     private static (CommandParser Parser, EditSession Session, IExecutor Executor, IModelProfileRegistry Profiles)
-        BuildAgent(string templateDirectory, IToolRegistry tools, ExecutionQueue executionQueue)
+        BuildAgent(
+            string templateDirectory,
+            IToolRegistry tools,
+            ExecutionQueue executionQueue)
     {
         // Step 9C.8-A: the executor rebuilds a re-run plan from the DAG, so it needs the
         // session (read + navigate) and the deterministic command parser.

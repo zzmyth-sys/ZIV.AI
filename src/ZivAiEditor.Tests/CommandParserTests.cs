@@ -80,19 +80,18 @@ public class CommandParserTests
     }
 
     [Fact]
-    public async Task SlashCommand_Outpaint_Sets_Explicit_Resolution()
+    public async Task SlashCommand_Outpaint_Now_ZeroArgs_Requires_Outpaint_Crop()
     {
         var parser = ParserWithoutFile();
 
-        var result = await parser.ParseAsync("/扩图 2048 1280", SessionWithImage());
+        // P1: /扩图 lost its width/height params and now needs the current node's outpaint crop.
+        var withArgs = await parser.ParseAsync("/扩图 2048 1280", SessionWithImage());
+        Assert.False(withArgs.Success);
+        Assert.NotNull(withArgs.ErrorMessage);
 
-        Assert.True(result.Success);
-        var step = Assert.Single(result.Plan!.Steps);
-        Assert.Equal("QW21outpaint", step.ToolName);
-        Assert.NotNull(result.Plan.Resolution);
-        Assert.Equal(ResolutionMode.Explicit, result.Plan.Resolution!.Mode);
-        Assert.Equal(2048, result.Plan.Resolution.Width);
-        Assert.Equal(1280, result.Plan.Resolution.Height);
+        var zeroArgs = await parser.ParseAsync("/扩图", SessionWithImage());
+        Assert.False(zeroArgs.Success);
+        Assert.Contains("需先做裁切外扩", zeroArgs.ErrorMessage);
     }
 
     [Fact]
@@ -154,13 +153,13 @@ public class CommandParserTests
         var parser = ParserWithoutFile();
         var injected = new ResolutionPolicy { Mode = ResolutionMode.Side, Side = 1536 };
 
-        // /扩图 carries its own explicit resolution, which must win over the injected one.
-        var result = await parser.ParseAsync("/扩图 2048 1280", SessionWithImage(), injected);
+        // /全景 carries its own fixed explicit resolution, which must win over the injected one.
+        var result = await parser.ParseAsync("/全景", SessionWithImage(), injected);
 
         Assert.True(result.Success);
         Assert.Equal(ResolutionMode.Explicit, result.Plan!.Resolution!.Mode);
         Assert.Equal(2048, result.Plan.Resolution.Width);
-        Assert.Equal(1280, result.Plan.Resolution.Height);
+        Assert.Equal(1024, result.Plan.Resolution.Height);
     }
 
     [Fact]

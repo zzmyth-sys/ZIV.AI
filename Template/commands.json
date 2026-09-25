@@ -64,10 +64,20 @@
     },
     {
       "name": "/扩图",
-      "params": ["width", "height"],
-      "tool": "QW21outpaint",
-      "template": "Extend the canvas to {width}x{height}. Fill the extended area with content consistent with <image1>.",
-      "description": "扩展画布"
+      "handler": "Edit",
+      "params": [],
+      "tool": "QW21edit",
+      "template": "Extend the image to fill the blank canvas seamlessly and continue the scene; keep the existing image content unchanged.",
+      "description": "填充裁切外扩的灰底区域"
+    },
+    {
+      "name": "/全景",
+      "handler": "Edit",
+      "params": [],
+      "tool": "QW21edit",
+      "fixed_resolution": { "mode": "Explicit", "width": 2048, "height": 1024 },
+      "template": "Generate a 180-degree equirectangular panorama (front hemisphere only, 2:1 aspect ratio) from the input perspective image. Use a true equirectangular projection covering 180 degrees horizontal and 180 degrees vertical. The left and right edges should be at the 90-degree-left and 90-degree-right extremes of the front hemisphere. Keep the scene, style, lighting and all content continuous and consistent with the original image.",
+      "description": "将当前图转为 180° 半全景"
     }
   ]
 }

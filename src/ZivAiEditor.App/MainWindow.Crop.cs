@@ -17,5 +17,15 @@ public partial class MainWindow
     private void OnPreviewCropCompleted(object? sender, CropCompletedEventArgs e)
     {
         _vm.SetNodeCrop(e.NodeId, e.Crop);
+        // P1 · /扩图 relocation: only an outpaint crop needs the previewed node to become
+        // current (the parser reads the current node's crop for /扩图); an inner crop must not
+        // move the selection or claim to be an outpaint. Either way the send gate refreshes,
+        // since an outpaint crop may now exist.
+        if (e.Crop.IsOutpaint())
+        {
+            _vm.AlignForCrop(e.NodeId);
+        }
+
+        UpdateSendEnabled();
     }
 }

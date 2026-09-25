@@ -62,4 +62,29 @@ public class CommandRequirementsTests
         Assert.False(CommandRequirements.RequiresMoreImages(
             commands, "把天空换成日落", currentImageCount: 1, attachmentCount: 0, out _));
     }
+
+    [Fact]
+    public void OutpaintCrop_Gate_Blocks_Without_Outpaint_Crop()
+    {
+        var commands = Commands();
+
+        Assert.True(CommandRequirements.RequiresOutpaintCrop(
+            commands, "/扩图", hasOutpaintCrop: false, out var hint));
+        Assert.Contains("裁切外扩", hint);
+        Assert.False(CommandRequirements.RequiresOutpaintCrop(
+            commands, "/扩图", hasOutpaintCrop: true, out _));
+    }
+
+    [Fact]
+    public void OutpaintCrop_Gate_Ignores_Other_Commands_And_Text()
+    {
+        var commands = Commands();
+
+        Assert.False(CommandRequirements.RequiresOutpaintCrop(
+            commands, "/去水印", hasOutpaintCrop: false, out _));
+        Assert.False(CommandRequirements.RequiresOutpaintCrop(
+            commands, "把天空换成日落", hasOutpaintCrop: false, out _));
+        Assert.False(CommandRequirements.RequiresOutpaintCrop(
+            commands, null, hasOutpaintCrop: false, out _));
+    }
 }

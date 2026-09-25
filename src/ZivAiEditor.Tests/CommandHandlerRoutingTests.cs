@@ -165,13 +165,13 @@ public class CommandHandlerRoutingTests : IDisposable
         {
           "version": "1.1",
           "commands": [
-            { "name": "/扩图", "handler": "Outpaint", "params": ["width", "height"],
+            { "name": "/外扩", "handler": "Outpaint", "params": ["width", "height"],
               "tool": "QW21outpaint", "template": "Extend to {width}x{height}." }
           ]
         }
         """);
 
-        var result = await parser.ParseAsync("/扩图 2048 1280", SessionWithImage(), 2, resolution: null);
+        var result = await parser.ParseAsync("/外扩 2048 1280", SessionWithImage(), 2, resolution: null);
 
         Assert.False(result.Success);
         Assert.Contains("恰好 1 张", result.ErrorMessage);
@@ -184,13 +184,13 @@ public class CommandHandlerRoutingTests : IDisposable
         {
           "version": "1.1",
           "commands": [
-            { "name": "/扩图", "handler": "Outpaint", "params": ["width", "height"],
+            { "name": "/外扩", "handler": "Outpaint", "params": ["width", "height"],
               "tool": "QW21outpaint", "template": "Extend to {width}x{height}." }
           ]
         }
         """);
 
-        var result = await parser.ParseAsync("/扩图 2048 1280", SessionWithImage(), 1, resolution: null);
+        var result = await parser.ParseAsync("/外扩 2048 1280", SessionWithImage(), 1, resolution: null);
 
         Assert.True(result.Success);
         Assert.Null(result.Capability);
@@ -225,13 +225,13 @@ public class CommandHandlerRoutingTests : IDisposable
         {
           "version": "1.1",
           "commands": [
-            { "name": "/扩图", "handler": "Outpaint", "t2i": true, "params": ["width", "height"],
+            { "name": "/外扩", "handler": "Outpaint", "t2i": true, "params": ["width", "height"],
               "tool": "QW21outpaint", "template": "Extend to {width}x{height}." }
           ]
         }
         """);
 
-        var result = await parser.ParseAsync("/扩图 2048 1280", SessionWithImage(), 1, resolution: null);
+        var result = await parser.ParseAsync("/外扩 2048 1280", SessionWithImage(), 1, resolution: null);
 
         Assert.True(result.Success);
         Assert.Contains(result.Warnings, warning => warning.Contains("t2i 为冗余"));

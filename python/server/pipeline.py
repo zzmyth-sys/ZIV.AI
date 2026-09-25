@@ -490,7 +490,14 @@ def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None, spe
         )
 
     if mask is not None:
-        mask = _resize_mask(mask, latent_samples.shape[3] * 16, latent_samples.shape[2] * 16)
+        # Soft masks (crop-outpaint / feathered) resample bilinearly (official VAEEncodeForInpaint);
+        # a hard 0/1 mask stays nearest, so binary hand masks are unchanged (Z19).
+        mask = _resize_mask(
+            mask,
+            latent_samples.shape[3] * 16,
+            latent_samples.shape[2] * 16,
+            mode="nearest" if _mask_is_binary(mask) else "bilinear",
+        )
     return positive, negative, latent_samples, mask
 
 
@@ -517,13 +524,20 @@ def _load_mask_tensor(path, binary=True):
     return torch.from_numpy(array)[None, ...]  # [1,H,W]
 
 
-def _resize_mask(mask, width, height):
+def _mask_is_binary(mask):
+    """True when every mask value is exactly 0 or 1 (a hard mask)."""
+    import torch
+
+    return bool(torch.all((mask == 0) | (mask == 1)))
+
+
+def _resize_mask(mask, width, height, mode="nearest"):
     import torch
 
     if mask.shape[-1] == width and mask.shape[-2] == height:
         return mask
     resized = torch.nn.functional.interpolate(
-        mask[:1, None], size=(height, width), mode="nearest"
+        mask[:1, None], size=(height, width), mode=mode
     )
     return resized[0]
 

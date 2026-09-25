@@ -864,6 +864,39 @@ public class SessionViewModelTests
     }
 
     [Fact]
+    public void AlignForCrop_Moves_Current_To_Previewed_Node()
+    {
+        var session = new EditSession();
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var rootId = session.CurrentNodeId!;
+        var child = session.AppendNode(rootId, @"C:\img\child.png", "child");
+        vm.RefreshHistory();
+
+        Assert.Equal(child.NodeId, session.CurrentNodeId);
+
+        var moved = vm.AlignForCrop(rootId);
+
+        Assert.True(moved);
+        Assert.Equal(rootId, session.CurrentNodeId);
+        Assert.Contains(vm.Messages, m => m.Role == ChatRole.System && m.Text.Contains("裁切外扩"));
+    }
+
+    [Fact]
+    public void AlignForCrop_NoOp_When_Already_Current_Or_Unknown()
+    {
+        var session = new EditSession();
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var rootId = session.CurrentNodeId!;
+
+        Assert.False(vm.AlignForCrop(rootId));
+        Assert.False(vm.AlignForCrop("missing"));
+        Assert.False(vm.AlignForCrop(null));
+        Assert.Equal(rootId, session.CurrentNodeId);
+    }
+
+    [Fact]
     public void GetParentPipelineImagePath_Is_Null_For_Root()
     {
         var session = new EditSession();

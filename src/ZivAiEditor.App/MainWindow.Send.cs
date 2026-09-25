@@ -88,7 +88,32 @@ public partial class MainWindow
             ShowModeHint(requirement.Hint);
         }
 
-        send.IsEnabled = !_busy && !requirement.Blocked && _vm.CanSend(text, count);
+        // P1 · /扩图 pre-gate: the command needs the current node's crop-tool outpaint crop.
+        var outpaintBlocked = CommandRequirements.RequiresOutpaintCrop(
+            _commands, text, CurrentNodeHasOutpaintCrop(), out var outpaintHint);
+        if (outpaintBlocked && outpaintHint is { Length: > 0 })
+        {
+            ShowModeHint(outpaintHint);
+        }
+
+        send.IsEnabled = !_busy && !requirement.Blocked && !outpaintBlocked && _vm.CanSend(text, count);
+    }
+
+    /// <summary>
+    /// P1: whether the current node carries a crop-tool outpaint crop (the <c>/扩图</c> pre-gate).
+    /// </summary>
+    private bool CurrentNodeHasOutpaintCrop()
+    {
+        var currentNodeId = _vm.Session.CurrentNodeId;
+        foreach (var node in _vm.Session.GetHistory())
+        {
+            if (string.Equals(node.NodeId, currentNodeId, StringComparison.Ordinal))
+            {
+                return node.Crop?.IsOutpaint() == true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -136,6 +161,15 @@ public partial class MainWindow
         if (requirement.Blocked)
         {
             ShowModeHint(requirement.Hint ?? "该命令需要更多图片");
+            ScrollToEnd();
+            return;
+        }
+
+        // P1 · /扩图 pre-gate (see UpdateSendEnabled).
+        if (CommandRequirements.RequiresOutpaintCrop(
+                _commands, text, CurrentNodeHasOutpaintCrop(), out var outpaintHint))
+        {
+            ShowModeHint(outpaintHint ?? "「/扩图」需先做裁切外扩");
             ScrollToEnd();
             return;
         }

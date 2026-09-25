@@ -26,7 +26,7 @@ public interface ICommandParser
     /// <paramref name="resolution"/> onto <see cref="EditPlan.Resolution"/> (V3: moved
     /// down from the UI, which used to rebuild the whole plan). The UI-selected
     /// resolution therefore never overrides a resolution the parser already produced
-    /// (e.g. the explicit <c>/扩图</c> width / height). A <c>null</c>
+    /// (e.g. a command-owned fixed resolution such as <c>/全景</c>). A <c>null</c>
     /// <paramref name="resolution"/> leaves the plan unchanged.
     /// </summary>
     Task<ParseResult> ParseAsync(

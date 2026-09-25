@@ -5529,3 +5529,82 @@ Python 链式叠加。**无 GPU**（Z29 / Z30）。
 - 契约追加 3 处 `Loras` + IPC `loras`；`ipc_version 0.9`；Z8 文件 < 600。
 - `FROZEN.md` 追加 T3.2 段 + Z-024 / Z-025；`INTERFACES.md` §11 更新；`ACCEPTANCE.MD` 追加 T3.2 段；
   `contracts/ipc-protocol.md` 0.9。
+
+---
+
+## [P1 · `/扩图` 重定位] - 2026-09-25：裁切外扩跟随动作
+
+### 目标
+
+把 `/扩图` 从「通用外扩命令」改为「裁切外扩（灰底画布）之后的跟随动作」：按名称触发、需当前节点
+有外扩裁切、掩膜临时生成不落节点。Step 1（`CropSpec` 扩展）已完成，本步做 Step 2–5 代码 + Step 6 文档。
+**无 GPU**（Z29 / Z30）。
+
+### 做了什么
+
+- **Step 2 数据**：`Template/commands.json` + `CommandParser.BuiltIn` 的 `/扩图` → `Edit` / `params=[]` /
+  `QW21edit` / 新 template + description。
+- **Step 3 几何 + 解析**：新 `Agent/Session/OutpaintMask.cs`（纯 `byte[]`，镜像 `outpaint.py` 的
+  `build_mask` / `_dilate`）；`CommandParser` ctor 增可选 `IImagingService?`，`ParseSlashCommand` 改 async，
+  `/扩图` 按名称走外扩裁切校验 + 临时掩膜；其余命令 `Mask` 仍取 `session.GetCurrentMaskSpec()`。
+- **Step 4 门控 / 对齐**：`CommandRequirements.RequiresOutpaintCrop`；`MainWindow.Send` 预阻断 + hint；
+  `SessionViewModel.AlignForCrop`；`MainWindow.OnPreviewCropCompleted` 调 `SetNodeCrop` → `AlignForCrop`
+  → `UpdateSendEnabled`。
+- **Step 5 重跑**：`FlowRunner.RerunNodeAsync` 预检父节点外扩裁切。
+- **接线**：`AppContext` 先建 imaging（`BuildImaging` 前移）再注入 `new CommandParser(path, imaging)`。
+- **测试**：新 `OutpaintMaskTests`(4) / `CommandOutpaintTests`(3)；改 `CommandParserTests` /
+  `CommandRealDataTests` / `CommandHandlerRoutingTests`（temp 命令改名 `/外扩`）/ `CommandFixedResolutionTests` /
+  `CommandRequirementsTests`(+2) / `SessionViewModelTests`(+2)。
+
+### 关键决策
+
+1. **按名称触发**：`/扩图` 分支只看 `command.Name`，不绑定 handler / tool。
+2. **掩膜临时**：`plan.Mask` 用生成的 `MaskSpec`（`IsBinary=false`、`FeatherPx=0`），不写节点。
+3. **分辨率随 UI**：命令不再自带显式分辨率；`FixedResolution`（P1a）保留给 `/全景`。
+4. **解析器门权威**：App 预阻断 + 重跑预检仅为体验，最终由 parser 判定。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 **519 通过 / 0 失败**（基线 508 + 11）。
+
+### 备注
+
+- 无 python / IPC 改动；不改 `/tag` / combo / `QW21outpaint`；无新 NuGet；改动文件 < 600（Z8）。
+- `FROZEN.md` 追加 P1 段 + Z-028；`INTERFACES.md` §12；`ACCEPTANCE.MD` 追加 P1 验收段。
+
+---
+
+## [P1 收尾] - 2026-09-26：`/扩图` 原生尺寸 + 无掩膜（对齐参考工作流）+ 边缘修复
+
+### 目标
+
+`/扩图` 从「灰底 + 软掩膜 inpaint（分辨率随 UI）」改为「扩画布 + 一句扩图指令」的参考工作流做法：
+**无掩膜** + **原生画布尺寸**；并修边缘（掩膜重采样 / 官方 guard / blur 常数）。**无 GPU**（Z29 / Z30）。
+
+### 做了什么
+
+- `CommandParser` 的 `/扩图`：`plan.Resolution = Explicit{crop.Width, crop.Height}`；`plan.Mask = null`；
+  移除 `IImagingService` 注入；`ParseSlashCommand` 恢复同步。
+- `AppContext`：`BuildAgent` 去 imaging；构造顺序恢复（backend → tools → agent → llm → persistence → imaging）。
+- template 改扩图语义（`Template/commands.json` + `CommandParser.BuiltIn.cs`）。
+- 边缘修复：`pipeline.py::_resize_mask` 条件化（软 bilinear / 二值 nearest）；`OutpaintMask` 补官方 guard +
+  `BlurRadius 31`。
+- 保留：`OutpaintMask.cs` / `OutpaintMaskTests`（B 策略）；P1a `FixedResolution`（`/全景`）。
+- 新增脚本（`_test_step2/`，真机由用户跑）：`outpaint_ab.py`（A 无掩膜 vs B 二值掩膜）、`outpaint_probe*.{ps1,py}`。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 **521 通过 / 0 失败**；受影响类 107 通过。
+- Python `py_compile`（`pipeline.py` / `outpaint_ab.py`）通过。
+
+### 遗留
+
+- **Z-029**：`/扩图` 掩膜策略 A/B（A 无掩膜已产品化；B 二值掩膜待真机）。
+- 真机验证：A 是否消缝、原图区是否保真。
+
+### 备注
+
+- 未改 `python/server` 业务逻辑（仅 `_resize_mask` 模式）；未改 `ipc-protocol.md`；无新 NuGet；改动文件 < 600（Z8）。
+- `FROZEN.md` 追加「P1 收尾修正」+ Z-029；`INTERFACES.md` §13；`ACCEPTANCE.MD` 追加 P1 收尾验收段。

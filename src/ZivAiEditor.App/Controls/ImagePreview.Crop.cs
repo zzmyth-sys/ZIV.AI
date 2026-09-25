@@ -416,6 +416,10 @@ public partial class ImagePreview
                 Y = y,
                 Width = width,
                 Height = height,
+                // The preview shows the node's ORIGINAL while cropping, so these are the
+                // source pixels the rectangle is relative to (outpaint detection).
+                SourceWidth = (int)Math.Round(_model.ImageWidth),
+                SourceHeight = (int)Math.Round(_model.ImageHeight),
                 ResultImagePath = output,
             };
 

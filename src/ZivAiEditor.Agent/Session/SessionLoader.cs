@@ -91,6 +91,8 @@ public static class SessionLoader
                         Y = dtoCrop.Y,
                         Width = dtoCrop.Width,
                         Height = dtoCrop.Height,
+                        SourceWidth = dtoCrop.SourceWidth,
+                        SourceHeight = dtoCrop.SourceHeight,
                         ResultImagePath = cropPath,
                     };
                 }
