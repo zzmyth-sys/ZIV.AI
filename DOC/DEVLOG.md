@@ -5206,3 +5206,57 @@ RTX 4080 16GB；GPU 任务前空闲，基线 **1132 MiB**。测试图 `_test_ste
 - 全步**无契约破坏**（仅授权追加）；无新 NuGet；改动文件 < 600（Z8）。
 - **Z29 / Z30 合规**：除 R6（Z30 例外）外全程无 GPU；R6 前后 GPU 回基线、无残留进程。
 - 三份文档收口段：`FROZEN.md`「第 8 步收口」/ `ACCEPTANCE.MD`「第 8 步验收」/ 本段。
+
+---
+
+## [TE-Speed 集成] - 2026-09-25：外置加速模块（A/B 实测 → 默认关 + 保留开关）
+
+### 目标
+
+评估第三方 TE-Speed-QwenImage21 加速节点是否默认集成。流程：只读调查（接口 / 兼容性）→ A/B 实测
+（1K / 2K）→ 裁决：**默认关 + 保留开关**，按「**外置模块**」语义（可控 / 可删 / 可更新），非隐藏规避许可。
+**无 GPU 实施**（A/B 已跑；Z29 / Z30）。
+
+### A/B 实测（2026-09-25）
+
+- 环境：RTX 4080 16GB；`user_input.png`（2560×1599）；`steps=30`、`seed=42`、denoise=1.0；
+  `te_predictor` / threshold 0.06 / `kitchen_int8`；A 关 / B 开，同图同 prompt；warmup 后 A×2、B×3。
+- **1K（side 1024 → 1024×640）**：A 9.66 s / B 8.48 s → **+12.3%**；MAD 2.15，PSNR 27.64 dB，SSIM 0.9865；像素差 >120 占 0.28%。
+- **2K（side 2048 → 2048×1280）**：A 44.94 s / B 37.91 s → **+15.6%**；MAD 0.80，PSNR 38.53 dB，SSIM 0.9957；像素差 >120 占 0.011%。
+- 显存：peak alloc 相同；`nvidia-smi` 峰值 +~1.6%（2K），**无 OOM**；B 三次 37.75–38.05 s（稳定）。
+- 识别：真实模型 `model=qwen_image21`（非 passthrough）；`attention=kitchen_int8` 未崩。
+- 视觉：A/B 肉眼无差（2K）；差异集中在主体/道具边缘与背景缝隙的微弱细节。
+- **规律**：分辨率越高 → 加速越大且画质越接近。**结论：< 30% 门槛 → 不默认开**。
+
+### 做了什么（实施 · 无 GPU / 不改 C#）
+
+- **config.py**：新增 `TE_SPEED_ENABLED`（默认 `False`，env `ZIV_AI_TE_SPEED`）+ `TE_SPEED_MODE` /
+  `TE_SPEED_REUSE_THRESHOLD` / `TE_SPEED_ERROR_LIMIT` / `TE_SPEED_ATTENTION` / `TE_SPEED_VERBOSE` / `TE_SPEED_NODE_DIR`。
+- **pipeline.py**：新增 `_load_te_speed()`（import-by-file 加载包，规避 `nodes` 名冲突）与 `apply_te_speed(model)`
+  （默认关 / 缺失 / 失败均原样返回，非致命）；`run()` 在 `apply_pre_sampling_hooks` 后插入 `model = apply_te_speed(model)`。
+- **`.gitignore`**：显式排除 `Comfyui/ComfyUI/custom_nodes/TE-Speed-QwenImage21/`（本地不入库）。
+- **节点部署（本地）**：`custom_nodes/TE-Speed-QwenImage21/`（gitignore 内；不进发布包）。
+- **临时脚本**：`_test_step2/te_speed_ab.py` / `te_speed_analyze.py`（未跟踪，不入产品代码）。
+
+### 关键决策
+
+1. **外置模块**：不 vendor `.pyd`（无 LICENSE，vendor 有法律风险）；保留加载机制 + 文档，用户自取自放。
+2. **默认关**：端到端 +15.6%（2K）< 30% 门槛；env 可控开。
+3. **非致命接入**：沿用 `make_lora_hook` 模式，缺失/失败绝不失败任务。
+
+### 实测（Z29 / Z30：不再跑 GPU）
+
+- `py_compile`（config / pipeline）通过；C# `dotnet build -c Release` → **0 错误 0 警告**。
+- 默认关：`apply_te_speed` no-op 且 **pyd 未加载**；env 开 + 未部署 / 删目录：跳过不致命；
+  env 开 + 已部署：类加载成功（mock patch 失败被捕获）。
+- Python CPU 单测（`test_loras` / `test_models` / `test_mask_feather` / `test_multi_image` / `test_outpaint`）**38/38**。
+
+### 遗留
+
+- **Z-019**：外置模块默认关（无 LICENSE / 闭源 pyd / 平台绑定 / attention 未验）。见 `FROZEN.md`。
+- 未做 UI 开关（下一轮可选）；未做 L2 数据文件（env 足够）。
+
+### 备注
+
+- 无契约签名变化；不改 C# / Contracts / IPC；`python/server` 仅 config / pipeline；无新 NuGet；改动文件 < 600（Z8）。
+- `OPTIMIZATION.md` §1.7 记录外置模块安装/开关/删除/更新 + 实测；`RELEASE-CHECKLIST.md` 登记「不含 .pyd」。

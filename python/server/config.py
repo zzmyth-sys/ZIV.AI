@@ -95,6 +95,22 @@ MODELS_REGISTRY_PATH = os.environ.get(
     os.path.join(REPO_ROOT, "Template", "models.json"),
 )
 
+# ---- TE-Speed Qwen Image 2.1 加速（默认关；A/B 实测见 DOC/OPTIMIZATION.md §1）----
+# 第三方 Cython 节点（custom_nodes/TE-Speed-QwenImage21，闭源 .pyd、无 LICENSE）。
+# A/B 实测（side 1024 / 2048，30 步）：端到端 +12.3% / +15.6%，低于 30% 门槛，故默认关。
+# 开启：ZIV_AI_TE_SPEED=1。节点缺失 / 补丁失败时自动跳过（不致命）。
+TE_SPEED_ENABLED = os.environ.get("ZIV_AI_TE_SPEED", "0") not in ("", "0", "false", "False")
+TE_SPEED_MODE = os.environ.get("ZIV_AI_TE_SPEED_MODE", "te_predictor")  # te_predictor | speed
+TE_SPEED_REUSE_THRESHOLD = float(os.environ.get("ZIV_AI_TE_SPEED_THRESHOLD", "0.06"))
+TE_SPEED_ERROR_LIMIT = float(os.environ.get("ZIV_AI_TE_SPEED_ERROR_LIMIT", "0.08"))
+TE_SPEED_ATTENTION = os.environ.get("ZIV_AI_TE_SPEED_ATTENTION", "kitchen_int8")
+TE_SPEED_VERBOSE = os.environ.get("ZIV_AI_TE_SPEED_VERBOSE", "") not in ("", "0", "false", "False")
+# 节点目录（可覆盖；默认随 ComfyUI）。
+TE_SPEED_NODE_DIR = os.environ.get(
+    "ZIV_AI_TE_SPEED_NODE_DIR",
+    os.path.join(COMFY_ROOT, "custom_nodes", "TE-Speed-QwenImage21"),
+)
+
 # ---- 显存策略（Z21 空闲卸载：Step 3 实现）----
 # auto = 交给 ComfyUI 的 model_management 决定权重驻留（CPU/GPU/offload）
 VRAM_MODE = "auto"

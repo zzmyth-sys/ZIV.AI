@@ -16,9 +16,11 @@ never touches the heavy stack.
 """
 
 import gc
+import importlib.util
 import logging
 import os
 import random
+import sys
 import time
 from datetime import datetime
 
@@ -38,6 +40,62 @@ from resolution import (
 )
 
 _LOG = logging.getLogger("zivai.server")
+
+# TE-Speed node class cache (loaded at most once per process); None = not loaded yet.
+_TE_SPEED_CLS = None
+
+
+def _load_te_speed():
+    """Load the external TE-Speed custom node as a package (import-by-file).
+
+    The node's ``nodes.pyd`` is a Cython module named ``nodes``; importing it
+    top-level would collide with ComfyUI's ``nodes.py``, so it is loaded under a
+    unique package name via its ``__init__.py`` (whose own relative import pulls
+    ``nodes.pyd``). Returns the node class, or ``None`` when it is not deployed.
+    """
+    global _TE_SPEED_CLS
+    if _TE_SPEED_CLS is not None:
+        return _TE_SPEED_CLS
+    init_py = os.path.join(config.TE_SPEED_NODE_DIR, "__init__.py")
+    if not os.path.isfile(init_py):
+        _LOG.warning("TE-Speed node not found at %s", config.TE_SPEED_NODE_DIR)
+        return None
+    name = "te_speed_qwen_image21"
+    spec = importlib.util.spec_from_file_location(
+        name, init_py, submodule_search_locations=[config.TE_SPEED_NODE_DIR]
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    _TE_SPEED_CLS = module.NODE_CLASS_MAPPINGS["TESpeedQwenImage21"]
+    return _TE_SPEED_CLS
+
+
+def apply_te_speed(model):
+    """Patch the loaded MODEL with the TE-Speed predictor (default off; never fatal).
+
+    Mirrors ``pipeline_hooks.make_lora_hook``: when disabled, the node is missing,
+    or the patch fails, the model is returned unchanged so acceleration can never
+    fail an otherwise valid task. Returns the (possibly new) model.
+    """
+    if not config.TE_SPEED_ENABLED:
+        return model
+    try:
+        node_cls = _load_te_speed()
+        if node_cls is None:
+            return model
+        model, status = node_cls().patch(
+            model,
+            attention=config.TE_SPEED_ATTENTION,
+            step_cache=config.TE_SPEED_MODE,
+            reuse_threshold=config.TE_SPEED_REUSE_THRESHOLD,
+            predictor_error_limit=config.TE_SPEED_ERROR_LIMIT,
+            verbose=config.TE_SPEED_VERBOSE,
+        )
+        _LOG.info("TE-Speed applied: %s", status)
+    except Exception as exc:  # pragma: no cover - exercised on the GPU host
+        _LOG.warning("TE-Speed apply failed (%s); model left unpatched", exc)
+    return model
 
 
 def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cancel=None,
@@ -76,6 +134,9 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
     # model triple is loaded and BEFORE text encoding, so a LoRA that patches
     # `clip` (strength_clip) takes effect on the conditioning.
     model, clip = pipeline_hooks.apply_pre_sampling_hooks(model, clip, request)
+
+    # Optional TE-Speed accelerator (default off; see config.TE_SPEED_ENABLED).
+    model = apply_te_speed(model)
 
     # Step 6.5: an optional payload `resolution` overrides the config default;
     # absent -> the config default path (backward compatible with ipc 0.5).

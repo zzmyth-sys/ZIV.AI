@@ -17,6 +17,34 @@
 | 1.4 | Lightning LoRA（4–8 步） | 候选 | 约 **4–6x** | 注意 alpha/rank 缩放 |
 | 1.5 | Turbo LoRA（2 步） | 候选（远期） | 约 **40x** | 质量下降明显，远期评估 |
 | 1.6 | GGUF 量化 | 候选 | 最低 **~4 GB** 显存 | 按需引入，注意画质/兼容 |
+| 1.7 | TE-Speed-QwenImage21（**外置模块**） | **已实测** | 端到端 **+12.3%**（1K）/ **+15.6%**（2K） | 无 LICENSE / 闭源 pyd / Windows x64；**默认关**，见 §1.7 |
+
+### 1.7 TE-Speed-QwenImage21（外置加速模块 · 已实测 · 默认关）
+
+> 第三方 ComfyUI 节点，用「输出预测」加速 Qwen-Image-2.1 采样。**外置模块语义**：
+> 不进发布包；用户自行放置 / 开启 / 删除 / 更新。接入点见 `FROZEN.md`「TE-Speed 集成」。
+
+- **来源**：https://github.com/tl2012tl/TE-Speed-QwenImage21
+- **放哪**：`<ComfyUI>/custom_nodes/TE-Speed-QwenImage21/`（`__init__.py` + `nodes.pyd` + `README.md`）
+- **怎么开**：环境变量 `ZIV_AI_TE_SPEED=1`（默认关，关闭时不加载 pyd）
+- **怎么删**：删除该目录即拔掉（开关开着也不会报错，自动跳过）
+- **怎么更新**：替换 `nodes.pyd` 即更新
+- **参数**（env 覆盖）：`ZIV_AI_TE_SPEED_MODE`（`te_predictor` | `speed`，默认 `te_predictor`）、
+  `ZIV_AI_TE_SPEED_THRESHOLD`（默认 0.06）、`ZIV_AI_TE_SPEED_ERROR_LIMIT`（默认 0.08）、
+  `ZIV_AI_TE_SPEED_ATTENTION`（默认 `kitchen_int8`）、`ZIV_AI_TE_SPEED_VERBOSE`
+
+**A/B 实测（2026-09-25；side 1024 / 2048，steps=30，seed=42，te_predictor/0.06，同图同 prompt）**：
+
+| 档位 | A 基线 | B 加速 | 端到端加速 | MAD | PSNR | SSIM | 像素差 >120 |
+|---|---|---|---|---|---|---|---|
+| 1K（1024×640） | 9.66 s | 8.48 s | **+12.3%** | 2.15 | 27.64 dB | 0.9865 | 0.28% |
+| 2K（2048×1280） | 44.94 s | 37.91 s | **+15.6%** | 0.80 | 38.53 dB | 0.9957 | 0.011% |
+
+- 显存：peak alloc 相同；`nvidia-smi` 峰值 +~1.6%（2K），无 OOM；连续 3 次稳定（B 37.75–38.05 s）。
+- **规律**：分辨率越高 → 加速越大且画质越接近（预测更准）。
+- **结论**：+15.6% **< 30% 门槛** → **默认关**（保留开关；外置模块）。
+- **限制**：无 LICENSE / 闭源 pyd / Windows x64 绑定 / attention 冲突未验（默认 `kitchen_int8` 实测未崩）。
+- 脚本：`_test_step2/te_speed_ab.py` / `te_speed_analyze.py`；结果 `te_speed_ab_result.json`。
 
 ## 2. 提示词遵循优化
 

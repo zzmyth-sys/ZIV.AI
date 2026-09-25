@@ -4143,3 +4143,45 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
   （第 7 步基线 432 → 460）；GPU 仅在 R6（Z30 例外）执行并回基线。
 - 未 push（提交链 `1648723` → `dee09ee` → `e6aedab` → `944bc7f` → `4b1aeae`）。
 - **Z29 / Z30 合规**：除 R6 外全程无 GPU；无契约破坏；无新 NuGet；改动文件 < 600（Z8）。
+
+---
+
+## TE-Speed 集成（外置加速模块 · 默认关）（日期：2026-09-25）
+
+> **只增不改**。新增**可选**加速器接入点（默认关，env 开启）；**无契约签名变化**——改动仅在 Python
+> 后端的 `config.py` / `pipeline.py` 与 `.gitignore`；**不改 C# / Contracts / IPC**；**不跑 GPU**（A/B 已实测）。
+
+### TE.1 语义（冻结 · 记录）
+
+- **外置模块**：TE-Speed **不 vendor、不进发布包**（第三方闭源 `.pyd`、无 LICENSE）。用户自行放置于
+  `<ComfyUI>/custom_nodes/TE-Speed-QwenImage21/`，env 开启；**删目录即拔除，换 `nodes.pyd` 即更新**。
+- **默认关**：`ZIV_AI_TE_SPEED` 默认 `0`；关闭时**不加载 pyd**（无副作用）。
+- **加载路径**：`config.TE_SPEED_NODE_DIR`（默认 `COMFY_ROOT/custom_nodes/TE-Speed-QwenImage21`，env 可覆盖）。
+- **非致命**：节点缺失 / 补丁失败 / 模型不支持 → 记 warning 并**原样返回 model**，绝不失败任务。
+
+### TE.2 接入点（冻结）
+
+- `python/server/config.py`：新增 `TE_SPEED_*`（默认关；参数见 `DOC/OPTIMIZATION.md` §1.7）。
+- `python/server/pipeline.py`：新增 `_load_te_speed()` / `apply_te_speed(model)`；`run()` 在
+  `pipeline_hooks.apply_pre_sampling_hooks` 之后调用 `model = apply_te_speed(model)`。
+- `.gitignore`：排除 `Comfyui/ComfyUI/custom_nodes/TE-Speed-QwenImage21/`（本地内容不入库）。
+
+### TE.3 实测（冻结 · 详见 `DOC/OPTIMIZATION.md` §1.7）
+
+- 1K（1024×640）：端到端 **+12.3%**，MAD 2.15，PSNR 27.64 dB，SSIM 0.9865；
+- 2K（2048×1280）：端到端 **+15.6%**，MAD 0.80，PSNR 38.53 dB，SSIM 0.9957；
+- 均 **< 30% 门槛** → **默认关**；显存 peak 相同、无 OOM、连续 3 次稳定。
+
+### TE.4 验收（无 GPU / C# 无改动）
+
+- `py_compile`（config / pipeline）通过；C# `dotnet build` **0/0**；
+- 默认关：`apply_te_speed` no-op 且 **pyd 未加载**；
+- env 开 + 未部署 / 删目录：跳过且**不致命**；
+- env 开 + 已部署：节点类加载成功（mock 模型 patch 失败被捕获，不致命）；
+- 默认关时编辑路径**无回归**（Python CPU 单测 38/38 通过）。
+
+### TE.5 妥协/挂账清单 · 追加（TE-Speed）
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-019 | TE-Speed 外置加速模块（默认关；可控 / 可删 / 可更新） | 无 LICENSE / 闭源 pyd / Windows x64 绑定 / attention 冲突未验 | 上游加 LICENSE / 加速率提升 / 暴露源码 | 发布前 / 升级 ComfyUI |

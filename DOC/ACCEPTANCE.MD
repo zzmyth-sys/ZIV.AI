@@ -3012,3 +3012,48 @@ B 类登记 Z-007 / Z-008。**无 GPU**（Z29 / Z30）。
 
 1. 在「验收记录」追加“第 8 步（域物理划分 + 沿途解耦）通过，日期：____”（待签）；
 2. 未 push，等提交裁决。
+
+---
+
+## TE-Speed 集成 验收：外置加速模块（默认关 + 保留开关）
+
+**目标**：把 TE-Speed-QwenImage21 作为**外置模块**接入（默认关、env 可控、可删可更新）；加载机制保留，
+`.pyd` 不进发布包。**无 GPU**（A/B 已实测；Z29 / Z30）；**不改 C# / Contracts / IPC**。
+
+### 清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| TE.1 | config 开关 | 查 `config.py` | `TE_SPEED_ENABLED` 默认 `False`（env `ZIV_AI_TE_SPEED` 覆盖）；其余参数照报告默认 | ✅ |
+| TE.2 | 接入点 | 查 `pipeline.py` | `apply_te_speed` 存在；`run()` 在 pre-sampling hooks 后调用 | ✅ |
+| TE.3 | 默认关不加载 | 默认 env 下 `apply_te_speed(mock)` | 原样返回；`te_speed_qwen_image21` 未进 `sys.modules`；类缓存为 `None` | ✅ |
+| TE.4 | 缺失不致命 | env 开 + 节点目录不存在 | 原样返回；不抛异常（记 warning） | ✅ |
+| TE.5 | 删目录不致命 | 重命名节点目录 + env 开 | 原样返回；不抛异常 | ✅ |
+| TE.6 | 已部署可加载 | env 开 + 已部署 + mock 模型 | 节点类加载成功；patch 失败被捕获、不致命 | ✅ |
+| TE.7 | 无回归（无 GPU） | Python CPU 单测 | `test_loras` / `test_models` / `test_mask_feather` / `test_multi_image` / `test_outpaint` 全过 | ✅ 38/38 |
+| TE.8 | py_compile | config / pipeline | 通过 | ✅ |
+| TE.9 | 构建 | `dotnet build -c Release` | **0 错误 0 警告**（C# 无改动） | ✅ |
+| TE.10 | 不入 git | `git check-ignore` | `custom_nodes/TE-Speed-QwenImage21/` 被忽略 | ✅ |
+| TE.11 | Z8 | 查改动文件 | 均 < 600 | ✅ |
+| TE.12 | 无 GPU 负载 | 本轮实施 | 未跑推理 / 未加载模型（Z29 / Z30） | ✅ |
+
+### A/B 实测数据（验收依据，2026-09-25）
+
+| 档位 | A | B | 加速 | MAD | PSNR | SSIM |
+|---|---|---|---|---|---|---|
+| 1K | 9.66 s | 8.48 s | +12.3% | 2.15 | 27.64 dB | 0.9865 |
+| 2K | 44.94 s | 37.91 s | +15.6% | 0.80 | 38.53 dB | 0.9957 |
+
+### 通过标准
+
+- 默认关 / 缺失 / 删目录 / 已部署 四条路径均**不致命**；默认关不加载 pyd；
+- py_compile 通过；C# 构建 0/0；Python CPU 单测 38/38；`.pyd` 不入 git、不进发布包。
+
+### 遗留说明（非阻断）
+
+- **Z-019**：外置模块默认关（无 LICENSE / 闭源 pyd / 平台绑定 / attention 未验）。见 `FROZEN.md`。
+- 未做 UI 开关；未做 L2 数据文件（env 足够）。
+
+### 验收后动作
+
+1. 在「验收记录」追加“TE-Speed 集成 通过，日期：____”（待签）。

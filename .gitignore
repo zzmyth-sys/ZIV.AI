@@ -1,6 +1,9 @@
 # ComfyUI 便携版（几十 GB，不入库）
 Comfyui/
 
+# TE-Speed 外置加速模块（第三方闭源 .pyd；本地自行放置，不入库；见 DOC/OPTIMIZATION.md §1）
+Comfyui/ComfyUI/custom_nodes/TE-Speed-QwenImage21/
+
 # 构建产物
 **/bin/
 **/obj/
@@ -17,6 +20,10 @@ _test_step2/input_test_*.png
 _test_step2/pipe_*
 _test_step2/shm_*
 _test_step2/session.json
+
+# TE-Speed A/B 实测产物（结果 JSON，临时；脚本 te_speed_*.py 保留入库）
+_test_step2/te_speed_*.json
+_test_step2/side1024_te_speed_*.json
 
 # Step 4 验收/诊断图片（大文件，不入库；保留脚本与 *.md/*.txt）
 _test_step2/*.png

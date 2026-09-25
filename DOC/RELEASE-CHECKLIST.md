@@ -34,3 +34,15 @@
   - `SettingsLoader.FindTemplate()` 仍向上找 `settings.ini`，未引用 `settings.ini.template`。
 - **新增参考（7-H）**：project 流程下沉 `App/Flows/ProjectFlowRunner` 的前置条件见
   `DOC/FROZEN.md`「模块边界迁移 · 第 7 步」7D2 段（本文件不改既有 1–4 段）。
+
+## 6. TE-Speed 外置加速模块（2026-09-25，只增）
+
+- **语义**：外置模块，**不 vendor、不进发布包**（第三方闭源 `.pyd`、无 LICENSE，vendor 有法律风险）；
+  默认关，缺失不致命。
+- **保留**：加载机制（`config.TE_SPEED_*` / `pipeline.apply_te_speed`）+ 文档
+  （`DOC/OPTIMIZATION.md` §1.7 的放置 / 开启 / 删除 / 更新说明）。
+- **用户自取**：https://github.com/tl2012tl/TE-Speed-QwenImage21 →
+  放到 `<ComfyUI>/custom_nodes/TE-Speed-QwenImage21/`，设 `ZIV_AI_TE_SPEED=1` 开启。
+- **发布前核查**：确认发布包内**不含** `TE-Speed-QwenImage21/`（其位于 `.gitignore` 的 `Comfyui/` 下，
+  且已在 `.gitignore` 显式排除）。
+- 挂账：**Z-019**（见 `DOC/FROZEN.md`）。
