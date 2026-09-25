@@ -34,10 +34,9 @@ internal partial class CommandJsonContext : JsonSerializerContext
 /// <c>width</c>/<c>height</c> arguments become an explicit
 /// <see cref="ResolutionPolicy"/>. The UI-selected tier applies only when neither
 /// is present. The name <c>/扩图</c> is special-cased (P1) to the crop-tool
-/// outpaint: it requires the current node's outpaint crop and pins the plan to
-/// that crop canvas's native size (Explicit), so nothing is rescaled; it runs
-/// Qwen's reference-conditioned edit with no mask, aligned with the reference
-/// outpainting workflows.
+/// outpaint: it requires the current node's outpaint crop, runs Qwen's
+/// reference-conditioned edit on the blue-padded canvas, and carries no
+/// resolution of its own (the UI-selected tier applies, like every other command).
 /// </summary>
 public sealed partial class CommandParser : ICommandParser
 {
@@ -179,11 +178,10 @@ public sealed partial class CommandParser : ICommandParser
         }
 
         // P1 · /扩图 relocation: the follow-up after a crop-tool outpaint. Keyed by name (never by
-        // handler / tool). Aligned with the reference outpainting workflows: it runs Qwen's
-        // reference-conditioned edit on the padded canvas with NO mask, at the canvas's native
-        // size (Explicit) so nothing is rescaled. The crop gate is the authoritative rule.
+        // handler / tool). It runs Qwen's reference-conditioned edit on the blue-padded canvas
+        // (the crop gate is the authoritative rule) and carries no resolution of its own, so the
+        // UI-selected tier applies like every other command.
         var isOutpaint = string.Equals(command.Name, OutpaintCommandName, StringComparison.Ordinal);
-        ResolutionPolicy? outpaintResolution = null;
         if (isOutpaint)
         {
             var currentNode = session.GetHistory().FirstOrDefault(n => n.NodeId == session.CurrentNodeId);
@@ -192,13 +190,6 @@ public sealed partial class CommandParser : ICommandParser
             {
                 return Error("「/扩图」需先做裁切外扩（当前节点没有外扩裁切）。", warnings);
             }
-
-            outpaintResolution = new ResolutionPolicy
-            {
-                Mode = ResolutionMode.Explicit,
-                Width = Math.Max(1, crop.Width),
-                Height = Math.Max(1, crop.Height),
-            };
         }
 
         if (ValidateImageCount(command, handler, imageCount) is { } countError)
@@ -249,11 +240,11 @@ public sealed partial class CommandParser : ICommandParser
         {
             SourcePrompt = text,
             MainImagePath = mainImage ?? "",
-            // /扩图 runs maskless on the padded canvas (the crop gate above); every other
+            // /扩图 runs maskless on the blue-padded canvas (the crop gate above); every other
             // command keeps the node's hand-drawn mask.
             Mask = isOutpaint ? null : session.GetCurrentMaskSpec(),
             Steps = new[] { step },
-            Resolution = outpaintResolution ?? ResolveResolution(command, effectiveArgs),
+            Resolution = ResolveResolution(command, effectiveArgs),
         };
 
         return new ParseResult

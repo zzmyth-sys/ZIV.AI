@@ -89,8 +89,8 @@ public sealed partial class CommandParser
             Handler = CommandHandler.Edit,
             Params = new List<string>(),
             Tool = "QW21edit",
-            Template = "Extend the image to fill the blank canvas seamlessly and continue the scene; keep the existing image content unchanged.",
-            Description = "填充裁切外扩的灰底区域",
+            Template = "Outpaint the image to fill the entire canvas. Replace all solid blue padded regions with coherent continuation of the scene. Keep the original subject and content unchanged outside the blue areas.",
+            Description = "填充裁切外扩的蓝底区域",
         },
         new CommandDefinition
         {

@@ -19,8 +19,8 @@ public partial class CropOverlay : UserControl
 {
     private static readonly IBrush MaskBrush = new SolidColorBrush(Color.FromArgb(0x99, 0x00, 0x00, 0x00));
 
-    /// <summary>Outpaint canvas preview — matches the cropper's grey 0.5 fill (Step 9C.4-B).</summary>
-    private static readonly IBrush GrayBrush = new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0x80));
+    /// <summary>Outpaint canvas preview — matches the cropper's solid blue fill.</summary>
+    private static readonly IBrush PadBrush = new SolidColorBrush(Color.FromRgb(0x00, 0x00, 0xFF));
 
     private static readonly IPen BorderPen = new Pen(Brushes.White, 2);
     private static readonly IBrush HandleFill = Brushes.White;
@@ -81,7 +81,7 @@ public partial class CropOverlay : UserControl
                      imageLeft, imageTop, imageRight - imageLeft, imageBottom - imageTop,
                      Bounds.Width, Bounds.Height))
         {
-            context.FillRectangle(GrayBrush, new Rect(band.X, band.Y, band.Width, band.Height));
+            context.FillRectangle(PadBrush, new Rect(band.X, band.Y, band.Width, band.Height));
         }
 
         foreach (var band in CropOverlayGeometry.DarkenBands(

@@ -118,7 +118,7 @@ public class ImageCropperTests
     }
 
     [Fact]
-    public async Task CropAsync_Expands_Canvas_With_Gray_Fill()
+    public async Task CropAsync_Expands_Canvas_With_Blue_Fill()
     {
         var dir = NewTempDir();
         var session = NewSessionId();
@@ -134,12 +134,12 @@ public class ImageCropperTests
             Assert.Equal(60, decoded.Width);
             Assert.Equal(40, decoded.Height);
 
-            // Grey 0.5 fill outside the source (D1).
-            var gray = new SKColor(128, 128, 128);
-            Assert.Equal(gray, decoded.GetPixel(0, 0));
-            Assert.Equal(gray, decoded.GetPixel(59, 39));
-            Assert.Equal(gray, decoded.GetPixel(0, 39));
-            Assert.Equal(gray, decoded.GetPixel(59, 0));
+            // Solid blue fill outside the source (Lazy Qwen2.1 outpaint padding).
+            var blue = new SKColor(0, 0, 255);
+            Assert.Equal(blue, decoded.GetPixel(0, 0));
+            Assert.Equal(blue, decoded.GetPixel(59, 39));
+            Assert.Equal(blue, decoded.GetPixel(0, 39));
+            Assert.Equal(blue, decoded.GetPixel(59, 0));
 
             // Source pixels at the (-x, -y) offset.
             Assert.Equal(SKColors.CornflowerBlue, decoded.GetPixel(10, 5));
@@ -195,7 +195,7 @@ public class ImageCropperTests
             Assert.Equal(20, decoded.Height);
 
             // Top half is opaque source; the transparent source region must stay transparent
-            // (Src blend), not become the grey fill.
+            // (Src blend), not become the blue fill.
             Assert.Equal(SKColors.CornflowerBlue, decoded.GetPixel(5, 5));
             Assert.Equal(0, decoded.GetPixel(5, 18).Alpha);
         }

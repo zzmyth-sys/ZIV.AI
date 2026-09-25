@@ -162,7 +162,7 @@ public sealed class ImageViewModel
     }
 
     /// <summary>
-    /// Fits the image then scales by <paramref name="factor"/> (e.g. 0.65 to leave room for
+    /// Fits the image then scales by <paramref name="factor"/> (e.g. 0.5 to leave room for
     /// outpaint dragging), centered. Used by the crop tool (Step 9C.4-B); clears the pending
     /// fit so a later resize does not snap back to full fit.
     /// </summary>

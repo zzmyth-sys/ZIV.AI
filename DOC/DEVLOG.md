@@ -5608,3 +5608,56 @@ Python 链式叠加。**无 GPU**（Z29 / Z30）。
 
 - 未改 `python/server` 业务逻辑（仅 `_resize_mask` 模式）；未改 `ipc-protocol.md`；无新 NuGet；改动文件 < 600（Z8）。
 - `FROZEN.md` 追加「P1 收尾修正」+ Z-029；`INTERFACES.md` §13；`ACCEPTANCE.MD` 追加 P1 收尾验收段。
+
+---
+
+## [P1 收尾修正 2] - 2026-09-26：外扩上限放宽 + `/扩图` 改「蓝底 + 无掩膜 + 工作流提示词」
+
+### 目标
+
+用户真机验收反馈两点：**(1)** 裁切外扩范围太小（被 `MaxExpandFactor=2.0` 顶住）；
+**(2)** `/扩图` 输出人物被缩小。本轮放宽外扩上限；`/扩图` 对照用户提供的 ComfyUI 工作流
+（`ComfyUI_Lazybuxuexi` 的 `LazyQwenGenerate`）复现后，改为「**蓝色填充 + 无掩膜 + 工作流提示词**」，
+分辨率不锁、跟随 UI。**无 GPU**（Z29 / Z30）。
+
+### 证据（真机用例 `00ebf2dc…`；红衣 bbox 宽，裁切画布 = 1006）
+
+| 变体 | 主体 | 接缝峰值 | 结论 |
+|---|---|---|---|
+| A 灰 + 英文 + 无掩膜 | 803 (0.80×) | 2.3 | 缩人 |
+| B 灰 + 软掩膜 | 1008 (1.00×) | 23 | 接缝 |
+| I 工作流原样（蓝 + 缩放塞入 + 无掩膜） | 632 (0.63×) | 2.7 | 无缝但缩人 |
+| **J 蓝 + 1:1 + 无掩膜 + 工作流提示词** | **1016 (1.01×)** | **2.7** | ✅ |
+| M 灰 + 无掩膜 + "grey" 提示词 | 1553 (1.54×) | 2.5 | 灰不行 |
+| K 参考图 1K | 1521 (1.51×) | 2.7 | 拉伸 |
+| L 输出 1K | 453 (0.95×) | — | 快、近似 1:1 |
+
+- 根因：**灰底**被模型当内容 → 重构图；**掩膜**让模型孤立 inpaint → 接缝。工作流靠**蓝色** +
+  提示词 + 无掩膜解决。对比脚本 `_test_step2/outpaint_abc.py`（A–M）。
+
+### 做了什么
+
+- `CropState.cs`：`MaxExpandFactor` 2.0 → **3.0**；`MaxPixelCount` 16 MP → **36 MP**。
+- `ImagePreview.Crop.cs`：`CropViewMarginFactor` 0.65 → **0.5**；`ImageViewModel.FitWithMargin` 注释同步。
+- `ImageCropper.cs`：`CanvasFill` 灰 `(128,128,128)` → **蓝 `(0,0,255)`**；`CropOverlay` 预览 `PadBrush` 同步。
+- `CommandParser`：`/扩图` 去掉掩膜（`plan.Mask = null`）、去掉 `Explicit` 原生尺寸锁定（分辨率跟随 UI）；
+  回退 `IImagingService` / async；`AppContext` 构造顺序恢复。`OutpaintMask.cs` 保留（实验用）。
+- `Template/commands.json` + `CommandParser.BuiltIn.cs`：`/扩图` 模板改为工作流内置扩图提示词。
+- 测试：`CommandOutpaintTests` 四条（掩膜 null / 分辨率跟随注入 / gate / 参数报错）；
+  `ImageCropperTests` 灰→蓝；`CropStateTests` 2×→3×、4000→6000。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 → **521 通过 / 0 失败**。
+
+### 遗留
+
+- **Z-029**：A / B 均不采用；改为「蓝底 + 无掩膜 + 工作流提示词」。`OutpaintMask` 保留供实验。
+- 真机复验：外扩是否够自由（0.5 fit / 3×/36MP）、`/扩图` 原图区是否 1:1、蓝底过渡是否自然、
+  分辨率跟随 UI 的档位选择。
+
+### 备注
+
+- 未改 Python / IPC；未改 `ipc-protocol.md`；无新 NuGet；改动文件 < 600（Z8）。
+- `FROZEN.md` 追加「P1 收尾修正 2」；`INTERFACES.md` §14（更正 §13）；`ACCEPTANCE.MD` 追加验收段。

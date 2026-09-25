@@ -31,6 +31,7 @@ import multi_image
 import outpaint
 import pipeline_hooks
 import preview as preview_module
+import vram_probe
 from resolution import (
     _normalize_payload_resolution,
     _resolution_specs,
@@ -269,12 +270,14 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
                 on_preview(step, total, jpeg)
 
     noise = comfy.sample.prepare_noise(latent_image, seed)
+    vram_probe.stage("sample BEG (first call loads weights)")
     samples = sample(
         model, positive, negative, latent_image, noise, steps, denoise, mask, seed, callback,
         sampler_name=sampler.get("sampler_name"),
         scheduler=sampler.get("scheduler"),
         cfg=float(sampler.get("cfg", 1.0)),
     )
+    vram_probe.stage("sample END")
 
     # A cancel that lands after the last sampling step still aborts here; the
     # VAE decode itself is not interruptible (it is short, see contract §3.3).
@@ -283,6 +286,7 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
     mm.throw_exception_if_processing_interrupted()
     _emit(on_progress, steps, steps, 1.0, "vae_decode", "vae_decode")
     decoded = vae_decode(vae, samples)
+    vram_probe.stage("vae_decode END")
     image, height, width = to_pil(decoded[0])
 
     save_png(image, output_path)

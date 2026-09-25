@@ -45,11 +45,11 @@ public sealed class CropState
     /// <summary>Fraction of the image used by the default (centered) rectangle.</summary>
     public const double DefaultFraction = 0.75;
 
-    /// <summary>Largest output edge, as a multiple of the corresponding image edge (D2).</summary>
-    public const double MaxExpandFactor = 2.0;
+    /// <summary>Largest output edge, as a multiple of the corresponding image edge (D2 · relaxed).</summary>
+    public const double MaxExpandFactor = 3.0;
 
-    /// <summary>Largest output area, in pixels (D2) — bounds an outpaint canvas allocation.</summary>
-    public const double MaxPixelCount = 16_000_000.0;
+    /// <summary>Largest output area, in pixels (D2 · relaxed) — bounds an outpaint canvas allocation.</summary>
+    public const double MaxPixelCount = 36_000_000.0;
 
     /// <summary>Absorbs floating-point noise when testing whether a rect leaves the image.</summary>
     private const double BoundaryEpsilon = 1e-6;

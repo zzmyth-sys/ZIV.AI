@@ -15,6 +15,7 @@ import sys
 import time
 
 import config
+import vram_probe
 
 _LOG = logging.getLogger("zivai.server")
 
@@ -51,6 +52,7 @@ def prepare_environment():
             pass
     _apply_runtime_defaults()
     _enable_dynamic_vram()
+    vram_probe.install()
     _environment_ready = True
 
 
@@ -151,7 +153,9 @@ def load_dit(path=None, on_loaded=None):
 
     path = path or config.DIT_MODEL_PATH
     start = time.time()
+    vram_probe.stage("load_dit BEG")
     model = comfy.sd.load_diffusion_model(path)
+    vram_probe.stage("load_dit END")
     elapsed = time.time() - start
     _notify(on_loaded, "dit", elapsed)
     return model, elapsed
@@ -164,7 +168,9 @@ def load_text_encoder(path=None, on_loaded=None):
 
     path = path or config.TEXT_ENCODER_PATH
     start = time.time()
+    vram_probe.stage("load_te BEG")
     clip = comfy.sd.load_clip([path], clip_type=comfy.sd.CLIPType.QWEN_IMAGE)
+    vram_probe.stage("load_te END")
     elapsed = time.time() - start
     _notify(on_loaded, "te", elapsed)
     return clip, elapsed
@@ -178,8 +184,10 @@ def load_vae(path=None, on_loaded=None):
 
     path = path or config.VAE_PATH
     start = time.time()
+    vram_probe.stage("load_vae BEG")
     state_dict = comfy.utils.load_torch_file(path)
     vae = comfy.sd.VAE(state_dict)
+    vram_probe.stage("load_vae END")
     elapsed = time.time() - start
     _notify(on_loaded, "vae", elapsed)
     return vae, elapsed

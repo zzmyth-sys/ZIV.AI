@@ -185,3 +185,21 @@
 - `CommandDefinition.FixedResolution`（P1a）保留（`/全景` 用）。
 - `OutpaintMask`（`ZivAiEditor.Agent.Session`）保留，供 B 策略 / 实验。
 - `python/server/pipeline.py::_resize_mask(mask,w,h,mode)`：软掩膜 `bilinear` / 二值 `nearest`。
+
+## 14. 追加/更正说明（P1 收尾修正 2 · 外扩放宽 + `/扩图` 蓝底无掩膜）
+
+> 本节为**追加**（只增不改）；**更正 §13** 中「/扩图 无掩膜 + 原生尺寸」与「灰底填充」。
+
+- **外扩数值放宽**（9C.4-B.2 / D2 / D3）：`CropState.MaxExpandFactor` 2.0 → **3.0**；
+  `MaxPixelCount` 16 MP → **36 MP**；`ImagePreview.Crop.CropViewMarginFactor` 0.65 → **0.5**。
+  钳制算法与 D1 / D4 / D5 不变。
+- **外扩填色**：`ImageCropper.CanvasFill` 灰 `(128,128,128)` → **蓝 `(0,0,255)`**（对齐 Lazy 工作流
+  `_pad_outpaint_blue`）；`CropOverlay` 预览色同步为蓝。
+- `/扩图`（`CommandParser`，按名称）：**无掩膜**（`plan.Mask = null`）+ **分辨率跟随 UI**
+  （不再自带 `Explicit{crop.W,crop.H}`，`ApplyResolution` 注入 UI 档位）。非 `/扩图` 命令仍用节点手绘掩膜与 UI 档位。
+- `CommandParser` ctor 恢复 `(string commandsJsonPath = ...)`；`ParseSlashCommand` 恢复同步（无 await）；
+  去掉 `IImagingService` 注入。`AppContext` 构造顺序恢复（… → `BuildAgent` → … → `BuildImaging`）。
+- `/扩图` 模板（`Template/commands.json` + `CommandParser.BuiltIn.cs`）：工作流内置扩图提示词
+  「…Replace all solid blue padded regions…outside the blue areas.」。
+- `OutpaintMask`（`ZivAiEditor.Agent.Session`）保留供实验，产品不再使用。
+- **Z-029**：A / B 均不采用。

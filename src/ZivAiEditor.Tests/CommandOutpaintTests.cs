@@ -7,9 +7,10 @@ using Xunit;
 namespace ZivAiEditor.Tests;
 
 /// <summary>
-/// P1 · <c>/扩图</c> (reference-aligned): the parser's name-based outpaint path requires the
-/// current node's crop-tool outpaint crop, runs maskless on the padded canvas, and pins the
-/// plan to the crop canvas's native size (Explicit) so nothing is rescaled. Pure parser; no GPU.
+/// P1 · <c>/扩图</c>: the parser's name-based outpaint path requires the current node's
+/// crop-tool outpaint crop, runs maskless on the (blue-padded) canvas, and carries no
+/// resolution of its own — the UI-selected tier applies like every other command.
+/// Pure parser; no GPU.
 /// </summary>
 public class CommandOutpaintTests
 {
@@ -23,10 +24,8 @@ public class CommandOutpaintTests
         return session;
     }
 
-    [Fact]
-    public async Task Outpaint_With_Crop_Succeeds_Maskless_At_Canvas_Size()
+    private static EditSession SessionWithOutpaintCrop()
     {
-        var parser = ParserWithoutFile();
         var session = SessionWithImage();
         var node = session.GetHistory()[0];
         session.SetNodeCrop(node.NodeId, new CropSpec
@@ -34,42 +33,38 @@ public class CommandOutpaintTests
             X = -50, Y = -50, Width = 300, Height = 200,
             SourceWidth = 200, SourceHeight = 160,
         });
+        return session;
+    }
 
-        var result = await parser.ParseAsync("/扩图", session);
+    [Fact]
+    public async Task Outpaint_With_Crop_Succeeds_Maskless_Without_Owning_Resolution()
+    {
+        var parser = ParserWithoutFile();
+
+        var result = await parser.ParseAsync("/扩图", SessionWithOutpaintCrop());
 
         Assert.True(result.Success);
         Assert.Equal("/扩图", result.MatchedCommand);
         var plan = result.Plan!;
-        Assert.Null(plan.Mask); // reference-aligned: no diffusion mask
-        var resolution = Assert.IsType<ResolutionPolicy>(plan.Resolution);
-        Assert.Equal(ResolutionMode.Explicit, resolution.Mode); // native canvas size, not the UI tier
-        Assert.Equal(300, resolution.Width);
-        Assert.Equal(200, resolution.Height);
+        Assert.Null(plan.Mask); // reference-conditioned: no diffusion mask
+        Assert.Null(plan.Resolution); // the UI-selected tier applies (parser owns none)
         var step = Assert.Single(plan.Steps);
         Assert.Equal("QW21edit", step.ToolName);
-        Assert.Contains("Extend the image", step.Parameters["prompt"]);
+        Assert.Contains("Outpaint the image", step.Parameters["prompt"]);
     }
 
     [Fact]
-    public async Task Outpaint_Pins_Canvas_Size_Over_Injected_Tier()
+    public async Task Outpaint_Follows_The_Injected_Ui_Resolution()
     {
         var parser = ParserWithoutFile();
-        var session = SessionWithImage();
-        var node = session.GetHistory()[0];
-        session.SetNodeCrop(node.NodeId, new CropSpec
-        {
-            X = 0, Y = -100, Width = 400, Height = 500,
-            SourceWidth = 400, SourceHeight = 400,
-        });
         var injected = new ResolutionPolicy { Mode = ResolutionMode.Side, Side = 1024 };
 
-        var result = await parser.ParseAsync("/扩图", session, 1, injected);
+        var result = await parser.ParseAsync("/扩图", SessionWithOutpaintCrop(), 1, injected);
 
         Assert.True(result.Success);
         var resolution = Assert.IsType<ResolutionPolicy>(result.Plan!.Resolution);
-        Assert.Equal(ResolutionMode.Explicit, resolution.Mode);
-        Assert.Equal(400, resolution.Width);
-        Assert.Equal(500, resolution.Height);
+        Assert.Equal(ResolutionMode.Side, resolution.Mode);
+        Assert.Equal(1024, resolution.Side);
     }
 
     [Fact]

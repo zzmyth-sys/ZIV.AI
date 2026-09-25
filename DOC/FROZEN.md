@@ -4543,3 +4543,65 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
 - 非 GPU 全量 **521 通过 / 0 失败**（`CommandOutpaintTests` 3 → 4：新增 `Outpaint_Pins_Canvas_Size_Over_Injected_Tier`）。
 - Python `py_compile`（`pipeline.py` / `outpaint_ab.py`）通过。
+
+---
+
+## P1 收尾修正 2：外扩上限放宽 + `/扩图` 改「蓝底 + 无掩膜 + 工作流提示词」（日期：2026-09-26）
+
+> **追加（只增不改）**。用户真机验收反馈：**(1)** 裁切外扩范围太小（被上限顶住）；
+> **(2)** `/扩图` 输出人物被缩小。先试过 A（无掩膜 / 灰底）会缩人、B（掩膜）会接缝，都不对。
+> 对照用户提供的 ComfyUI 工作流（`ComfyUI_Lazybuxuexi` 的 `LazyQwenGenerate`）复现后确认：
+> 正解 = **蓝色填充** + **无掩膜** + 工作流那句提示词；分辨率**不锁**，跟随 UI 档位。**无 GPU**（Z29 / Z30）。
+
+### P1-收尾2.1 外扩上限放宽（9C.4-B.2 / D2 / D3 数值）
+
+| 常量 | 原值 | 新值 | 位置 |
+|---|---|---|---|
+| `CropViewMarginFactor` | 0.65 | **0.5** | `ImagePreview.Crop.cs`（进入裁切缩到 fit×0.5，灰边更大） |
+| `MaxExpandFactor` | 2.0 | **3.0** | `CropState.cs`（输出边长 ≤ 3× 原图对应边） |
+| `MaxPixelCount` | 16 MP | **36 MP** | `CropState.cs`（外扩总像素上限，仅外扩生效） |
+
+- 钳制算法（边上限 + 面积按比例缩 + ≥1px 重叠，`ClampToLimits`）与 D1 / D4 / D5 **不变**，仅放宽数值。
+- 真机触发：用例源图 1080×2340，外扩画布宽被顶到 2160 = **2×1080**（`MaxExpandFactor` 精确命中）。
+
+### P1-收尾2.2 `/扩图` 最终行为（取代 P1-收尾.1 的「灰底 + 原生尺寸」）
+
+- **填色**：`ImageCropper.CanvasFill` 灰 `(128,128,128)` → **蓝 `(0,0,255)`**；`CropOverlay` 预览同步
+  （`PadBrush`），对齐工作流 `_pad_outpaint_blue`。
+- **无掩膜**：`plan.Mask = null`（回到 P1-收尾.1；不再生成 `OutpaintMask`）。
+- **提示词**：`Template/commands.json` + `CommandParser.BuiltIn.cs` 的 `/扩图` 模板改为工作流内置提示词
+  「Outpaint the image to fill the entire canvas. Replace all solid blue padded regions with coherent
+  continuation of the scene. Keep the original subject and content unchanged outside the blue areas.」。
+- **分辨率跟随 UI**：移除 P1-收尾.1 的 `Explicit{crop.W,crop.H}` 锁定；`/扩图` 不再自带分辨率，
+  `ApplyResolution` 注入 UI 档位（与其它命令一致）。
+- **回退**：`CommandParser` 去掉 `IImagingService` / async / 掩膜；`AppContext` 构造顺序恢复
+  （backend → tools → agent → llm → persistence → imaging）。`OutpaintMask.cs` 保留（实验用）。
+
+### P1-收尾2.3 根因（真机用例 `00ebf2dc…`；红衣 bbox 宽，裁切画布 = 1006）
+
+| 变体 | 主体 | 接缝峰值 | 结论 |
+|---|---|---|---|
+| A 灰 + 英文 + 无掩膜 | 803 (0.80×) | 2.3 | 缩人 |
+| B 灰 + 软掩膜 | 1008 (1.00×) | 23 | 接缝 |
+| I 工作流原样（蓝 + **缩放塞入** + 无掩膜） | 632 (0.63×) | 2.7 | 无缝但缩人 |
+| **J 蓝 + 1:1 放置 + 无掩膜 + 工作流提示词** | **1016 (1.01×)** | **2.7** | ✅ 无缝 + 不缩人 |
+| M 灰 + 无掩膜 + "grey" 提示词 | 1553 (1.54×) | 2.5 | 灰不行（被放大） |
+| K 参考图按 1K 重采样 | 1521 (1.51×) | 2.7 | size shift 拉伸 |
+| L 输出 1K（最大边 1024） | 453 (0.95×) | — | 快、近似 1:1 |
+
+- 根因：**灰底**被模型当成内容 → 重构图；**掩膜**让模型只在灰区孤立 inpaint → 接缝。
+  工作流靠**蓝色**（明确的「待补」信号色）+ 提示词 + **无掩膜**解决。
+- 对比脚本（真机跑）：`_test_step2/outpaint_abc.py`（A–M 变体）。
+
+### P1-收尾2.4 Z-029 收敛
+
+| 编号 | 原挂账 | 处置 |
+|---|---|---|
+| Z-029 | `/扩图` 掩膜策略未定（A / B） | **两者都不采用**：改用「蓝底 + 无掩膜 + 工作流提示词」；`OutpaintMask` 保留供实验 |
+
+### P1-收尾2.5 验收（无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 **521 通过 / 0 失败**（`CommandOutpaintTests` 四条：`plan.Mask == null`、分辨率跟随注入、
+  crop gate、参数报错）。
+- 未启动 Python 推理 / 未加载模型（Z29 / Z30）；`/扩图` 分辨率跟随 UI，不再固定原生尺寸。

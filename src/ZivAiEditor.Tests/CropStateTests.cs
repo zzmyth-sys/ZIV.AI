@@ -71,14 +71,14 @@ public class CropStateTests
     {
         var state = NewState();
 
-        // Far beyond the image: limited to 2x each edge (D2).
+        // Far beyond the image: limited to 3x each edge (D2 · relaxed).
         state.SetRect(-99999, -99999, 99999, 99999);
 
         Assert.True(state.HasRect);
         Assert.Equal(-W, state.X);
         Assert.Equal(-H, state.Y);
-        Assert.Equal(W * 2, state.Width);
-        Assert.Equal(H * 2, state.Height);
+        Assert.Equal(W * 3, state.Width);
+        Assert.Equal(H * 3, state.Height);
     }
 
     [Fact]
@@ -88,11 +88,11 @@ public class CropStateTests
         state.SetImageBounds(4000, 4000);
         state.Enter();
 
-        // 8000x8000 = 64 MP > 16 MP cap -> scaled by 0.5.
+        // 8000x8000 = 64 MP > 36 MP cap -> scaled by 0.75.
         state.SetRect(0, 0, 8000, 8000);
 
-        Assert.Equal(4000, state.Width);
-        Assert.Equal(4000, state.Height);
+        Assert.Equal(6000, state.Width);
+        Assert.Equal(6000, state.Height);
     }
 
     [Fact]

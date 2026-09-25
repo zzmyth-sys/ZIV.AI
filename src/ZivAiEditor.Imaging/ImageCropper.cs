@@ -13,8 +13,8 @@ namespace ZivAiEditor.Imaging;
 /// PNG (Step 9C.6-B2 / 9C.4-B). It reuses the shared ZIV.Imaging <see cref="SkiaCodec"/> for
 /// decode and SkiaSharp directly for the composite (ZIV.Imaging exposes no crop / canvas
 /// primitive). The rectangle is in source-image coordinates; a negative X / Y means the
-/// source is pasted inside a larger canvas whose remaining area is filled with grey 0.5
-/// (matching <c>python/server/outpaint.py</c>). The source file is never modified (Z24).
+/// source is pasted inside a larger canvas whose remaining area is filled with solid blue
+/// (the Lazy Qwen2.1 workflow's outpaint padding). The source file is never modified (Z24).
 ///
 /// <para><b>Temporary area</b> (Z14): the crop is an intermediate product, so it is
 /// written under the <b>program directory</b> at
@@ -43,8 +43,11 @@ public static class ImageCropper
     public static string ResolveCropPath(string sessionId, string nodeId)
         => Path.Combine(CropsRootDirectory, sessionId, nodeId + PngExtension);
 
-    /// <summary>Grey 0.5 outpaint fill — matches <c>outpaint.CANVAS_FILL</c> (D1).</summary>
-    private static readonly SKColor CanvasFill = new(128, 128, 128);
+    /// <summary>
+    /// Outpaint fill — solid blue, matching the Lazy Qwen2.1 workflow's
+    /// <c>_pad_outpaint_blue</c> (its outpaint prompt targets "solid blue padded regions").
+    /// </summary>
+    private static readonly SKColor CanvasFill = new(0, 0, 255);
 
     /// <summary>
     /// Crops / outpaints <paramref name="sourceImagePath"/> to the given pixel rectangle and

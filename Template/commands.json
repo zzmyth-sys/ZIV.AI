@@ -67,8 +67,8 @@
       "handler": "Edit",
       "params": [],
       "tool": "QW21edit",
-      "template": "Extend the image to fill the blank canvas seamlessly and continue the scene; keep the existing image content unchanged.",
-      "description": "填充裁切外扩的灰底区域"
+      "template": "Outpaint the image to fill the entire canvas. Replace all solid blue padded regions with coherent continuation of the scene. Keep the original subject and content unchanged outside the blue areas.",
+      "description": "填充裁切外扩的蓝底区域"
     },
     {
       "name": "/全景",

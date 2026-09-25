@@ -41,8 +41,8 @@ public partial class ImagePreview
 {
     private const double CropHandlePaddingPx = 8.0;
 
-    /// <summary>Fit factor applied while cropping so the gray margin is reachable (D3).</summary>
-    private const double CropViewMarginFactor = 0.65;
+    /// <summary>Fit factor applied while cropping so the gray margin is reachable (D3 · relaxed).</summary>
+    private const double CropViewMarginFactor = 0.5;
 
     private CropState? _crop;
     private CropOverlay? _cropOverlay;
@@ -517,7 +517,7 @@ public partial class ImagePreview
         RestoreOrDefaultCrop();
         _cropPointerDown = false;
 
-        // Shrink to 65% of fit so the gray margin around the image is reachable by dragging.
+        // Shrink to half of fit so the gray margin around the image is reachable by dragging.
         _model.FitWithMargin(CropViewMarginFactor);
         ApplyModel();
         _cropOverlay?.InvalidateVisual();
