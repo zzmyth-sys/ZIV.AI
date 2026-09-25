@@ -1,0 +1,27 @@
+{
+  "steps": 30,
+  "seed": 42,
+  "denoise": 1.0,
+  "runs": [
+    {
+      "ok": true,
+      "output": "D:\\devlop\\ZIV.AI\\_test_step2\\wd_ab3b_A.png",
+      "width": 1024,
+      "height": 1024,
+      "wall_s": 24.14,
+      "pipeline_ms": 24113,
+      "variant": "A",
+      "prompt": "Make the girl in <image1> wear the clothes from <image2> and place her in the scene from <image3>, waving and smiling at the camera. Blend the lighting and shadows naturally between the person and the background."
+    },
+    {
+      "ok": true,
+      "output": "D:\\devlop\\ZIV.AI\\_test_step2\\wd_ab3b_B.png",
+      "width": 1024,
+      "height": 1024,
+      "wall_s": 24.76,
+      "pipeline_ms": 24723,
+      "variant": "B",
+      "prompt": "Use <image1> as 1girl, solo, long hair, looking at viewer, smile, black hair, brown eyes, upper body, clothes writing, asian. Dress her in <image2>'s long sleeves, chinese clothes, red lips, hanfu. Place her into <image3>'s outdoors, tree, night, building, scenery, city, lamppost, real world location, tokyo (city). She is waving and smiling at the camera. Blend the lighting and shadows naturally between the person and the background."
+    }
+  ]
+}

@@ -1,0 +1,106 @@
+{
+  "steps": 30,
+  "seed": 42,
+  "denoise": 1.0,
+  "runs": [
+    {
+      "ok": true,
+      "output": "D:\\devlop\\ZIV.AI\\_test_step2\\wd_ab_batch1_A1.png",
+      "width": 576,
+      "height": 1024,
+      "wall_s": 8.87,
+      "pipeline_ms": 8868,
+      "batch": "batch1",
+      "variant": "A1",
+      "prompt": "1girl, solo, looking at viewer, brown hair, black hair, long sleeves, sitting, brown eyes, outdoors, shoes, day, striped clothes, sweater, tree, lips, grass, sneakers, nature, striped shirt, realistic, photorealistic. Replace the background with a classical Chinese garden with white walls and dark tiled roofs."
+    },
+    {
+      "ok": true,
+      "output": "D:\\devlop\\ZIV.AI\\_test_step2\\wd_ab_batch1_A2.png",
+      "width": 576,
+      "height": 1024,
+      "wall_s": 8.9,
+      "pipeline_ms": 8895,
+      "batch": "batch1",
+      "variant": "A2",
+      "prompt": "1girl, solo, looking at viewer, brown hair, black hair, long sleeves, sitting, brown eyes, outdoors, shoes, day, striped clothes, sweater, tree, lips, grass, sneakers, nature, striped shirt. Replace the background with a classical Chinese garden with white walls and dark tiled roofs."
+    },
+    {
+      "ok": true,
+      "output": "D:\\devlop\\ZIV.AI\\_test_step2\\wd_ab_batch1_B.png",
+      "width": 576,
+      "height": 1024,
+      "wall_s": 8.92,
+      "pipeline_ms": 8915,
+      "batch": "batch1",
+      "variant": "B",
+      "prompt": "A solo 1girl sits outdoors on a day, looking directly at the viewer with brown eyes and lips. Her brown and black long hair frames her face. She wears long sleeves and a striped shirt, with striped clothes over her. Her feet are in sneakers. Behind her, the grassy area with a tree is replaced by a classical Chinese garden featuring white walls and dark tiled roofs."
+    },
+    {
+      "ok": true,
+      "output": "D:\\devlop\\ZIV.AI\\_test_step2\\wd_ab_batch1_C.png",
+      "width": 576,
+      "height": 1024,
+      "wall_s": 8.88,
+      "pipeline_ms": 8881,
+      "batch": "batch1",
+      "variant": "C",
+      "prompt": "Replace the background with a classical Chinese garden with white walls and dark tiled roofs."
+    },
+    {
+      "ok": true,
+      "output": "D:\\devlop\\ZIV.AI\\_test_step2\\wd_ab_batch1b_A1.png",
+      "width": 672,
+      "height": 1024,
+      "wall_s": 10.14,
+      "pipeline_ms": 10140,
+      "batch": "batch1b",
+      "variant": "A1",
+      "prompt": "1girl, solo, looking at viewer, smile, shirt, skirt, brown hair, holding, jewelry, standing, white shirt, full body, short sleeves, earrings, black skirt, black footwear, high heels, shadow, long skirt, realistic. Replace the background with a classical Chinese garden with white walls and dark tiled roofs."
+    },
+    {
+      "ok": true,
+      "output": "D:\\devlop\\ZIV.AI\\_test_step2\\wd_ab_batch1b_A2.png",
+      "width": 672,
+      "height": 1024,
+      "wall_s": 10.1,
+      "pipeline_ms": 10095,
+      "batch": "batch1b",
+      "variant": "A2",
+      "prompt": "1girl, solo, looking at viewer, smile, shirt, skirt, brown hair, holding, jewelry, standing, white shirt, full body, short sleeves, earrings, black skirt, black footwear, high heels, shadow, long skirt. Replace the background with a classical Chinese garden with white walls and dark tiled roofs."
+    },
+    {
+      "ok": true,
+      "output": "D:\\devlop\\ZIV.AI\\_test_step2\\wd_ab_batch1b_B.png",
+      "width": 672,
+      "height": 1024,
+      "wall_s": 10.3,
+      "pipeline_ms": 10296,
+      "batch": "batch1b",
+      "variant": "B",
+      "prompt": "A solitary young woman stands in a classical Chinese garden, her brown hair flowing and a warm smile directed at the viewer. She wears a crisp white short-sleeved shirt and a flowing black long skirt, her black high heels visible as she stands with a poised, elegant posture. She holds a piece of delicate jewelry, her earrings catching the soft light. The garden behind her features pristine white walls and dark tiled roofs, with shadows cast across the scene."
+    },
+    {
+      "ok": true,
+      "output": "D:\\devlop\\ZIV.AI\\_test_step2\\wd_ab_batch2_A1.png",
+      "width": 576,
+      "height": 1024,
+      "wall_s": 11.4,
+      "pipeline_ms": 11402,
+      "batch": "batch2",
+      "variant": "A1",
+      "prompt": "1girl, solo, looking at viewer, brown hair, black hair, long sleeves, sitting, brown eyes, outdoors, shoes, day, striped clothes, sweater, tree, lips, grass, sneakers, nature, striped shirt, realistic, photorealistic. Keep the person from <image1> unchanged. Use the scene from <image2> as the new background."
+    },
+    {
+      "ok": true,
+      "output": "D:\\devlop\\ZIV.AI\\_test_step2\\wd_ab_batch2_B.png",
+      "width": 576,
+      "height": 1024,
+      "wall_s": 11.35,
+      "pipeline_ms": 11351,
+      "batch": "batch2",
+      "variant": "B",
+      "prompt": "A solo girl sits outdoors in the day, her long brown and black hair framing brown eyes as she looks directly at the viewer. She wears striped clothes with a sweater and long sleeves, and has sneakers on her feet. The background is now the scene from <image2>."
+    }
+  ]
+}
