@@ -13,6 +13,7 @@ internal sealed record SubmitPayload(
     double Denoise,
     string? OutputPath,
     LoraOptions? Lora,
+    IReadOnlyList<LoraOptions>? Loras,
     OptimizationOptions? Optimizations,
     ResolutionPayload? Resolution,
     string? Anchor,

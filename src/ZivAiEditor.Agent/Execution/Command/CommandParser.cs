@@ -40,6 +40,9 @@ public sealed class CommandParser : ICommandParser
 
     private const string OutpaintToolName = "QW21outpaint";
 
+    /// <summary>Capability marker returned for <see cref="CommandHandler.Tag"/> (T3.1; T4 executes).</summary>
+    public const string TagCapability = "tag";
+
     /// <summary>Sentinel image count used when the caller does not know the pipeline size.</summary>
     private const int UnknownImageCount = -1;
 
@@ -156,6 +159,32 @@ public sealed class CommandParser : ICommandParser
                 $"Command '{command.Name}' expects {command.Params.Count} argument(s) ({paramList}). Try: {example}");
         }
 
+        // T3.1: route by the effective handler and validate the fields it owns (warn + ignore, never silent).
+        var handler = command.EffectiveHandler;
+        var warnings = new List<string>(ValidateFields(command, handler));
+        if (command.Loras is { Count: > 0 } rawLoras && command.EffectiveLoras.Count < rawLoras.Count)
+        {
+            warnings.Add($"命令 '{command.Name}' 的 loras 含重复 path，已按首次去重（保留首次）。");
+        }
+
+        if (ValidateImageCount(command, handler, imageCount) is { } countError)
+        {
+            return Error(countError, warnings);
+        }
+
+        if (handler == CommandHandler.Tag)
+        {
+            // T3.1: recognized as a capability call, not an EditPlan; execution lands in T4.
+            return new ParseResult
+            {
+                Success = false,
+                MatchedCommand = command.Name,
+                Capability = TagCapability,
+                ErrorMessage = $"打标命令 '{command.Name}' 已识别；实际执行将在后续版本提供。",
+                Warnings = warnings,
+            };
+        }
+
         if (TrySelectTemplate(command, imageCount) is not { } template)
         {
             // A command whose variants lack a "single" template (e.g. /合照) is multi-only:
@@ -167,10 +196,10 @@ public sealed class CommandParser : ICommandParser
         }
 
         var prompt = ApplyTemplate(template, command.Params, effectiveArgs);
-        var mainImage = command.T2i ? "" : session.GetCurrentPipelineImagePath();
+        var mainImage = handler == CommandHandler.T2I ? "" : session.GetCurrentPipelineImagePath();
         if (string.IsNullOrWhiteSpace(mainImage) && string.IsNullOrWhiteSpace(prompt))
         {
-            return Error("No current image and no prompt; cannot build a plan.");
+            return Error("No current image and no prompt; cannot build a plan.", warnings);
         }
 
         var step = new EditStep
@@ -178,8 +207,8 @@ public sealed class CommandParser : ICommandParser
             Order = 1,
             ToolName = command.Tool,
             Parameters = BuildParameters(prompt),
-            // Step 8-1: carry the command's LoRA (data-driven) to the executor / tool.
-            Lora = NormalizeLora(command.Lora),
+            // T3.2: carry the command's LoRAs (multi-slot, de-duplicated) to the executor / tool.
+            Loras = BuildLoras(command.EffectiveLoras),
         };
 
         var plan = new EditPlan
@@ -196,6 +225,7 @@ public sealed class CommandParser : ICommandParser
             Success = true,
             Plan = plan,
             MatchedCommand = command.Name,
+            Warnings = warnings,
         };
     }
 
@@ -251,7 +281,7 @@ public sealed class CommandParser : ICommandParser
             return command.Template;
         }
 
-        var effectiveCount = command.T2i ? 0 : imageCount;
+        var effectiveCount = command.EffectiveHandler == CommandHandler.T2I ? 0 : imageCount;
         var key = effectiveCount < 0
             ? command.DefaultVariant
             : effectiveCount >= 2 ? "multi" : "single";
@@ -315,6 +345,20 @@ public sealed class CommandParser : ICommandParser
         };
     }
 
+    /// <summary>
+    /// Normalizes the effective LoRAs for an edit step (T3.2): drops blank paths and applies the
+    /// Step 8-2 strength defaults; returns <c>null</c> when none remain.
+    /// </summary>
+    private static List<LoraOptions>? BuildLoras(IReadOnlyList<LoraOptions> effective)
+    {
+        var resolved = effective
+            .Select(lora => NormalizeLora(lora))
+            .Where(lora => lora is not null)
+            .Select(lora => lora!)
+            .ToList();
+        return resolved.Count > 0 ? resolved : null;
+    }
+
     private static string ApplyTemplate(
         string template,
         IReadOnlyList<string> paramNames,
@@ -359,8 +403,80 @@ public sealed class CommandParser : ICommandParser
                 : null;
     }
 
-    private static ParseResult Error(string message)
-        => new() { Success = false, ErrorMessage = message };
+    private static ParseResult Error(string message, IReadOnlyList<string>? warnings = null)
+        => new()
+        {
+            Success = false,
+            ErrorMessage = message,
+            Warnings = warnings ?? Array.Empty<string>(),
+        };
+
+    /// <summary>
+    /// T3.1 field-ownership check: a field that does not belong to the command's handler is
+    /// ignored and reported (never silently). One message per offending field.
+    /// </summary>
+    private static IReadOnlyList<string> ValidateFields(CommandDefinition command, CommandHandler handler)
+    {
+        var warnings = new List<string>();
+        if (handler == CommandHandler.Tag)
+        {
+            if (!string.IsNullOrWhiteSpace(command.Template))
+            {
+                warnings.Add($"handler=Tag 不支持 template（已忽略）：'{command.Name}'。");
+            }
+
+            if (command.Variants is { Count: > 0 })
+            {
+                warnings.Add($"handler=Tag 不支持 variants（已忽略）：'{command.Name}'。");
+            }
+
+            if (command.T2i)
+            {
+                warnings.Add($"handler=Tag 不支持 t2i（已忽略）：'{command.Name}'。");
+            }
+
+            if (!string.IsNullOrWhiteSpace(command.Tool))
+            {
+                warnings.Add($"handler=Tag 不支持 tool（已忽略）：'{command.Name}'。");
+            }
+
+            if (command.EffectiveLoras.Count > 0)
+            {
+                warnings.Add($"handler=Tag 不支持 loras（已忽略）：'{command.Name}'。");
+            }
+        }
+        else if (command.T2i && command.Handler != CommandHandler.Edit)
+        {
+            // t2i is the legacy source of T2I; when the handler is given explicitly it is redundant.
+            warnings.Add($"handler={handler} 时 t2i 为冗余字段（已忽略）：'{command.Name}'。");
+        }
+
+        return warnings;
+    }
+
+    /// <summary>
+    /// T3.1 handler input constraints (裁决 2): T2I takes no image; Outpaint / Tag take exactly
+    /// one; Edit takes one or many. An unknown count (<c>-1</c>) is unconstrained. Returns an
+    /// error message, or <c>null</c> when the count is acceptable.
+    /// </summary>
+    private static string? ValidateImageCount(CommandDefinition command, CommandHandler handler, int imageCount)
+    {
+        if (imageCount < 0)
+        {
+            return null;
+        }
+
+        return handler switch
+        {
+            CommandHandler.T2I when imageCount > 0 =>
+                $"命令 '{command.Name}' 为文生图（handler=T2I），不接受输入图（收到 {imageCount} 张）。",
+            CommandHandler.Outpaint when imageCount != 1 =>
+                $"命令 '{command.Name}'（handler=Outpaint）需要恰好 1 张输入图（收到 {imageCount} 张）。",
+            CommandHandler.Tag when imageCount != 1 =>
+                $"打标命令 '{command.Name}'（handler=Tag）需要恰好 1 张输入图（收到 {imageCount} 张）。",
+            _ => null,
+        };
+    }
 
     private static IReadOnlyList<CommandDefinition> LoadCommands(string path)
     {
@@ -384,7 +500,7 @@ public sealed class CommandParser : ICommandParser
         return BuiltInCommands();
     }
 
-    private static IReadOnlyList<CommandDefinition> BuiltInCommands() => new[]
+    internal static IReadOnlyList<CommandDefinition> BuiltInCommands() => new[]
     {
         new CommandDefinition
         {

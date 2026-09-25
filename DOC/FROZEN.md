@@ -4222,3 +4222,221 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 | 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
 |---|---|---|---|---|
 | Z-018 | 切项目时预览窗未同步（预览窗残留旧项目图 / 遮罩工具未退 / 主窗未前移） | —（已由本段收口） | — | **本轮关闭**（2026-09-25） |
+
+---
+
+## WD14 Tagger 集成 L1（Python 侧打标能力）（日期：2026-09-25）
+
+> **只增不改**。以**外置模块**语义接入 WD14 Tagger 的 **L1（Python 侧能力）**：复制节点目录 +
+> `python/server/tagger.py` 复刻推理核心（路线 A，绕开节点对 `PromptServer` / web 的依赖）。
+> **无契约签名变化**；**不改 C# / Contracts / IPC / commands.json**；**无 GPU**（Z29 / Z30，CPU 打标）。
+
+### WD14.1 行为（冻结 · 非契约）
+
+- **外置模块**：节点与 ONNX 模型放 `<ComfyUI>/custom_nodes/comfyui-wd14-tagger/`（源 `C:\AI\ComfyUI_PIC\...`，
+  复制排除 `__pycache__/`、`.github/`）；`Comfyui/` 已被 `.gitignore` 第 1 行整体忽略，**不进发布包**。
+- **依赖**：`python_embeded` 安装 **onnxruntime 1.30.0（CPU）**（py3.13 wheel 存在）；
+  providers 仅 `CPUExecutionProvider`（无 CUDA），**不占 GPU**。
+- **`python/server/tagger.py`**：`tag_image(image_path, model_name=None, threshold=None,
+  character_threshold=None) -> list[str]`；复刻节点 resize / 白底 pad / RGB→BGR / `InferenceSession.run` /
+  csv `general(0)` + `character(4)` 分段阈值过滤；`InferenceSession` 按路径缓存；**失败降级为空列表**
+  （禁用 / 模型缺失 / 推理异常 → warning + `[]`，绝不致命）。
+- **`config.py` 新增 `TAGGER_*`**：`TAGGER_ENABLED`（env `ZIV_AI_TAGGER`，默认 True）、
+  `TAGGER_MODEL_DIR`（默认 `COMFY_ROOT/custom_nodes/comfyui-wd14-tagger/models`）、
+  `TAGGER_MODEL`（`wd-vit-tagger-v3`，写死默认，不读 `pysssss.json`）、`TAGGER_THRESHOLD`（0.35）、
+  `TAGGER_CHARACTER_THRESHOLD`（0.85）。
+
+### WD14.2 验收（无 GPU）
+
+- `py_compile`（tagger / config / test_tagger）→ 通过。
+- **CPU 打标冒烟**（`_test_step2/test_tagger.py`，`user_input.png`）→ 41 标签（如 `1girl` / `solo` /
+  `chinese clothes` / `hanfu` / `reading`）；csv 解析 10861 标签、general_index 4 / character_index 8110。
+- **失败路径**：`ZIV_AI_TAGGER=0` → `[]`；模型缺失 → warning + `[]`。
+- 未启动 GPU / 未加载 CUDA（Z29 / Z30）。
+
+### WD14.3 妥协/挂账清单 · 追加（L1）
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-020 | WD14 Tagger 外置模块（CPU 打标；模型权重许可未核；节点未走 ComfyUI 加载，路线 A 独立实现，可能与源节点漂移） | 外置模块语义 / 模型许可由用户自持 / 与源节点实现可能漂移 | 需要 GPU 打标 / 节点接口变更 / 许可问题 | 发布前 / 后续 ComfyUI |
+
+---
+
+## 模板系统 T1–T2：数据分层 + CRUD 服务（日期：2026-09-25）
+
+> **契约追加（1 处）+ 新增服务**。模板从「单一内置 commands.json」升级为
+> **内置 + 用户覆盖**两层（`commands.json` + `commands.user.json`），新增按 name 合并的
+> 服务层与 CRUD。**不改 CommandParser 解析逻辑**（handler 分流属 T3）；**不改 C# / IPC 契约**
+> （仅 `CommandDefinition` 追加 `Handler`）。**无 GPU**（Z29 / Z30）。
+
+### T1 裁决落地（只读调查 → 设计）
+
+- **用户模板位置**：`<AppDir>/Template/commands.user.json`（独立文件；方案 A 程序目录，Z14）。
+- **合并语义**：按 `name`（Ordinal）覆盖 / 追加；无 uid（name 即标识）。
+- **Source 不进契约**：`CommandSource`（BuiltIn / User）由服务层 DTO 承载。
+
+### T2.1 契约追加（`Contracts/Execution`）
+
+| 类型 | 追加 | 说明 |
+|---|---|---|
+| `CommandHandler`（enum，新） | `Edit` / `T2I` / `Outpaint` / `Tag` | JSON 按名序列化（`JsonStringEnumConverter<CommandHandler>`） |
+| `CommandDefinition` | `CommandHandler Handler`（JSON `handler`，默认 `Edit`） | 旧文件缺 `handler` → `Edit`（兼容） |
+
+### T2.2 服务层（`Agent/Execution/Command`）
+
+- `CommandSource`（enum）+ `CommandTemplateDto(CommandDefinition, CommandSource)`（**非契约**）。
+- `ICommandTemplateService`：`List()` / `Add` / `Update` / `Delete` / `Reset` / `ResetAll`。
+- `CommandTemplateService(templateDirectory)`：读 `commands.json`（缺失 → `CommandParser.BuiltInCommands()`）
+  + `commands.user.json`（缺失 / 损坏 → 空）→ 按 name 合并；写仅动用户文件（**原子写**：临时文件 + 替换）；
+  空列表 → 删除用户文件。`CommandParser.BuiltInCommands()` 可见性 private → internal（复用，未改解析逻辑）。
+
+### T2.3 发布白名单
+
+- `publish.ps1` 清理旧产物时**保留 `Template/` 目录**，使 `commands.user.json` 不被发布清掉；
+  内置 `commands.json` / `loras.json` / `models.json` 仍由 `dotnet publish` 覆盖为最新。
+
+### T2.4 验收（无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 **473 通过 / 0 失败**（460 + 13：`CommandTemplateServiceTests` 13）。
+- 覆盖：合并（覆盖 / 追加）、CRUD（Add/Update/Delete/Reset/ResetAll）、用户文件缺失、内置缺失回退、
+  `handler` 缺省 → `Edit`、`handler` 字符串解析、用户 `handler` 往返。
+
+### T2.5 妥协/挂账清单 · 追加（T2）
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-021 | 模板 UI（T5）：用户命令的增删改查界面未做；`ICommandTemplateService` 未装配到 `AppContext` / 未接入 `CommandParser`（T3） | 本轮仅后端服务，UI / 接线属 T3–T5 | 需要用户编辑模板 | T5 / 后续 |
+| Z-022 | 全局 LoRA 槽（不属命令、编辑共享）未实现 | 全局偏好与命令模板正交；本轮只做命令级多槽 | 用户需要「所有编辑叠同一个 LoRA」 | 后续 UI / 模板轮 |
+
+### T2.6 LoRA 多槽（契约追加 · 只增不改）
+
+- **契约追加**：`CommandDefinition.Loras`（`List<LoraOptions>?`，JSON `loras`）。
+- **兼容**：`Lora`（单槽，JSON `lora`）保留为**只读兼容字段**（加 `WhenWritingNull`）；
+  `EffectiveLoras`（`[JsonIgnore]`）读取规则 = `Loras` 非空 → 用 `Loras`；否则 `Lora` 升级为 `[Lora]`；
+  均空 → 空。旧 `commands.json` 的 `lora` 仍可读；新写入（服务层）只写 `loras`。
+- **服务层归一化**：`CommandTemplateService.WriteUserEntries` 写前 `NormalizeLora`，把单槽 `Lora`
+  折叠进 `Loras` 并清空 `Lora` → 用户文件只含 `loras`。
+- **字段归属矩阵（定义；落地在 T3）**：编辑类 handler（`Edit` / `T2I` / `Outpaint`）可用 `loras`；
+  `Tag` 不可用（打标不应用 LoRA）。T3 分流时据此校验 / 忽略。
+- **遗留（T2.5）**：`EditPlan` / `PlanRequest` / `ToolInput` / `EditRequest` 的 `Lora` 仍为**单槽**；
+  多槽透传 / 按序叠加属 T3/T4（本步未动）。
+- **验收**：非 GPU 全量 **479 通过 / 0 失败**（473 + 6：`CommandLoraTests` 6）。
+
+---
+
+## 模板系统 T3.1：handler 分流 + 字段归属校验（日期：2026-09-25）
+
+> **契约追加（ParseResult 2 字段 + CommandDefinition 1 只读属性）+ 解析行为新增**。`CommandParser` 按
+> `CommandHandler` 分流：`Edit` / `T2I` / `Outpaint` 走既有 `EditPlan` 路径；`Tag` 走**能力调用**
+> （不产 `EditPlan`，实际执行属 T4）。新增**字段归属校验**（越界报警 + 忽略）与 **handler 输入约束**。
+> **无 GPU**（Z29 / Z30）。
+
+### T3.1.1 契约追加
+
+| 类型 | 追加 | 说明 |
+|---|---|---|
+| `ParseResult` | `string? Capability` | 非 null = 能力调用（当前仅 `"tag"`），T4 执行 |
+| `ParseResult` | `IReadOnlyList<string> Warnings` | 字段归属越界警告（非致命，不静默） |
+| `CommandDefinition` | `CommandHandler EffectiveHandler`（`[JsonIgnore]`） | 显式非 Edit handler 优先；否则旧 `t2i=true` → `T2I`（T2 字段迁移） |
+
+### T3.1.2 handler 分流
+
+- `handler = command.EffectiveHandler`。
+- `Edit` / `T2I` / `Outpaint` → 既有 `EditPlan` 路径（T2I 用 `handler==T2I` 判定，替代 `command.T2i`）。
+- `Tag` → `ParseResult { Success=false, Capability="tag", ErrorMessage=…, Warnings }`（T4 实现执行）。
+
+### T3.1.3 字段归属校验（越界报警 + 忽略）
+
+- `Tag` 允许：`name` / `description` / `params` / `variadic` / `handler`；
+  禁止：`template` / `variants` / `t2i` / `tool` / `loras` → 每条 warning + 忽略。
+- `Edit` / `T2I` / `Outpaint`：`t2i` 为兼容来源；仅当显式 `handler != Edit` 且 `t2i=true` 时报
+  「t2i 冗余」warning。
+- **限制**：JSON 无法区分「显式 `handler=Edit`」与「缺省 Edit」，故「显式 Edit + `t2i=true`」不报警
+  （缺省 + `t2i=true` 视为旧数据，映射 `T2I`）。
+
+### T3.1.4 handler 输入约束（裁决 2）
+
+| handler | 接受 N | 备注 |
+|---|---|---|
+| `T2I` | N=0 | N>0 → 报错（**行为反转**：旧行为忽略输入图） |
+| `Tag` | N=1 | N≠1 → 报错 |
+| `Outpaint` | N=1 | N≠1 → 报错 |
+| `Edit` | N=1 或 N≥2 | 用 variants 分流 |
+
+- N=-1（未知）不约束（兼容既有 2/3 参重载与既有测试）。
+
+### T3.1.5 t2i 字段迁移
+
+- 旧 `commands.json` 的 `t2i=true`（无 handler）→ `EffectiveHandler = T2I`；解析成功。
+- 新写入用 `handler`，不写 `t2i`（读时兼容）。
+
+### T3.1.6 验收（无 GPU）
+
+- `dotnet build -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 **489 通过 / 0 失败**（479 + 10：`CommandHandlerRoutingTests` 10）。
+- **行为反转（授权）**：T2I 有输入图由「忽略」改为「报错」；同步更新既有测试
+  `SessionViewModelTests.Submit_T2I_With_Root_Images_Is_Rejected`（原 `..._Does_Not_Use_The_Pack`）
+  与 `Submit_DisplayText_Shows_Original_But_Stores_Expanded`（`/生成` → `/去水印`）。
+
+### T3.1.7 妥协/挂账清单 · 追加（T3.1）
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-023 | 组合命令（/tag换背景）未实现 | 依赖 handler 分流 + 多步编排 | 用户需要「打标后接编辑」的组合指令 | 后续轮 |
+
+---
+
+## 模板系统 T3.2：LoRA 多槽透传（日期：2026-09-25）
+
+> **契约追加（3 处）+ IPC 0.9**。LoRA 由单槽升级为**多槽**：`EditStep` / `ToolInput` /
+> `EditRequest` 追加 `Loras`（`Lora` 保留兼容），按 `path` 去重（保留首次 + warning），
+> 逐个透传到 `submit.payload.loras`；Python 侧按序注册多个 hook（链式叠加）。
+> **无 GPU**（Z29 / Z30；多 LoRA 叠加语义需真机验证）。
+
+### T3.2.1 契约追加（`Contracts`）
+
+| 类型 | 追加 | 说明 |
+|---|---|---|
+| `EditStep` | `List<LoraOptions>? Loras` + `EffectiveLoras` | `Lora` 保留只读兼容 |
+| `ToolInput` | `List<LoraOptions>? Loras` + `EffectiveLoras` | 同上 |
+| `EditRequest` | `IReadOnlyList<LoraOptions>? Loras` + `EffectiveLoras` | 同上 |
+| `LoraSlots`（新，internal） | `Resolve(loras, lora)` | 共享去重（按 path，保留首次；丢弃时 `Debug.WriteLine`） |
+
+- `EffectiveLoras`：`Loras` 非空 → 去重后；否则 `Lora` 升级为 `[Lora]`；均空 → 空。
+- `CommandDefinition.EffectiveLoras`（T2.5）改用同一 `LoraSlots.Resolve`（命令级也去重）。
+
+### T3.2.2 透传链（逐环节）
+
+- `CommandParser`：`Loras = BuildLoras(command.EffectiveLoras)`（含重复检测 → `Warnings`）。
+- `Executor`：`Loras = step.EffectiveLoras`。
+- `QwenImage21EditTool`：`Loras = input.EffectiveLoras`。
+- `IpcSubmitMapper`：`Loras = request.EffectiveLoras`（`Lora` 兼容保留）。
+- `IpcDtos.SubmitPayload` 加 `IReadOnlyList<LoraOptions>? Loras`；`IpcJsonContext` 加 `List<LoraOptions>`。
+- **不改**：`QwenImage21OutpaintTool`（Z-024）；`EditPlan` / `PlanRequest`（无 Lora）。
+
+### T3.2.3 Python
+
+- `handlers._register_loras`（新）：读 `payload.loras`（数组）→ 逐个注册 hook；回退 `payload.lora`
+  （升级为 `[lora]`）；`loras` 优先。
+- `pipeline_hooks`：链式 `apply_pre_sampling_hooks` 天然叠加（未改）；`make_lora_hook` 单次加载（未改）。
+- 去重（C# 已做，Python 信任）。
+
+### T3.2.4 IPC 契约
+
+- `contracts/ipc-protocol.md`：§3.4 加 `submit.payload.loras`；`ipc_version 0.8 → 0.9`；§7 变更点。
+- `config.PROTOCOL_VERSION` 同步 `0.9`。
+
+### T3.2.5 验收（无 GPU）
+
+- `dotnet build -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 **491 通过 / 0 失败**（489 + 2）；`IpcSubmitMapperTests` **10 通过**（+3，单独跑，
+  因 `!~Ipc` 过滤把该类一并排除）。
+- Python CPU **38/38**；`py_compile`（handlers / config）通过。
+
+### T3.2.6 妥协/挂账清单 · 追加（T3.2）
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-024 | Outpaint（`QW21outpaint`）的 LoRA 透传未实现 | 本轮只做 3 契约；outpaint 工具不透传 | 需要 outpaint 局部叠 LoRA | 后续轮 |
+| Z-025 | 多 LoRA 叠加语义（同 key patch 的顺序 / 覆盖）未 GPU 验证 | Z29 / Z30 不跑 GPU（需真机验证） | 真机多 LoRA 结果异常 | 观察 |

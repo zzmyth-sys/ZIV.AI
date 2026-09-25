@@ -112,6 +112,66 @@ public class IpcSubmitMapperTests
     }
 
     [Fact]
+    public void Loras_Map_To_Payload_In_Order()
+    {
+        var request = IpcSubmitMapper.BuildSubmitRequest(
+            "r",
+            "t",
+            new EditRequest
+            {
+                Op = EditOps.Inpaint,
+                ImagePath = "in.png",
+                Prompt = "x",
+                Loras = new List<LoraOptions>
+                {
+                    new() { Path = "a", StrengthModel = 0.8 },
+                    new() { Path = "b" },
+                },
+            });
+
+        Assert.NotNull(request.Payload.Loras);
+        Assert.Equal(new[] { "a", "b" }, request.Payload.Loras!.Select(lora => lora.Path));
+    }
+
+    [Fact]
+    public void Legacy_Single_Lora_Upgrades_To_Payload_Loras()
+    {
+        var request = IpcSubmitMapper.BuildSubmitRequest(
+            "r",
+            "t",
+            new EditRequest
+            {
+                Op = EditOps.Inpaint,
+                ImagePath = "in.png",
+                Prompt = "x",
+                Lora = new LoraOptions { Path = "only" },
+            });
+
+        Assert.Equal("only", Assert.Single(request.Payload.Loras!).Path);
+    }
+
+    [Fact]
+    public void Duplicate_Loras_Are_Deduplicated_In_Payload()
+    {
+        var request = IpcSubmitMapper.BuildSubmitRequest(
+            "r",
+            "t",
+            new EditRequest
+            {
+                Op = EditOps.Inpaint,
+                ImagePath = "in.png",
+                Prompt = "x",
+                Loras = new List<LoraOptions>
+                {
+                    new() { Path = "same" },
+                    new() { Path = "same" },
+                },
+            });
+
+        Assert.Equal("same", Assert.Single(request.Payload.Loras!).Path);
+    }
+
+    [Fact]
     public void Inpaint_Maps_MaskPath()
     {
         // Step 9C.7-B: the mask PNG path still maps to the IPC payload; FeatherPx is a

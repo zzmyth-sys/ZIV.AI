@@ -289,7 +289,7 @@ public class CommandParserTests
         Assert.Contains("Replace the background", single.Plan!.Steps[0].Parameters["prompt"]);
         Assert.Contains("<image2>", multi.Plan!.Steps[0].Parameters["prompt"]);
 
-        var generate = await parser.ParseAsync("/生成 森林精灵", SessionWithImage(), 1, resolution: null);
+        var generate = await parser.ParseAsync("/生成 森林精灵", SessionWithImage(), 0, resolution: null);
         Assert.Equal("", generate.Plan!.MainImagePath);
         Assert.Equal("森林精灵", generate.Plan.Steps[0].Parameters["prompt"]);
 
@@ -380,7 +380,7 @@ public class CommandParserTests
     {
         var parser = ParserWithoutFile();
 
-        var result = await parser.ParseAsync("/生成 森林精灵", SessionWithImage(), 1, resolution: null);
+        var result = await parser.ParseAsync("/生成 森林精灵", SessionWithImage(), 0, resolution: null);
 
         Assert.True(result.Success);
         Assert.Equal("", result.Plan!.MainImagePath);

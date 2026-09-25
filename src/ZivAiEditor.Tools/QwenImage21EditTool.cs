@@ -94,8 +94,8 @@ public sealed class QwenImage21EditTool : IEditTool
             // R3 (Step 9C.5-D): the legacy reference slot is image2, followed by the
             // ordered additional references. Single owner of that ordering.
             AdditionalImages = BuildAdditionalImages(input.ReferenceImagePath, input.AdditionalImages),
-            // Step 8-1: forward the step's LoRA (id / path + strengths) to the backend.
-            Lora = input.Lora,
+            // T3.2: forward the step's LoRAs (multi-slot) to the backend.
+            Loras = input.EffectiveLoras.Count > 0 ? input.EffectiveLoras.ToList() : null,
             // Step 8-2: forward the plan's model id to the backend.
             ModelId = input.ModelId,
         };

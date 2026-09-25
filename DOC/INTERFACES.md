@@ -130,3 +130,34 @@
   窗口级遮罩导出任务 `_pendingMaskExport`，`MaskOverlayBitmap` 气泡 / 预览共用叠加）。
 - `MaskSpec.FeatherPx` 契约不变；`MaskFeather.MaxRadiusPx` 保持 25（纯函数内部钳制，产品路径受
   `MaskState.MaxFeatherPx = 15` 限制）。
+
+## 11. 追加说明（模板系统 T1–T2 · 数据分层）
+
+> 本节为**追加**（只增不改）。
+
+- **契约追加**：`ZivAiEditor.Contracts.Execution.CommandHandler`（enum：`Edit` / `T2I` / `Outpaint` / `Tag`）；
+  `CommandDefinition.Handler`（`CommandHandler`，JSON `handler`，默认 `Edit`；旧文件缺省 → `Edit`）。
+- **契约追加（T2.5）**：`CommandDefinition.Loras`（`List<LoraOptions>?`，JSON `loras`）；`Lora`（JSON `lora`）
+  保留为只读兼容字段；`EffectiveLoras`（`[JsonIgnore]`）= `Loras` 非空取 `Loras`，否则 `Lora` 升级为 `[Lora]`；
+  服务层写入只写 `loras`（`NormalizeLora`）。
+- **服务层（非契约，`ZivAiEditor.Agent.Execution`）**：
+  - `CommandSource`（enum：`BuiltIn` / `User`）+ `CommandTemplateDto(CommandDefinition, CommandSource)`；
+  - `ICommandTemplateService`：`List()` / `Add` / `Update` / `Delete` / `Reset` / `ResetAll`；
+  - 实现 `CommandTemplateService(templateDirectory)`：内置 `commands.json` + 用户 `commands.user.json` 按
+    `name`（Ordinal）合并；写仅动用户文件（原子写；空 → 删文件）。
+- **数据文件追加**：`Template/commands.user.json`（用户覆盖层；可选，缺失 = 无覆盖）。
+- **未接入**：`CommandParser` 仍只读内置 `commands.json`（合并视图接入属 T3）；`AppContext` 未装配服务（T3/T5）。
+- **契约追加（T3.1）**：`ParseResult.Capability`（`string?`，非 null = 能力调用，当前 `"tag"`；T4 执行）；
+  `ParseResult.Warnings`（`IReadOnlyList<string>`，字段归属越界警告）；
+  `CommandDefinition.EffectiveHandler`（`[JsonIgnore]`）= 显式非 `Edit` handler 优先，否则旧 `t2i=true` → `T2I`。
+- **解析行为（T3.1）**：`CommandParser` 按 `EffectiveHandler` 分流（`Edit` / `T2I` / `Outpaint` → `EditPlan`；
+  `Tag` → `Capability="tag"`，暂不产 plan）；字段归属校验（越界报警 + 忽略）；handler 输入约束
+  （`T2I` N=0 / `Tag` N=1 / `Outpaint` N=1 / `Edit` N≥1）。
+- **T3.1 行为反转**：`T2I` 有输入图由「忽略」改为「报错」（授权）；已同步既有测试。
+- **契约追加（T3.2）**：`EditStep` / `ToolInput`（`List<LoraOptions>? Loras`）、
+  `EditRequest`（`IReadOnlyList<LoraOptions>? Loras`）各加 `Loras`（JSON `loras`，`Lora` 保留只读兼容）
+  与 `EffectiveLoras`（`[JsonIgnore]`，去重按 `path`，保留首次）；新增 internal `LoraSlots.Resolve`。
+- **IPC（T3.2）**：`submit.payload.loras`（数组，可选，优先于 `lora`）；`ipc_version 0.8 → 0.9`。
+  `IpcSubmitMapper` → `SubmitPayload.Loras`；`config.PROTOCOL_VERSION = "0.9"`。
+- **透传链（T3.2）**：`CommandParser` / `Executor` / `QwenImage21EditTool` / `IpcSubmitMapper` 全用
+  `EffectiveLoras`；`QwenImage21OutpaintTool` 不透传（Z-024）。

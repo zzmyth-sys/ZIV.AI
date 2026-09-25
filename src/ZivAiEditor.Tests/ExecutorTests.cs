@@ -322,7 +322,7 @@ public class ExecutorTests
     }
 
     [Fact]
-    public async Task Step_Lora_Is_Passed_To_ToolInput()
+    public async Task Step_Loras_Are_Passed_To_ToolInput()
     {
         var tool = new FakeTool("QW21edit", (input, _) => Task.FromResult(
             Ok(input.StepId, @"C:\out\lora.png")));
@@ -338,7 +338,7 @@ public class ExecutorTests
                     StepId = "s1",
                     Order = 1,
                     ToolName = "QW21edit",
-                    Lora = lora,
+                    Loras = new List<LoraOptions> { lora },
                     Parameters = new Dictionary<string, string> { ["prompt"] = "x" },
                 },
             },
@@ -347,7 +347,7 @@ public class ExecutorTests
         await executor.ExecuteAsync(plan);
 
         var input = Assert.Single(tool.Received);
-        Assert.Same(lora, input.Lora);
+        Assert.Same(lora, Assert.Single(input.EffectiveLoras));
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 namespace ZivAiEditor.Contracts.Inference;
 
+using System.Text.Json.Serialization;
 using ZivAiEditor.Contracts.Imaging;
 
 /// <summary>
@@ -64,7 +65,23 @@ public sealed class EditRequest
     /// </summary>
     public string? ModelId { get; init; }
 
+    /// <summary>
+    /// Legacy single LoRA slot (Step 8-1; read-only compatibility from T3.2). New code sets
+    /// <see cref="Loras"/>.
+    /// </summary>
     public LoraOptions? Lora { get; init; }
+
+    /// <summary>Multi-slot LoRAs (T3.2); when non-empty it wins over <see cref="Lora"/>.</summary>
+    [JsonPropertyName("loras")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<LoraOptions>? Loras { get; init; }
+
+    /// <summary>
+    /// Effective LoRAs (T3.2): <see cref="Loras"/> de-duplicated by path (first wins), else
+    /// <see cref="Lora"/> as a one-element list, else empty. Not serialized.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<LoraOptions> EffectiveLoras => LoraSlots.Resolve(Loras, Lora);
 
     public OptimizationOptions? Optimizations { get; init; }
 

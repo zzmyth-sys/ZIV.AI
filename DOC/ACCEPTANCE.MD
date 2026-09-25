@@ -3107,3 +3107,155 @@ B 类登记 Z-007 / Z-008。**无 GPU**（Z29 / Z30）。
 ### 验收后动作
 
 1. 真机 M1–M7 通过后，在「验收记录」追加“Z-018 收口 通过，日期：____”（待签）。
+
+---
+
+## WD14 Tagger 集成 L1 验收（外置模块 · Python 侧 CPU 打标）
+
+**目标**：以**外置模块**语义接入 WD14 Tagger 的 L1（Python 侧能力）。**无 GPU**（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么做 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| W14.1 | onnxruntime 前置验证 | `python_embeded` pip install | 成功且记录版本 | ✅ 1.30.0（CPU） |
+| W14.2 | 复制节点 | robocopy（排除 __pycache__/.github） | 13 文件含模型 | ✅ |
+| W14.3 | tagger.py | 复刻推理核心 | `tag_image` 可用 | ✅ |
+| W14.4 | config TAGGER_* | 新增块 | 5 项默认正确 | ✅ |
+| W14.5 | py_compile | tagger / config / test_tagger | 通过 | ✅ |
+| W14.6 | CPU 打标冒烟 | `_test_step2/test_tagger.py` | 输出标签列表 | ✅ 41 标签 |
+| W14.7 | 失败路径 | 禁用 / 模型缺失 | 返回空列表 | ✅ |
+| W14.8 | 无 GPU 负载 | 本轮 | 未加载 CUDA（Z29 / Z30） | ✅ |
+
+### 通过标准
+
+- onnxruntime 安装成功；节点复制完整；`tag_image` CPU 打标输出合理；失败降级空列表；无 GPU 负载。
+
+### 验收后动作
+
+1. 用户手动复跑 `_test_step2/test_tagger.py` 确认后，在「验收记录」追加“WD14 L1 通过，日期：____”（待签）。
+
+---
+
+## 模板系统 T1–T2 验收（数据分层 + CRUD 服务）
+
+**目标**：内置 + 用户覆盖两层模板，按 name 合并 + CRUD 服务。**无 GPU**（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么做 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| T2.1 | CommandHandler 契约 | 追加 enum + `Handler` 字段 | 旧文件缺 handler → Edit | ✅ |
+| T2.2 | 合并（覆盖） | 用户同名覆盖内置 | Source=User，内容=用户 | ✅ |
+| T2.3 | 合并（追加） | 用户新 name | 追加在内置之后 | ✅ |
+| T2.4 | CRUD | Add/Update/Delete/Reset | List 正确 | ✅ |
+| T2.5 | ResetAll | 删用户文件 | 文件消失，回到内置 | ✅ |
+| T2.6 | 用户文件缺失 | 不写 commands.user.json | List = 内置，不报错 | ✅ |
+| T2.7 | 内置文件缺失 | 不写 commands.json | 回退 BuiltInCommands | ✅ |
+| T2.8 | handler 解析 | `"handler":"Tag"` | 解析为 Tag | ✅ |
+| T2.9 | 原子写 | 写用户文件 | 临时文件 + 替换 | ✅ |
+| T2.10 | publish 白名单 | `publish.ps1` 保留 Template/ | commands.user.json 不被清 | ✅ |
+| T2.11 | 构建 | `dotnet build -c Release` | 0 错误 0 警告 | ✅ |
+| T2.12 | 测试 | 非 GPU 全量 | 473 通过 / 0 失败 | ✅ |
+| T2.13 | 无 GPU 负载 | 本轮 | 未启动 Python / 未加载模型 | ✅ |
+
+### 通过标准
+
+- 构建 0/0；非 GPU 473 通过 / 0 失败；T2.1–T2.13 通过；Z8 改动文件 < 600。
+
+### 验收后动作
+
+1. T3（handler 分流）接入后回归；T5 UI 完成后在「验收记录」追加“模板系统 T1–T2 通过，日期：____”（待签）。
+
+---
+
+## 模板系统 T2.5 验收（LoRA 多槽）
+
+**目标**：补 T2 遗漏的 LoRA 多槽（纯数据层）。**无 GPU**（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么做 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| T2.14 | 契约 `loras` | `CommandDefinition.Loras` | JSON `loras` 可读写 | ✅ |
+| T2.15 | 旧单槽升级 | `lora` → `EffectiveLoras` | 读为 `[lora]` | ✅ |
+| T2.16 | 多槽原样 | `loras` → `EffectiveLoras` | 原样 | ✅ |
+| T2.17 | 并存优先 | `lora` + `loras` | `loras` 优先 | ✅ |
+| T2.18 | 写归一化 | 服务层写用户文件 | 只写 `loras`，不含 `lora` | ✅ |
+| T2.19 | 构建 / 测试 | `dotnet build` + 非 GPU 全量 | 0/0；479 通过 / 0 失败 | ✅ |
+| T2.20 | 无 GPU 负载 | 本轮 | 未启动 Python / 未加载模型 | ✅ |
+
+### 通过标准
+
+- 构建 0/0；非 GPU 479 通过 / 0 失败；T2.14–T2.20 通过。
+
+### 遗留 / 待裁决
+
+- `EditPlan` / `PlanRequest` / `ToolInput` / `EditRequest` 仍单槽（多槽透传属 T3/T4）。
+- **Z-021 编号不一致**（FROZEN 现为「模板 UI T5」，裁决为「组合命令」）→ 待裁决。
+
+---
+
+## 模板系统 T3.1 验收（handler 分流 + 字段归属校验）
+
+**目标**：按 handler 分流 + 字段归属 / 输入约束。**无 GPU**（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么做 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| T3.1 | Edit 分流 | `handler=Edit` | 走 `EditPlan` | ✅ |
+| T3.2 | T2I 分流 | `handler=T2I` / 旧 `t2i` | main="" 走 `EditPlan` | ✅ |
+| T3.3 | Outpaint 分流 | `handler=Outpaint` | 走 `EditPlan` | ✅ |
+| T3.4 | Tag 分流 | `handler=Tag` | `Capability="tag"`，无 plan | ✅ |
+| T3.5 | 字段越界报警 | Tag + template/tool | `Warnings` 含「不支持」 | ✅ |
+| T3.6 | t2i 迁移 | 旧 `t2i=true` | `EffectiveHandler=T2I` | ✅ |
+| T3.7 | T2I 输入约束 | N=1 | 报错「不接受输入图」 | ✅ |
+| T3.8 | Outpaint 输入约束 | N=2 | 报错「恰好 1 张」 | ✅ |
+| T3.9 | Tag 输入约束 | N=2 | 报错「恰好 1 张」 | ✅ |
+| T3.10 | t2i 冗余报警 | `handler=Outpaint` + `t2i` | warning | ✅ |
+| T3.11 | 构建 / 测试 | build + 非 GPU 全量 | 0/0；489 通过 / 0 失败 | ✅ |
+| T3.12 | 无 GPU 负载 | 本轮 | 未启动 Python / 未加载模型 | ✅ |
+
+### 通过标准
+
+- 构建 0/0；非 GPU 489 通过 / 0 失败；T3.1–T3.12 通过。
+
+### 行为反转 / 遗留
+
+- **T2I 有图由「忽略」改为「报错」（授权）**；已同步更新 2 个既有测试。
+- **Z-023**：组合命令（/tag换背景）未实现。
+- T3.2 / T4 / T5 未做；`EditPlan` 等仍单槽。
+
+---
+
+## 模板系统 T3.2 验收（LoRA 多槽透传）
+
+**目标**：LoRA 单槽 → 多槽贯穿 C# 透传链 + IPC + Python 叠加。**无 GPU**（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么做 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| T3.2.1 | 契约 `Loras` | EditStep / ToolInput / EditRequest | 追加 + `EffectiveLoras` | ✅ |
+| T3.2.2 | 去重（保留首次） | 同 path 重复 | `EffectiveLoras` 去重 | ✅ |
+| T3.2.3 | 去重报警 | CommandParser | `Warnings` 含「重复 path」 | ✅ |
+| T3.2.4 | 命令级多槽 | `commands.json` `loras` | `EditStep.Loras` 有序 | ✅ |
+| T3.2.5 | Executor 透传 | step → ToolInput | `ToolInput.EffectiveLoras` | ✅ |
+| T3.2.6 | Tool 透传 | input → EditRequest | `EditRequest.EffectiveLoras` | ✅ |
+| T3.2.7 | IPC 映射 | EditRequest → payload | `payload.loras` 有序 | ✅ |
+| T3.2.8 | 旧单槽兼容 | `Lora` 单槽 | 升级为 `[Lora]` | ✅ |
+| T3.2.9 | Python 多槽 | `payload.loras` 数组 | 逐个注册 hook | ✅ |
+| T3.2.10 | IPC 版本 | `ipc-protocol.md` | `ipc_version 0.9` | ✅ |
+| T3.2.11 | 构建 / 测试 | build + 非 GPU 全量 | 0/0；491 + `IpcSubmitMapperTests` 10 | ✅ |
+| T3.2.12 | Python CPU | `unittest discover` | 38/38 | ✅ |
+| T3.2.13 | 无 GPU 负载 | 本轮 | 未启动 Python 推理 / 未加载模型 | ✅ |
+
+### 通过标准
+
+- 构建 0/0；非 GPU 491 通过 / 0 失败 + `IpcSubmitMapperTests` 10；Python 38/38；T3.2.1–T3.2.13 通过。
+
+### 遗留
+
+- **Z-024**：Outpaint LoRA 透传未实现；**Z-025**：多 LoRA 叠加语义未 GPU 验证（观察）。
+- T4 / T5 / 组合命令（Z-023）未做。

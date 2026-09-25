@@ -1,7 +1,7 @@
 # ZIV.AI IPC 传输契约（IPC Protocol）
 
-- 文档状态：**Step 2 冻结**（2026-09-21）；**修订至 ipc_version 0.8**（Step 9C.5-D 修订后）
-- **ipc_version：`0.8`**
+- 文档状态：**Step 2 冻结**（2026-09-21）；**修订至 ipc_version 0.9**（模板系统 T3.2 修订后）
+- **ipc_version：`0.9`**
 - 用途：定义 C# 前端（`ZivAiEditor.App` / `ZivAiEditor.Backend`）与 Python 推理进程之间的
   **跨进程传输契约**。取代 Step 1 的「OpenAPI 作为跨进程唯一契约」定位（见 `FROZEN.md` Step 2）。
 - 依据：`_test_step2/REPORT.md`（11 项实测）。
@@ -174,6 +174,7 @@
   "denoise": 1.0,
   "output_path": null,
   "lora": null,
+  "loras": null,
   "optimizations": null,
   "resolution": null,
   "anchor": null,
@@ -196,7 +197,8 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `lora` | object \| null | LoRA 配置；缺省 / `null` = 不加载。`{ "path": <绝对路径>, "strength_model": <float, 默认 1.0>, "strength_clip": <float, 默认 1.0> }`。 |
+| `lora` | object \| null | **单槽（兼容）**；缺省 / `null` = 不加载。`{ "path": <绝对路径>, "strength_model": <float, 默认 1.0>, "strength_clip": <float, 默认 1.0> }`。 |
+| `loras` | array \| null | **多槽（T3.2，优先于 `lora`）**；缺省 / `null` = 回退 `lora`。`[ { path, strength_model, strength_clip }, ... ]`；C# 侧已按 `path` 去重（保留首次）。 |
 | `optimizations` | object \| null | 优化开关；缺省 / `null` = 不启用。`{ "magcache": <bool, 默认 false>, "magcache_thresh": <float, 默认 0.24> }`。 |
 
 - 两者均为 **Python 进程内部变换**（LoRA 修改 model / clip；MagCache 修改采样），
@@ -361,6 +363,11 @@ C#(server)                                              Python(client)
      路径列表（位置即 `<imageN>` 编号）。C# 契约 `EditRequest` / `PlanRequest` / `EditPlan` /
      `ToolInput` 追加 `AdditionalImages`（既有成员 / 签名不变）。**向后兼容**：字段可选，
      缺省行为与 0.7 一致；`config.PROTOCOL_VERSION` 同步升 `0.8`。
+- **0.8 → 0.9 变更点**（模板系统 T3.2）：
+  1. **`submit.payload` 新增可选字段 `loras`**（§3.4）：多槽 LoRA 列表，**优先于** `lora`；
+     `lora`（单槽）保留兼容。C# 契约 `EditStep` / `ToolInput` / `EditRequest` 追加 `Loras`
+     （`Lora` 既有成员不变）。**向后兼容**：字段可选，缺省行为与 0.8 一致（回退 `lora`）；
+     `config.PROTOCOL_VERSION` 同步升 `0.9`。
 - 协议变更时升 `ipc_version`（必要时同时升管道名 `v2`），旧前端可并存。
 - `openapi.yaml` 保留为 **Schema 参考**（`ImageEditRequest` / `TaskAccepted` /
   `TaskStatusResponse` 等结构即本协议 payload 的形状来源）。

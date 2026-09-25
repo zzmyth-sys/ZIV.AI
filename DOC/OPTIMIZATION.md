@@ -302,3 +302,14 @@
 - **触发条件**：当 outpaint 结果的划像对比需要「像素级对齐外扩区域」时再评估；
   届时**必须先报告并获授权**（涉及 `EditNode` / IPC result 帧等冻结结构）。
 - **当前实现**：简化对齐（居中 + 背景填充），见 `ZivAiEditor.App/Controls/CompareOverlay.axaml.cs`。
+
+## 8. WD14 Tagger（CPU 打标能力 · L1 已落地）
+
+> 追加于 2026-09-25（L1）。**非速度优化**，登记为「已落地能力」。
+
+- **能力**：对任意图片做 WD14 booru 标签识别（`wd-vit-tagger-v3`），输出标签列表。
+- **实现**：外置节点 `custom_nodes/comfyui-wd14-tagger/`（模型 + 参考实现）+
+  `python/server/tagger.py`（复刻推理核心，路线 A，绕开节点对 `PromptServer` / web 的依赖）。
+- **运行**：**CPU only**（onnxruntime 1.30.0，`CPUExecutionProvider`），不占 GPU、不参与 Z18 串行队列。
+- **默认开**：`ZIV_AI_TAGGER`（默认 `1`）；缺失 / 失败静默降级（返回空列表）。
+- **边界**：L1 仅 Python 侧能力；无 IPC / C# 接入（L2 待契约授权）。

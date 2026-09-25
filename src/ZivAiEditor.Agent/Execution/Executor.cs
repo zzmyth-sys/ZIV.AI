@@ -273,8 +273,8 @@ public sealed class Executor : IExecutor
                 Parameters = step.Parameters,
                 WorkingDirectory = workingDirectory,
                 Resolution = plan.Resolution,
-                // Step 8-1: pass the step's LoRA (from the command definition) to the tool.
-                Lora = step.Lora,
+                // T3.2: pass the step's LoRAs (multi-slot) to the tool.
+                Loras = step.EffectiveLoras.Count > 0 ? step.EffectiveLoras.ToList() : null,
                 // Step 8-2: pass the plan-level model id down to the tool.
                 ModelId = plan.ModelId,
             };

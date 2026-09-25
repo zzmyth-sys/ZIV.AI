@@ -10,6 +10,7 @@ namespace ZivAiEditor.Backend;
 [JsonSerializable(typeof(SubmitRequest))]
 [JsonSerializable(typeof(CancelRequest))]
 [JsonSerializable(typeof(LoraOptions))]
+[JsonSerializable(typeof(List<LoraOptions>))]
 [JsonSerializable(typeof(OptimizationOptions))]
 [JsonSerializable(typeof(ResolutionPayload))]
 internal partial class IpcJsonContext : JsonSerializerContext

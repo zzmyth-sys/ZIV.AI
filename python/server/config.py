@@ -21,7 +21,7 @@ MODEL_NAME = "qwen-image-2.1"
 PIPE_NAME = "zivai.infer.v1"
 PIPE_PATH = r"\\.\pipe\zivai.infer.v1"
 
-PROTOCOL_VERSION = "0.8"
+PROTOCOL_VERSION = "0.9"
 BACKEND_VERSION = "0.4.0"
 
 CONNECT_TIMEOUT_S = 15.0
@@ -110,6 +110,19 @@ TE_SPEED_NODE_DIR = os.environ.get(
     "ZIV_AI_TE_SPEED_NODE_DIR",
     os.path.join(COMFY_ROOT, "custom_nodes", "TE-Speed-QwenImage21"),
 )
+
+# ---- WD14 Tagger（L1 Python 侧打标；外置模块，CPU，不占 GPU）----
+# 外部节点 custom_nodes/comfyui-wd14-tagger 提供 ONNX 模型（wd-vit-tagger-v3）与参考实现；
+# ZIV.AI 侧 tagger.py 复刻其推理核心（路线 A，绕开节点对 PromptServer / web 的依赖）。
+# 默认开；onnxruntime 缺失 / 模型缺失 / 推理失败时静默跳过（返回空列表，不致命）。
+TAGGER_ENABLED = os.environ.get("ZIV_AI_TAGGER", "1") not in ("", "0", "false", "False")
+TAGGER_MODEL_DIR = os.environ.get(
+    "ZIV_AI_TAGGER_MODEL_DIR",
+    os.path.join(COMFY_ROOT, "custom_nodes", "comfyui-wd14-tagger", "models"),
+)
+TAGGER_MODEL = os.environ.get("ZIV_AI_TAGGER_MODEL", "wd-vit-tagger-v3")
+TAGGER_THRESHOLD = float(os.environ.get("ZIV_AI_TAGGER_THRESHOLD", "0.35"))
+TAGGER_CHARACTER_THRESHOLD = float(os.environ.get("ZIV_AI_TAGGER_CHARACTER_THRESHOLD", "0.85"))
 
 # ---- 显存策略（Z21 空闲卸载：Step 3 实现）----
 # auto = 交给 ComfyUI 的 model_management 决定权重驻留（CPU/GPU/offload）

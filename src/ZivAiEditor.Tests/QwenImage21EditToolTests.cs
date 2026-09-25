@@ -338,7 +338,7 @@ public class QwenImage21EditToolTests
     }
 
     [Fact]
-    public async Task Lora_Is_Forwarded_To_EditRequest()
+    public async Task Loras_Are_Forwarded_To_EditRequest()
     {
         var client = new FakeInferenceClient();
         var tool = new QwenImage21EditTool(client);
@@ -347,14 +347,14 @@ public class QwenImage21EditToolTests
         {
             StepId = "s1",
             MainImagePath = @"C:\img\a.png",
-            Lora = lora,
+            Loras = new List<LoraOptions> { lora },
             Parameters = new Dictionary<string, string> { ["prompt"] = "x" },
         };
 
         await tool.ExecuteAsync(input);
 
         var request = Assert.IsType<EditRequest>(client.LastRequest);
-        Assert.Same(lora, request.Lora);
+        Assert.Same(lora, Assert.Single(request.EffectiveLoras));
     }
 
     [Fact]

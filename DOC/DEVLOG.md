@@ -5309,3 +5309,223 @@ RTX 4080 16GB；GPU 任务前空闲，基线 **1132 MiB**。测试图 `_test_ste
 
 - 无契约签名变化；不改 C# 契约 / IPC / Python / TE-Speed；无新 NuGet。
 - `FROZEN.md` 追加「Z-018 收口」段 + Z-018 关闭行；`ACCEPTANCE.MD` 追加对应验收段。
+
+---
+
+## [WD14 Tagger 集成 L1] - 2026-09-25（外置模块 · Python 侧 CPU 打标）
+
+### 目标
+
+以**外置模块**语义接入 WD14 Tagger 的 **L1（Python 侧能力）**：复制节点 + 复刻推理核心（路线 A）。
+**无 GPU**（Z29 / Z30，CPU 打标）；**不改 C# / Contracts / IPC / commands.json**。
+
+### 前置验证（硬阻断）
+
+- `python_embeded`（3.13.14）`pip install onnxruntime` → **成功**，**1.30.0**（cp313 win_amd64 wheel）；
+  providers 仅 `CPUExecutionProvider`（+ Azure），**无 CUDA**。
+
+### 做了什么
+
+- **复制**：`C:\AI\ComfyUI_PIC\...\comfyui-wd14-tagger\` → `Comfyui/ComfyUI/custom_nodes/comfyui-wd14-tagger/`
+  （13 文件，含 `models/wd-vit-tagger-v3.onnx` 361 MiB + `.csv`）；排除 `__pycache__/`、`.github/`。
+- **`python/server/tagger.py`（新增）**：`tag_image(...) -> list[str]`，复刻 `wd14tagger.py:50-107` 推理核心；
+  `InferenceSession` 按路径缓存；失败降级空列表。
+- **`config.py`**：新增 `TAGGER_*` 块（默认开 / 模型目录 / 默认模型 / 两阈值）。
+- **`_test_step2/test_tagger.py`（新增）**：CPU 冒烟脚本，用户可手动跑。
+
+### 关键决策
+
+1. **路线 A**：不 import 节点（其顶层 `@PromptServer.instance.routes.get` 在 in-process 下会 `AttributeError`，
+   实测 `hasattr(PromptServer,'instance')=False`），改为 ZIV.AI 侧独立实现推理核心。
+2. **默认模型写死** `wd-vit-tagger-v3`：不读 `pysssss.json` 的默认（`wd-v1-4-moat-tagger-v2` 盘上无，
+   会触发联网下载，违反 SPEC §4）。
+3. **CPU only**：装 `onnxruntime`（CPU）而非 `onnxruntime-gpu`，避免与 ComfyUI torch/CUDA 依赖冲突，
+   且不占 GPU（Z29 / Z30）。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `py_compile`（tagger / config / test_tagger）→ 通过。
+- CPU 打标冒烟（`user_input.png`）→ **41 标签**；csv 解析 **10861 标签**，general_index 4 / character_index 8110。
+- 失败路径：`ZIV_AI_TAGGER=0` → `[]`；模型缺失 → warning + `[]`。
+- 未启动 GPU / 未加载 CUDA。
+
+### 遗留
+
+- **Z-020**：外置模块（模型权重许可未核 / 节点接口可能漂移 / 仅 CPU）。
+- L2（IPC `op="tag"` + C# 接入）**未做**，需契约授权。
+
+### 备注
+
+- 无契约签名变化；不改 C# / Contracts / IPC / commands.json；无新 NuGet。
+- `FROZEN.md` 追加「WD14 Tagger 集成 L1」段 + Z-020；`OPTIMIZATION.md` 追加 §8；
+  `ACCEPTANCE.MD` 追加验收段；`RELEASE-CHECKLIST.md` 追加 §7。
+
+---
+
+## [模板系统 T1–T2] - 2026-09-25（数据分层 + CRUD 服务）
+
+### 目标
+
+模板从「单一内置 commands.json」升级为**内置 + 用户覆盖**两层；新增按 name 合并的服务层与 CRUD。
+**不改 CommandParser 解析逻辑**（handler 分流属 T3）；**不改 C# / IPC 契约**（仅追加 `Handler`）；
+**无 GPU**（Z29 / Z30）。
+
+### 前置（T1 只读调查 · 已裁决）
+
+- 用户模板位置 `<AppDir>/Template/commands.user.json`；合并按 `name`；Source 不进契约。
+- 现状：`settings.ini` / `sessions/` / `_cache/` 均在程序目录（Z14）；`%APPDATA%` 未使用；
+  `D:\Program Files` 本机对 Authenticated Users 可写（非默认 ACL，不可推广）。
+
+### 做了什么
+
+- **Contracts**：新增 `CommandHandler` enum；`CommandDefinition.Handler`（默认 `Edit`，JSON `handler`）。
+- **Agent**：新增 `CommandSource` / `CommandTemplateDto` / `ICommandTemplateService` /
+  `CommandTemplateService`（内置 + 用户合并；CRUD；原子写；空 → 删用户文件）。
+- **CommandParser**：`BuiltInCommands()` private → internal（复用，解析逻辑未动）。
+- **publish.ps1**：保留白名单加 `Template/`（护住 `commands.user.json`）。
+- **测试**：新增 `CommandTemplateServiceTests`（13 例）。
+
+### 关键决策
+
+1. **用户覆盖独立文件**：`commands.user.json` 与内置 `commands.json` 并列，避免被 build / publish 覆盖。
+2. **按 name 合并**：用户同名整条覆盖内置，新 name 追加；不引 uid（避免改冻结契约）。
+3. **Source 在服务层**：`CommandSource` 不进 `CommandDefinition`，保持契约纯净。
+4. **不改解析逻辑**：合并视图接入 `CommandParser` 留 T3；本轮服务独立可测。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 **473 通过 / 0 失败**（460 + 13）。
+- 未启动 Python / 未加载模型。
+
+### 遗留
+
+- **Z-021**：T5 UI；T3 接线（`ICommandTemplateService` 未装配 `AppContext` / 未接入 `CommandParser`）。
+- T3（handler 分流）/ T4（/tag 验证）/ T5（UI）**未做**。
+
+### 备注
+
+- 契约仅追加 `CommandHandler` + `CommandDefinition.Handler`；无 IPC 改动；无新 NuGet；改动文件 < 600（Z8）。
+- `FROZEN.md` 追加「模板系统 T1–T2」段 + Z-021；`INTERFACES.md` 追加 §11；
+  `ACCEPTANCE.MD` 追加验收段；`RELEASE-CHECKLIST.md` 追加 §8。
+
+---
+
+## [模板系统 T2.5] - 2026-09-25（LoRA 多槽 + Z-022）
+
+### 目标
+
+补 T2 范围遗漏：LoRA 单槽 → 多槽（**纯数据层**）；登记 Z-022。
+
+### 做了什么
+
+- **Contracts**：`CommandDefinition.Loras`（JSON `loras`）+ `EffectiveLoras`（`[JsonIgnore]`，升级规则）；
+  `Lora` 加 `WhenWritingNull`（只读兼容）。
+- **Agent**：`CommandTemplateService` 写用户文件前 `NormalizeLora`（单槽折叠进多槽，清 `Lora`）。
+- **测试**：`CommandLoraTests`（6 例：旧单槽升级 / 多槽原样 / 并存优先 / 无 LoRA / 写归一化 / 多槽顺序）。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 **479 通过 / 0 失败**（473 + 6）。
+
+### 遗留
+
+- `EditPlan` / `PlanRequest` / `ToolInput` / `EditRequest` 仍单槽；多槽透传 / 按序叠加属 T3/T4。
+- **Z-021 编号不一致**：FROZEN 现为「模板 UI（T5）」，裁决为「组合命令（/tag换背景）」→ **待裁决**，
+  未擅自改既有行。
+
+### 备注
+
+- 契约仅追加 `Loras`；无 IPC 改动；不改 T2 已通过部分（数据分层 / CRUD / handler）。
+- `FROZEN.md` 追加 T2.6 段 + Z-022；`INTERFACES.md` §11 更新；`ACCEPTANCE.MD` 追加 T2.5 段。
+
+---
+
+## [模板系统 T3.1] - 2026-09-25（handler 分流 + 字段归属校验）
+
+### 目标
+
+`CommandParser` 按 `CommandHandler` 分流：`Edit` / `T2I` / `Outpaint` 走 `EditPlan`；`Tag` 走能力调用
+（执行属 T4）。新增字段归属校验 + handler 输入约束。**无 GPU**（Z29 / Z30）。
+
+### 做了什么
+
+- **Contracts**：`ParseResult.Capability` / `Warnings`；`CommandDefinition.EffectiveHandler`。
+- **CommandParser**：handler 分流；`ValidateFields`（越界报警 + 忽略）；`ValidateImageCount`
+  （T2I / Tag / Outpaint 输入约束）；`t2i` 迁移（`EffectiveHandler`）。
+- **测试**：`CommandHandlerRoutingTests`（10 例）。
+
+### 关键决策
+
+1. **Tag = 能力调用**：T3.1 返回 `Success=false` + `Capability="tag"` + 报错（安全，调用方走失败路径）；
+   T4 改为执行。
+2. **t2i 迁移**：显式非 Edit handler 优先；缺省 + `t2i=true` → `T2I`（旧数据兼容）。
+3. **越界不静默**：`Warnings` 随 `ParseResult` 上抛（T5 可展示）。
+
+### 行为反转（授权 · 需注意）
+
+- **T2I 有输入图：忽略 → 报错**。与既有产品行为（T2I 忽略 root pack）冲突，按裁决实施；
+  同步更新既有测试：`SessionViewModelTests.Submit_T2I_With_Root_Images_Is_Rejected`
+  （原 `Submit_T2I_With_MultiImage_Root_Does_Not_Use_The_Pack`）与
+  `Submit_DisplayText_Shows_Original_But_Stores_Expanded`（`/生成` → `/去水印`）。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 **489 通过 / 0 失败**（479 + 10）。
+
+### 遗留
+
+- **Z-023**：组合命令（/tag换背景）未实现（依赖 handler 分流 + 多步编排）。
+- T3.2（LoRA 多槽透传）/ T4（/tag 执行）/ T5（UI）未做。
+- `EditPlan` / `PlanRequest` / `ToolInput` / `EditRequest` 仍单槽。
+
+### 备注
+
+- 契约追加 `Capability` / `Warnings` / `EffectiveHandler`；无 IPC 改动；Z8 文件 < 600。
+- `FROZEN.md` 追加 T3.1 段 + Z-023；`INTERFACES.md` §11 更新；`ACCEPTANCE.MD` 追加 T3.1 段。
+
+---
+
+## [模板系统 T3.2] - 2026-09-25（LoRA 多槽透传 + IPC 0.9）
+
+### 目标
+
+LoRA 单槽 → **多槽**贯穿 `EditStep` → `ToolInput` → `EditRequest` → `submit.payload.loras`，
+Python 链式叠加。**无 GPU**（Z29 / Z30）。
+
+### 做了什么
+
+- **Contracts**：`EditStep` / `ToolInput` / `EditRequest` 加 `Loras` + `EffectiveLoras`；新增
+  `LoraSlots.Resolve`（去重）；`CommandDefinition.EffectiveLoras` 改用 `LoraSlots`。
+- **透传链**：`CommandParser.BuildLoras` / `Executor` / `QwenImage21EditTool` / `IpcSubmitMapper`
+  改走 `EffectiveLoras`；`SubmitPayload` + `IpcJsonContext` 加 `Loras`。
+- **Python**：`handlers._register_loras`（读 `loras` 数组 + 回退 `lora`）。
+- **IPC**：`ipc-protocol.md` §3.4 / §7 + `ipc_version 0.9`；`config.PROTOCOL_VERSION = "0.9"`。
+- **测试**：`CommandParserLoraTests` +2；`IpcSubmitMapperTests` +3。
+
+### 关键决策
+
+1. **去重按 path（保留首次）**：`LoraSlots` 共享，命令级 / 透传级一致；丢弃时 `Debug.WriteLine`，
+   命令入口另加 `ParseResult.Warnings`（不静默）。
+2. **兼容**：`Lora` 单槽保持只读；IPC `lora` 保留，`loras` 优先。
+3. **Outpaint 不做**（Z-024）；`EditPlan` / `PlanRequest` 无 Lora（不改）。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 **491 通过 / 0 失败**（489 + 2）；`IpcSubmitMapperTests` **10 通过**（+3，单独跑）。
+- Python CPU **38/38**；`py_compile`（handlers / config）通过。
+
+### 遗留
+
+- **Z-024**：Outpaint LoRA 透传未实现。
+- **Z-025**：多 LoRA 叠加语义未 GPU 验证（观察）。
+- T4（/tag 执行）/ T5（UI）/ 组合命令（Z-023）未做。
+
+### 备注
+
+- 契约追加 3 处 `Loras` + IPC `loras`；`ipc_version 0.9`；Z8 文件 < 600。
+- `FROZEN.md` 追加 T3.2 段 + Z-024 / Z-025；`INTERFACES.md` §11 更新；`ACCEPTANCE.MD` 追加 T3.2 段；
+  `contracts/ipc-protocol.md` 0.9。

@@ -46,3 +46,20 @@
 - **发布前核查**：确认发布包内**不含** `TE-Speed-QwenImage21/`（其位于 `.gitignore` 的 `Comfyui/` 下，
   且已在 `.gitignore` 显式排除）。
 - 挂账：**Z-019**（见 `DOC/FROZEN.md`）。
+
+## 7. WD14 Tagger 外置模块（2026-09-25，只增）
+
+- **语义**：外置模块，**不进发布包**（节点 + ONNX 模型位于 `.gitignore` 的 `Comfyui/` 下）。
+- **保留**：加载机制（`config.TAGGER_*` / `python/server/tagger.py`）+ 文档（`DOC/OPTIMIZATION.md` §8）。
+- **依赖**：`python_embeded` 需装 `onnxruntime`（CPU）；模型 `wd-vit-tagger-v3` 由用户自备
+  （放 `<ComfyUI>/custom_nodes/comfyui-wd14-tagger/models/`）。
+- **发布前核查**：确认发布包内**不含** `comfyui-wd14-tagger/` 与模型。
+- 挂账：**Z-020**（见 `DOC/FROZEN.md`）。
+
+## 8. 模板系统用户覆盖（T2，2026-09-25，只增）
+
+- **数据**：用户模板覆盖 `Template/commands.user.json`（程序目录，Z14）；缺失 = 无覆盖。
+- **发布保留**：`publish.ps1` 清理旧产物时保留整个 `Template/` 目录，避免清掉用户覆盖；
+  内置 `commands.json` / `loras.json` / `models.json` 由 `dotnet publish` 覆盖为最新。
+- **发布前核查**：确认发布流程后 `Template/commands.user.json`（若存在）仍在。
+- 挂账：**Z-021**（T5 UI / T3 接线，见 `DOC/FROZEN.md`）。

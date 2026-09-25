@@ -236,27 +236,44 @@ def _configure_pre_sampling_hooks(payload):
     transform stays a reserved seam (out of scope; see DOC/OPTIMIZATION.md).
     """
     pipeline_hooks.clear_pre_sampling_hooks()
-    lora = payload.get("lora")
-    if isinstance(lora, dict) and lora.get("path"):
-        entry = loras.resolve(lora.get("path"))
-        lora_path = loras.resolve_path(lora.get("path"))
-        if lora_path:
-            pipeline_hooks.register_pre_sampling_hook(
-                pipeline_hooks.make_lora_hook(
-                    lora_path,
-                    loras.resolve_strength(
-                        lora.get("strength_model"), entry, "default_strength_model"
-                    ),
-                    loras.resolve_strength(
-                        lora.get("strength_clip"), entry, "default_strength_clip"
-                    ),
-                )
-            )
-        else:
-            _LOG.warning("LoRA id/path could not be resolved: %s", lora.get("path"))
+    _register_loras(payload)
     optimizations = payload.get("optimizations")
     if isinstance(optimizations, dict) and optimizations.get("magcache"):
         pipeline_hooks.register_pre_sampling_hook(_build_magcache_hook(optimizations))
+
+
+def _register_loras(payload):
+    """Register one pre-sampling hook per LoRA (T3.2).
+
+    ``submit.payload.loras`` (array) wins; a legacy single ``lora`` dict is upgraded to a
+    one-element list. Each entry is ``{path, strength_model, strength_clip}`` where ``path``
+    is a registry id (resolved via :mod:`loras`) or a literal weight path. De-duplication
+    happens on the C# side (T3.2), so every entry is registered in order.
+    """
+    entries = payload.get("loras")
+    if not isinstance(entries, list) or not entries:
+        legacy = payload.get("lora")
+        entries = [legacy] if isinstance(legacy, dict) else []
+
+    for lora in entries:
+        if not isinstance(lora, dict) or not lora.get("path"):
+            continue
+        entry = loras.resolve(lora.get("path"))
+        lora_path = loras.resolve_path(lora.get("path"))
+        if not lora_path:
+            _LOG.warning("LoRA id/path could not be resolved: %s", lora.get("path"))
+            continue
+        pipeline_hooks.register_pre_sampling_hook(
+            pipeline_hooks.make_lora_hook(
+                lora_path,
+                loras.resolve_strength(
+                    lora.get("strength_model"), entry, "default_strength_model"
+                ),
+                loras.resolve_strength(
+                    lora.get("strength_clip"), entry, "default_strength_clip"
+                ),
+            )
+        )
 
 
 def _build_magcache_hook(optimizations):

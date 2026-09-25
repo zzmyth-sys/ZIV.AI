@@ -52,10 +52,10 @@ public class CommandParserLoraTests
 
         Assert.True(result.Success);
         var step = Assert.Single(result.Plan!.Steps);
-        Assert.NotNull(step.Lora);
-        Assert.Equal("anime_v2", step.Lora!.Path);
-        Assert.Equal(0.8, step.Lora.StrengthModel!.Value);
-        Assert.Equal(0.7, step.Lora.StrengthClip!.Value);
+        var lora = Assert.Single(step.EffectiveLoras);
+        Assert.Equal("anime_v2", lora.Path);
+        Assert.Equal(0.8, lora.StrengthModel!.Value);
+        Assert.Equal(0.7, lora.StrengthClip!.Value);
     }
 
     [Fact]
@@ -80,9 +80,8 @@ public class CommandParserLoraTests
         var result = await parser.ParseAsync("/简", SessionWithImage());
 
         Assert.True(result.Success);
-        var lora = Assert.Single(result.Plan!.Steps).Lora;
-        Assert.NotNull(lora);
-        Assert.Equal("anime_v2", lora!.Path);
+        var lora = Assert.Single(Assert.Single(result.Plan!.Steps).EffectiveLoras);
+        Assert.Equal("anime_v2", lora.Path);
         Assert.Equal(1.0, lora.StrengthModel!.Value);
         Assert.Equal(1.0, lora.StrengthClip!.Value);
     }
@@ -109,10 +108,9 @@ public class CommandParserLoraTests
         var result = await parser.ParseAsync("/抑制", SessionWithImage());
 
         Assert.True(result.Success);
-        var lora = Assert.Single(result.Plan!.Steps).Lora;
-        Assert.NotNull(lora);
+        var lora = Assert.Single(Assert.Single(result.Plan!.Steps).EffectiveLoras);
         // Step 8-2: an explicit 0 must survive (0 = suppress), not be rewritten to 1.0.
-        Assert.Equal(0.0, lora!.StrengthModel!.Value);
+        Assert.Equal(0.0, lora.StrengthModel!.Value);
         Assert.Equal(0.0, lora.StrengthClip!.Value);
     }
 
@@ -132,6 +130,66 @@ public class CommandParserLoraTests
         var result = await parser.ParseAsync("/plain", SessionWithImage());
 
         Assert.True(result.Success);
-        Assert.Null(Assert.Single(result.Plan!.Steps).Lora);
+        var step = Assert.Single(result.Plan!.Steps);
+        Assert.Null(step.Loras);
+        Assert.Empty(step.EffectiveLoras);
+    }
+
+    [Fact]
+    public async Task Command_With_Multiple_Loras_Populates_EditStep_Loras()
+    {
+        const string json = """
+        {
+          "version": "1.1",
+          "commands": [
+            {
+              "name": "/双",
+              "params": [],
+              "tool": "QW21edit",
+              "template": "x",
+              "loras": [
+                { "path": "lora_a", "strength_model": 0.8 },
+                { "path": "lora_b", "strength_model": 0.6 }
+              ]
+            }
+          ]
+        }
+        """;
+        var parser = new CommandParser(WriteCommands(json));
+
+        var result = await parser.ParseAsync("/双", SessionWithImage(), 1, resolution: null);
+
+        Assert.True(result.Success);
+        var loras = Assert.Single(result.Plan!.Steps).EffectiveLoras;
+        Assert.Equal(new[] { "lora_a", "lora_b" }, loras.Select(lora => lora.Path));
+        Assert.Equal(0.8, loras[0].StrengthModel!.Value);
+        Assert.Equal(0.6, loras[1].StrengthModel!.Value);
+    }
+
+    [Fact]
+    public async Task Duplicate_Lora_Paths_Are_Deduplicated_With_Warning()
+    {
+        const string json = """
+        {
+          "version": "1.1",
+          "commands": [
+            {
+              "name": "/重复",
+              "params": [],
+              "tool": "QW21edit",
+              "template": "x",
+              "loras": [ { "path": "same" }, { "path": "same" }, { "path": "other" } ]
+            }
+          ]
+        }
+        """;
+        var parser = new CommandParser(WriteCommands(json));
+
+        var result = await parser.ParseAsync("/重复", SessionWithImage(), 1, resolution: null);
+
+        Assert.True(result.Success);
+        var loras = Assert.Single(result.Plan!.Steps).EffectiveLoras;
+        Assert.Equal(new[] { "same", "other" }, loras.Select(lora => lora.Path));
+        Assert.Contains(result.Warnings, warning => warning.Contains("重复 path"));
     }
 }

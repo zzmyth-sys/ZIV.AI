@@ -25,6 +25,7 @@ internal static class IpcSubmitMapper
                 Denoise: request.Denoise,
                 OutputPath: request.OutputPath,
                 Lora: request.Lora,
+                Loras: request.EffectiveLoras.Count > 0 ? request.EffectiveLoras.ToList() : null,
                 Optimizations: request.Optimizations,
                 Resolution: MapResolution(request.Resolution),
                 Anchor: request.Anchor,

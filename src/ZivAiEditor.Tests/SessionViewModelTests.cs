@@ -686,25 +686,20 @@ public class SessionViewModelTests
     }
 
     [Fact]
-    public async Task Submit_T2I_With_MultiImage_Root_Does_Not_Use_The_Pack()
+    public async Task Submit_T2I_With_Root_Images_Is_Rejected()
     {
-        // A T2I plan has no main image, so the root pack must not be attached as references
-        // (Step 9C.10): no phantom refs, no usage info line, no used images on the node.
+        // T3.1: a T2I (handler=T2I) command takes no input image, so a non-empty root pack is
+        // rejected before the executor runs (previously the root pack was silently ignored).
         var session = new EditSession();
         var executor = new CapturingExecutor(Output);
         var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), executor);
         vm.SetRootImage(new[] { "a", "b", "c" });
 
-        await vm.SubmitAsync("/生成 一只猫");
+        var ok = await vm.SubmitAsync("/生成 一只猫");
 
-        Assert.NotNull(executor.LastPlan);
-        Assert.True(string.IsNullOrWhiteSpace(executor.LastPlan!.MainImagePath));
-        Assert.Empty(executor.LastPlan.AdditionalImages);
-        var node = session.GetHistory().Single(n => !string.IsNullOrEmpty(n.ParentNodeId));
-        Assert.Empty(node.UsedImagePaths);
-        Assert.DoesNotContain(
-            vm.Messages,
-            m => m.Role == ChatRole.System && m.Text.StartsWith("本次使用", StringComparison.Ordinal));
+        Assert.False(ok);
+        Assert.Null(executor.LastPlan);
+        Assert.Contains(vm.Messages, m => m.Role == ChatRole.Assistant && m.IsError);
     }
 
     [Fact]
@@ -1247,7 +1242,7 @@ public class SessionViewModelTests
         var session = new EditSession();
         var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
         vm.Start(new LaunchOptions { ImagePath = Root });
-        const string expanded = "/生成 一只发光的森林精灵";
+        const string expanded = "/去水印";
 
         var ok = await vm.SubmitAsync(expanded, displayText: "原始");
 
