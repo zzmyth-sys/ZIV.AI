@@ -4038,3 +4038,108 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 
 - 审计遗留 **M-7**（9C.7.16 / 9C.7B.16 未验）→ **R6 通过，关闭**。
   （注：FROZEN 既有 `Z-007` 为“UI 名实不符”，与本项无关；按“只增不改”**不动其行**。）
+
+---
+
+## 第 8 步收口（日期：2026-09-25）
+
+> 本段为**第 8 步（域物理划分 + 沿途解耦）整体收口**（**只增不改**）。汇总 8-0 ~ 8-4 各子步结论、
+> Z-006 收口、审查 A 类 R-1 ~ R-4、遮罩修复 R1–R6，以及妥协/挂账清单 Z-001 ~ Z-018 的统一状态。
+> **不改动 Step 0–9C.7-C 已冻结行**；各子步的原始冻结行以对应段落为准，本段只做收口索引与状态判定。
+> 全步**无契约破坏**（仅授权追加）；**无 GPU**，除 R6 为 Z30 例外的必需 GPU 验证。
+
+### 8-0 解耦审计（4 场景）· 结论
+
+- **性质**：第 8 步启动前的只读解耦审计（4 场景），非代码步。
+- **结论 / 方法修正**：审计把**物理划分从「主菜」降为「配菜」**——真正的价值在沿途**数据化 / 端口化**
+  （8-1 LoRA、8-2 模型、8-3 分辨率、Z-006 端口），物理划分（8-4）作为可选收尾；该修正贯穿 8-1 ~ 8-4 排序。
+- **裁决（Q1 / Q9 / Q10 / Q11）**：Q1 **不拆程序集**；Q9 端口接口放 `Contracts`；Q10 **不允许 UI 直接持有 Backend DTO**；
+  Q11 **保留 `Contracts` 程序集名**。同轮定优先级：8-1 LoRA → 8-2 模型 → 8-3 分辨率 → 8-4 物理划分（可选）。
+
+### 8-1 LoRA 数据驱动链路 · 结论
+
+- **目标**：加一个 LoRA 模板 = 改数据（`Template/commands.json` + `Template/loras.json`），0 代码。
+- **结论**：✅ 达成。契约追加 `Lora`（`CommandDefinition` / `EditStep` / `ToolInput`）+ `LoraOptions` 序列化名；
+  透传链 `CommandParser → Executor → QwenImage21EditTool → EditRequest.Lora` 打通；Python `loras.py`（CPU）+ 真加载 hook。
+  非 GPU **432 → 437**；Python `test_loras` 6/6。**Z-001 关闭**（显式 0 语义反转，8-2 彻底修复）。
+  遗留：Python 真加载待 GPU（**Z-002**，R6 关闭）。
+
+### 8-2 模型身份契约化（ModelId + models.json）· 结论
+
+- **目标**：加一个新模型 = 写 `Template/models.json` 条目 + 契约一处 `model_id`，代码不动。
+- **结论**：✅ 达成。契约追加 `ModelId`（`EditRequest` / `PlanRequest` / `EditPlan` / `ToolInput`）+ IPC `model_id`；
+  `ModelProfileRegistry` 改读 `models.json`（Backend 局部 DTO，kernel 零改动，缺失回退内置 Qwen）；Python `models.py`（env > models.json > 默认）。
+  **授权修订**：`LoraOptions.StrengthModel/StrengthClip` `double → double?`（关闭 Z-001）。非 GPU **437 → 444**（+7，含过滤外 1）；
+  Python `test_loras` 10/10、`test_models` 5/5。新增挂账 **Z-003**（无 UI 选择器）/ **Z-004**（Python env 过渡）。
+
+### 8-3 分辨率档位数据化 · 结论
+
+- **目标**：档位**标签**与**集合**来自数据（`models.json`），代码不动。
+- **结论**：✅ 达成。数据追加 `tier_labels`；**授权追加** kernel `ModelProfile.TierLabels`（Q10：标签必须经 kernel 承载）；
+  UI 新增纯 helper `ResolutionTierOptions`，`ResolutionPicker` 删除硬编码。生产缺 label → enum 名（配置错误可见）。
+  非 GPU **444 → 450**（+6）。新增挂账 **Z-005**（新增档位仍改代码，不引入任意数量档位）。
+
+### 8-4 域物理划分（命名空间拆分）· 结论
+
+- **目标**：纯搬迁（位置 / 命名空间变更，不改类型 / 签名 / 成员 / 行为；Q1 不拆程序集）。
+- **结论**：✅ 达成。`Contracts.Planning` → `Session` / `Project` / `Execution`（`Planning/` 移除）；
+  `Agent` → `Session` / `Project` / `Execution`（`Command` / `Planner` 子文件夹，命名空间扁平）；`git mv` 100% rename，
+  仅 namespace / using 行变化；旧命名空间 `grep` 全 0；程序集名不变。非 GPU **450 通过 / 0 失败**。
+  新增挂账 **Z-006**（Project→Session 具体依赖，本轮后收口关闭）。
+
+### Z-006 收口（IProjectMetadataStore 端口）· 结论
+
+- **结论**：✅ 关闭。新增 `Contracts/Project/IProjectMetadataStore`（3 元数据原语，**不含**会话读写）；
+  `SessionStore` 实现；`ProjectService` 由具体 `SessionStore` 改注入端口。非 GPU **450 → 451**（+1 接口一致性）。
+
+### 审查 A 类 R-1 ~ R-4 · 结论
+
+- **R-1**：Z-006 收口文档补登 ✅。
+- **R-2**：`ZivAiEditor.UI.csproj` 删除死引用，**只保留 `Contracts`**（比 ARCHITECTURE §4 旧措辞更严）✅。
+- **R-3**：`ARCHITECTURE.md` / `INTERFACES.md` / `FROZEN.md` 文档同步（8 项目 / UI 仅 Contracts / `IpcInferenceClient` / 编排分层）✅。
+- **R-4**：`AppContext.Create` 拆为 `BuildBackend` / `BuildTools` / `BuildAgent` / `BuildLlm` / `BuildPersistence` / `BuildImaging`，
+  构造顺序与 `AppContext` 形状不变 ✅。非 GPU **451 通过 / 0 失败**（未增测试）。
+- 新增 B 类挂账 **Z-007**（UI 名实不符）/ **Z-008**（MainWindow 上帝类）。
+
+### 遮罩修复 R1–R6（9C.7-C 收口）· 结论
+
+- **R1–R5（无 GPU）**：送管线对齐 / 持久化 flush / 气泡叠加 / 羽化上限 15 / 光标 / 半透明 / 关窗刷新 / 抑制深度
+  （`bool → int` 根因修复）/ 持久化硬化（源缺失不写悬空引用）/ 边界 M-4（导航退出遮罩工具）；非 GPU **451 → 460**。
+- **R6（Z30 例外，GPU 端到端）**：**9C.7.16 ✅**（遮罩外 MAD 0.71 / 遮罩内 33.09）、**9C.7B.16 ✅**（接缝 B 0.008 ≤ A 0.011）；
+  GPU 回基线（1132 → 1116 MiB）、无残留进程、无产品代码改动；**M-7 关闭**。
+- 新增挂账：**Z-009**（气泡叠加无缓存 / 对齐单向）、**Z-011**（多图 root 次缩略图，M-3）、**Z-015**（打包/参考/用图同模式）、
+  **Z-016**（`ReplaceNodeImage` 后尺寸错配，观察）、**Z-017**（导航后预览窗不同步，观察）。
+
+### 遗留清单（Z-001 ~ Z-018 汇总 · 统一状态）
+
+> 汇总自各段「妥协/挂账清单」，**不改动既有行**，仅在此统一标注状态。
+
+| 编号 | 内容 | 状态 |
+|---|---|---|
+| Z-001 | `LoraOptions` 显式 0 被误改 | 已关闭（8-2） |
+| Z-002 | Python LoRA 真加载未 GPU 验 | 已关闭（R6） |
+| Z-003 | `ModelId` 无 UI 选择器 | 挂账 |
+| Z-004 | Python env 覆盖 | 挂账 |
+| Z-005 | 新增档位仍改代码 | 挂账 |
+| Z-006 | Project→Session 具体依赖 | 已关闭（本轮） |
+| Z-007 | UI 名实不符 | 挂账 |
+| Z-008 | MainWindow 上帝类 | 挂账 |
+| Z-009 | 遮罩仅随裁切变化失效（气泡叠加无缓存 / 对齐单向） | 挂账 |
+| Z-010 | 羽化核心区视觉弱化 | 挂账（观察） |
+| Z-011 | 多图 root 次缩略图遮罩静默丢弃（M-3） | 挂账 |
+| Z-012 | 画笔大小不持久化 | 挂账 |
+| Z-013 | `MaskSpec` 注释不符 | 挂账 |
+| Z-014 | 脏标记 mtime | 挂账 |
+| Z-015 | 打包 / 参考 / 用图同模式（悬空） | 挂账 |
+| Z-016 | `ReplaceNodeImage` 后尺寸错配 | 挂账（观察） |
+| Z-017 | 导航后预览不同步 | 挂账（观察） |
+| Z-018 | 切项目时预览窗未同步 | 挂账（观察） |
+
+- **关闭 3 项**：Z-001 / Z-002 / Z-006；**其余 15 项挂账**（其中 Z-010 / Z-016 / Z-017 / Z-018 为观察）。
+
+### 第 8 步总收口
+
+- 主线（8-0 ~ 8-4 + Z-006 + R-1 ~ R-4 + 遮罩 R1–R6）**全部完成**；构建 0/0；非 GPU 全量 **460 通过 / 0 失败**
+  （第 7 步基线 432 → 460）；GPU 仅在 R6（Z30 例外）执行并回基线。
+- 未 push（提交链 `1648723` → `dee09ee` → `e6aedab` → `944bc7f` → `4b1aeae`）。
+- **Z29 / Z30 合规**：除 R6 外全程无 GPU；无契约破坏；无新 NuGet；改动文件 < 600（Z8）。
