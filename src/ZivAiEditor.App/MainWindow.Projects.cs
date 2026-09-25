@@ -1,10 +1,12 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using Avalonia.Controls;
 using ZivAiEditor.Agent.Project;
 using ZivAiEditor.Agent.Session;
 using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.UI;
+using ZivAiEditor.UI.Editing;
 
 namespace ZivAiEditor.App;
 
@@ -99,8 +101,9 @@ public partial class MainWindow
                 return false;
             }
 
-            // Step 9C.7: let any in-flight mask export land before its temp dir is cleaned.
-            await FlushPendingMaskAsync();
+            // Z-018: flush the export, exit the mask tool and close the preview window before
+            // the session is swapped; the main window is brought forward.
+            await ResetTransientUiAsync();
 
             // Decision A: clean the OLD session's crop temp files BEFORE Restore rewrites SessionId.
             var oldId = _session.SessionId;
@@ -147,12 +150,67 @@ public partial class MainWindow
             return true;
         }
 
-        if (!await _shell.ConfirmAsync(this, "保存当前项目？"))
+        // Z-018: the confirm dialog is modal to the main window only; disable the preview
+        // window while the prompt is up so it cannot be edited behind the dialog.
+        if (_imagePreview is { } preview)
+        {
+            preview.IsEnabled = false;
+        }
+
+        bool save;
+        try
+        {
+            save = await _shell.ConfirmAsync(this, "保存当前项目？");
+        }
+        finally
+        {
+            if (_imagePreview is { } restored)
+            {
+                restored.IsEnabled = true;
+            }
+        }
+
+        if (!save)
         {
             return true;
         }
 
         return await SaveCurrentAsync();
+    }
+
+    /// <summary>
+    /// Z-018: drops the transient per-project UI before the session is swapped — flushes the
+    /// pending mask export, exits the mask tool, closes the standalone preview window and brings
+    /// the main window forward. Aborting paths (busy / save failed / load failed) must not call
+    /// this.
+    /// </summary>
+    private async Task ResetTransientUiAsync()
+    {
+        await FlushPendingMaskAsync();
+
+        if (_imagePreview is { } preview)
+        {
+            // Null the field first so a re-entrant switch skips a second close.
+            _imagePreview = null;
+            _switchingProject = true;
+            try
+            {
+                preview.ToolState.SetTool(ToolMode.None);
+                preview.IsEnabled = false; // 防模态期间误操作
+                preview.Close();
+            }
+            finally
+            {
+                _switchingProject = false;
+            }
+        }
+
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        Activate();
     }
 
     private async Task NewProjectAsync()
@@ -173,8 +231,8 @@ public partial class MainWindow
 
     private async Task ResetToEmptyProjectAsync()
     {
-        // Step 9C.7: let any in-flight mask export land before its temp dir is cleaned.
-        await FlushPendingMaskAsync();
+        // Z-018: flush / exit the mask tool / close the preview before clearing the project.
+        await ResetTransientUiAsync();
 
         _imaging.CleanupSession(_session.SessionId); // Step 9C.7
         _writer.NewSession();
@@ -227,6 +285,9 @@ public partial class MainWindow
 
         if (deletingCurrent)
         {
+            // Z-018: deleting the current project swaps the session, so drop the transient UI.
+            await ResetTransientUiAsync();
+
             var projects = await _projects.ListAsync();
             if (projects.Count > 0)
             {

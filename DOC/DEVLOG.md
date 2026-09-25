@@ -5260,3 +5260,52 @@ RTX 4080 16GB；GPU 任务前空闲，基线 **1132 MiB**。测试图 `_test_ste
 
 - 无契约签名变化；不改 C# / Contracts / IPC；`python/server` 仅 config / pipeline；无新 NuGet；改动文件 < 600（Z8）。
 - `OPTIMIZATION.md` §1.7 记录外置模块安装/开关/删除/更新 + 实测；`RELEASE-CHECKLIST.md` 登记「不含 .pyd」。
+
+---
+
+## [Z-018 收口] - 2026-09-25：切项目边界（预览窗 / 遮罩工具 / 主窗激活）
+
+### 目标
+
+关闭 8-4 R5 登记的观察项 **Z-018**：切项目时预览窗残留旧项目图、遮罩工具未退出、主窗未前移。
+用户期望：切项目 → 判断改动 → 有改动弹「是否保存」→ 然后**自动关预览窗 + 回主窗**。
+前置：只读调查报告（A~E 现状 + 差距 + 方案）→ 用户裁决「Open / New / Delete-current 对称实施」。
+**无 GPU**（Z29 / Z30）；改动仅在 `ZivAiEditor.App`。
+
+### 现状（调查结论）
+
+- 已有：切项目走 `OpenProjectAsync(askSave:true)`，含 `IsDirty`（`SessionSignature`）判断 + `AskSaveIfDirtyAsync`
+  弹「保存当前项目？」（`MainWindow.Projects.cs:71` / `:141`）。
+- 缺失：全库无 `_imagePreview.Close()`；切项目不关预览窗、不退遮罩工具（仅 R5 历史导航退）、不激活主窗。
+
+### 做了什么（实施）
+
+- **字段**：`MainWindow._switchingProject`（`MainWindow.axaml.cs:74`）。
+- **助手** `ResetTransientUiAsync()`（`MainWindow.Projects.cs:187`）：flush → `SetTool(None)` →
+  `IsEnabled=false` → `Close()` →（Minimized→Normal）→ `Activate()`；先置 `_imagePreview=null` 抗重入。
+- **三处对称调用**：`OpenProjectAsync`（`Restore` 前，`:106`）/ `ResetToEmptyProjectAsync`（`:235`）/
+  `DeleteProjectAsync` 删当前分支（`:289`）。中止路径（IsBusy / 保存失败 / Load 异常）**不调用**。
+- **模态期禁用**：`AskSaveIfDirtyAsync` 的确认提示期间禁用预览窗、`finally` 恢复（`:153-171`）。
+- **Closed 守卫**：`MainWindow.Preview.cs:56` 追加 `&& !_switchingProject`（抑制旧 session 的多余重建）。
+
+### 关键决策
+
+1. **中止不关窗**：关闭动作放在「`Load` 成功、保存已决」之后；失败路径提前返回，预览窗保持原状。
+2. **单一入口**：`_switchingProject` 只在 `ResetTransientUiAsync` 内读写；三处调用点对称。
+3. **重入防护**：助手先置 `_imagePreview=null`，`Delete` 后接 `OpenProjectAsync` 再调助手时自动跳过第二次 Close。
+4. **模态期禁用落地风险 #3**：把 `IsEnabled=false` 环绕 `ConfirmAsync`（而非只放在 Close 前），使验收 #2 成立。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build -c Release` → **0 错误 0 警告**；非 GPU 全量 **460 通过 / 0 失败**（App 层，未增测试）。
+- Z8：改动的 3 个 partial 均 < 600（546 / 205 / 323）。
+
+### 遗留
+
+- 真机 **7 条**用户确认通过；**Z-018 关闭**。
+- 未动 R5 的历史导航逻辑（两者独立）。
+
+### 备注
+
+- 无契约签名变化；不改 C# 契约 / IPC / Python / TE-Speed；无新 NuGet。
+- `FROZEN.md` 追加「Z-018 收口」段 + Z-018 关闭行；`ACCEPTANCE.MD` 追加对应验收段。

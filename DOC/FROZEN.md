@@ -4185,3 +4185,40 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 | 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
 |---|---|---|---|---|
 | Z-019 | TE-Speed 外置加速模块（默认关；可控 / 可删 / 可更新） | 无 LICENSE / 闭源 pyd / Windows x64 绑定 / attention 冲突未验 | 上游加 LICENSE / 加速率提升 / 暴露源码 | 发布前 / 升级 ComfyUI |
+
+---
+
+## Z-018 收口：切项目边界（预览窗 / 遮罩工具 / 主窗激活）（日期：2026-09-25）
+
+> **只增不改**。关闭 8-4 R5 登记的观察项 **Z-018**（切项目时预览窗未同步）。**无契约签名变化**；
+> 改动仅在 `ZivAiEditor.App`（MainWindow 的 3 个 partial）；**不改 C# 契约 / IPC / Python**；**无 GPU**（Z29 / Z30）。
+
+### Z018.1 行为（冻结 · 非契约）
+
+- **新增 `MainWindow._switchingProject`**（bool）：切项目关闭预览窗期间为真，用于抑制预览窗
+  `Closed` 回调里的聊天重建（该重建由随后的 `_vm.Reload()` 负责）。
+- **新增 `ResetTransientUiAsync()`**（`MainWindow.Projects.cs`）：**flush 遮罩导出 → 退出遮罩工具
+  （`ToolState.SetTool(ToolMode.None)`）→ `IsEnabled=false` → `Close()` 预览窗 →（Minimized 时先 Normal）
+  → `Activate()` 主窗**；先置 `_imagePreview=null` 以抗重入。
+- **三处对称调用**（中止路径不调用）：
+  - `OpenProjectAsync`：`LoadAsync` 成功、保存已决后、`Restore` 之前（`MainWindow.Projects.cs:106`）；
+  - `ResetToEmptyProjectAsync`：清空前（`:235`）；
+  - `DeleteProjectAsync`：**删当前项目**分支内（`:289`）。
+- **中止不关窗**：`IsBusy` / 保存失败 / `Load` 异常 → 提前 `return false`，不执行本助手。
+- **模态期禁用**：`AskSaveIfDirtyAsync` 在「保存当前项目？」提示期间将预览窗 `IsEnabled=false`，提示
+  结束（含异常）后恢复（`:153-171`）——落地上轮报告风险 #3。
+- **Closed 守卫**：`MainWindow.Preview.cs:56` 的重建条件追加 `&& !_switchingProject`。
+
+### Z018.2 验收（无 GPU / C# 改动）
+
+- `dotnet build -c Release` → **0 错误 0 警告**；非 GPU 全量 **460 通过 / 0 失败**（App 层，未增测试）。
+- Z8：`MainWindow.axaml.cs` 546 / `MainWindow.Preview.cs` 205 / `MainWindow.Projects.cs` 323，均 < 600。
+- **真机 7 条**（用户跑）：① 画遮罩切项目 → 保存询问 + 关预览 + 回主窗；② 询问期预览不可操作；
+  ③ 切同一项目 no-op；④ 生成中拒绝；⑤ 新建 / 删当前同款；⑥ 未进遮罩工具切项目同款；
+  ⑦ 切项目后无残留遮罩工具。
+
+### Z018.3 妥协/挂账清单 · 追加（Z-018 关闭）
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-018 | 切项目时预览窗未同步（预览窗残留旧项目图 / 遮罩工具未退 / 主窗未前移） | —（已由本段收口） | — | **本轮关闭**（2026-09-25） |

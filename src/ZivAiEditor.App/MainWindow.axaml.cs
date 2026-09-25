@@ -66,6 +66,13 @@ public partial class MainWindow : Window
     private readonly ILlmPreflight? _llmPreflight;
     private ImagePreview? _imagePreview;
     private bool _closing;
+
+    /// <summary>
+    /// Z-018: true while a project switch is closing the preview window. The preview's
+    /// close-time chat rebuild is skipped because the switch reloads the session itself.
+    /// </summary>
+    private bool _switchingProject;
+
     private bool _suppressHistorySelection;
 
     /// <summary>The live preview Image inside the pending bubble, if any.</summary>

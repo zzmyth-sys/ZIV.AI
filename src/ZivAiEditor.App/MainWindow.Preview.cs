@@ -53,7 +53,7 @@ public partial class MainWindow
                 if (_maskEditedInPreview)
                 {
                     _maskEditedInPreview = false;
-                    if (!_vm.IsBusy && !_closing)
+                    if (!_vm.IsBusy && !_closing && !_switchingProject)
                     {
                         MaskDiagnostics.Log("[rebuild] current=" + _vm.Session.CurrentNodeId
                             + " path=" + string.Join(",", _vm.Session.GetPathToCurrent()
