@@ -154,6 +154,15 @@
     <Setter Property="StrokeJoin" Value="Round" />
   </Style>
 
+  <!-- Delete-X on a completed AI bubble: hidden until the bubble is hovered; red base. -->
+  <Style Selector="Button.bubbleDelete">
+    <Setter Property="IsVisible" Value="False" />
+    <Setter Property="Background" Value="{StaticResource ZivCloseHoverBrush}" />
+  </Style>
+  <Style Selector="Border.bubble:pointerover Button.bubbleDelete">
+    <Setter Property="IsVisible" Value="True" />
+  </Style>
+
   <!-- Borderless transparent text box used inside the input container. -->
   <Style Selector="TextBox.plainInput">
     <Setter Property="Background" Value="Transparent" />

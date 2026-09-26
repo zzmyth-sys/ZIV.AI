@@ -28,4 +28,11 @@ public interface IEditFlowRunner
         CancellationToken ct = default);
 
     bool CancelCurrent();
+
+    /// <summary>
+    /// Deletes the DAG node <paramref name="nodeId"/> and its whole subtree, cleans up the
+    /// related files, and refreshes the history / context. Returns <c>true</c> when the node
+    /// was removed (a root node / unknown id / busy state returns <c>false</c>).
+    /// </summary>
+    Task<bool> DeleteNodeAsync(string nodeId);
 }

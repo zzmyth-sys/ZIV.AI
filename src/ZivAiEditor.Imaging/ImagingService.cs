@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using ZivAiEditor.Contracts.Imaging;
@@ -54,5 +58,39 @@ public sealed class ImagingService : IImagingService
     {
         ImageCropper.CleanupAll();
         MaskExporter.CleanupAll();
+    }
+
+    public void CleanupNode(string? sessionId, IReadOnlyList<string> nodeIds)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || nodeIds is null || nodeIds.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var nodeId in nodeIds)
+        {
+            if (string.IsNullOrWhiteSpace(nodeId))
+            {
+                continue;
+            }
+
+            DeleteFileSafe(ImageCropper.ResolveCropPath(sessionId, nodeId));
+            DeleteFileSafe(MaskExporter.ResolveMaskPath(sessionId, nodeId));
+        }
+    }
+
+    private static void DeleteFileSafe(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[imaging] node cleanup failed '{path}': {ex.Message}");
+        }
     }
 }

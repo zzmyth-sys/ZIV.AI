@@ -108,4 +108,13 @@ public interface IEditSessionWriter
     /// <paramref name="nodeId"/> is unknown (no-op, matching <see cref="SetNodeCrop"/>).
     /// </summary>
     IReadOnlyList<IEditNode> RemoveSubtree(string nodeId);
+
+    /// <summary>
+    /// Removes <paramref name="nodeId"/> <b>and its whole subtree</b> (every descendant), and
+    /// returns the removed nodes — including <paramref name="nodeId"/> itself — so the caller
+    /// can clean up their files. A no-op that returns an empty list when
+    /// <paramref name="nodeId"/> is unknown; never throws. Removing the root empties the DAG.
+    /// Unlike <see cref="RemoveSubtree"/>, the start node is removed too.
+    /// </summary>
+    IReadOnlyList<IEditNode> RemoveNodeAndSubtree(string nodeId);
 }

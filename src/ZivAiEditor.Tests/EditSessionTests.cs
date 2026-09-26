@@ -730,4 +730,67 @@ public class EditSessionTests
         Assert.Empty(session.RemoveSubtree("missing"));
         Assert.Single(session.Nodes);
     }
+
+    [Fact]
+    public void RemoveNodeAndSubtree_Removes_Node_And_Descendants()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        var a = session.AppendNode(rootId, @"C:\img\a.png", "a");
+        var b = session.AppendNode(a.NodeId, @"C:\img\b.png", "b");
+        var c = session.AppendNode(b.NodeId, @"C:\img\c.png", "c");
+        var sibling = session.AppendNode(rootId, @"C:\img\s.png", "s");
+
+        var removed = session.RemoveNodeAndSubtree(a.NodeId);
+
+        Assert.Equal(3, removed.Count);
+        Assert.Contains(removed, n => n.NodeId == a.NodeId);
+        Assert.Contains(removed, n => n.NodeId == b.NodeId);
+        Assert.Contains(removed, n => n.NodeId == c.NodeId);
+        Assert.False(session.Nodes.ContainsKey(a.NodeId));
+        Assert.True(session.Nodes.ContainsKey(rootId));
+        Assert.True(session.Nodes.ContainsKey(sibling.NodeId));
+    }
+
+    [Fact]
+    public void RemoveNodeAndSubtree_Root_Empties_Dag()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        session.AppendNode(rootId, @"C:\img\a.png", "a");
+
+        var removed = session.RemoveNodeAndSubtree(rootId);
+
+        Assert.Equal(2, removed.Count);
+        Assert.Empty(session.Nodes);
+        Assert.Null(session.RootImagePath);
+        Assert.Null(session.CurrentNodeId);
+    }
+
+    [Fact]
+    public void RemoveNodeAndSubtree_Current_Switches_To_Parent()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        var a = session.AppendNode(rootId, @"C:\img\a.png", "a");
+        var b = session.AppendNode(a.NodeId, @"C:\img\b.png", "b");
+        session.NavigateTo(b.NodeId);
+
+        session.RemoveNodeAndSubtree(a.NodeId);
+
+        Assert.Equal(rootId, session.CurrentNodeId);
+    }
+
+    [Fact]
+    public void RemoveNodeAndSubtree_Unknown_Node_Returns_Empty()
+    {
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+
+        Assert.Empty(session.RemoveNodeAndSubtree("missing"));
+        Assert.Single(session.Nodes);
+    }
 }

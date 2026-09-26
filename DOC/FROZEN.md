@@ -4740,3 +4740,87 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 
 - **Z-030（命令模板无热重载）本轮裁决永久关闭**：不做热重载，UI 编辑 `commands.user.json` 后**重启生效**。
   T5·S1 段落的 Z-030 原行**不改**，以本段为准。
+
+---
+
+## 模板系统 T5 收口（日期：2026-09-26）
+
+> **只增不改**。T5（模板系统 UI / 接线）整段收口：关闭 Z-021 / Z-030，登记新增非契约文件。
+> **不改代码 / 契约 / `commands.json` / IPC / Python**；**无 GPU**（Z29 / Z30）。
+
+### T5c.1 Z-021 关闭说明（不改 T2.5 原行）
+
+- **Z-021**（T2.5 登记：「模板 UI（T5）未做；`ICommandTemplateService` 未装配 `AppContext` / 未接入
+  `CommandParser`」）→ **本轮全部关闭**：
+  - **装配**：`AppContext` 构 `CommandTemplateService`，`CommandParser` 以 `List()` 合并视图构造，
+    暴露 `ICommandTemplateService CommandTemplates`（S1）；
+  - **UI 接线**：`/` 候选列表（Popup + 键盘 + 筛选 + 可用性 + 排序）（S4 / S4-fix）。
+- T2.5 段落的 Z-021 原行**不改**，以本段为准。
+
+### T5c.2 Z-030 关闭说明（不改 T5·S1 原行）
+
+- **Z-030**（命令模板无热重载）→ **已评估不做，永久关闭**：UI 编辑 `commands.user.json` 后**重启生效**
+  （重启足够快，重建 parser 重分发收益低）。T5·S1 段落的 Z-030 原行**不改**，以本段为准。
+
+### T5c.3 新增文件登记（非契约）
+
+| 类型 | 位置 | 说明 |
+|---|---|---|
+| `CommandOrdering`（新） | `ZivAiEditor.UI/Editing/CommandOrdering.cs` | 纯排序：`/扩图` 置顶 + 次数降序 + 稳定并列 |
+| `CommandUsageStore`（新） | `ZivAiEditor.App/CommandUsageStore.cs` | App 状态：`Load()` / `Record(name)` / `Counts`；源生成 JSON |
+| `MainWindow.CommandList`（新，partial） | `ZivAiEditor.App/MainWindow.CommandList.cs` | `/` 候选列表 UI（Popup / 键盘 / 筛选 / 排序 / 计数） |
+| `commands.usage.json`（新，状态文件） | `{AppContext.BaseDirectory}/`（Z14） | 使用次数；**非契约**；缺 / 坏 → 空；写失败静默 |
+
+- 另：`CommandAvailability`（App）/ `CommandSuggestions`（UI）为 S1 已登记的非契约纯函数（见 INTERFACES §15）。
+
+---
+
+## 临时诊断钩子登记（`/扩图` 重跑丢蓝底 · D1–D7，2026-09-26）
+
+> **临时诊断钩子，后续移除**。不改任何冻结签名 / 不新增契约类型。
+
+| 类型 | 位置 | 说明 |
+|---|---|---|
+| `DiagLog`（新，诊断专用） | `ZivAiEditor.Contracts/Diagnostics/DiagLog.cs` | `ZIV_AI_DIAG=1` 门控；写 `{BaseDirectory}/_cache/diag.log`；never-throw；无行为改变 |
+| D1 钩子 | `ZivAiEditor.Agent/Session/EditSession.cs`（`PipelinePath`） | 记录 node / crop / picked / result |
+| D2/D3 钩子 | `ZivAiEditor.Agent/Execution/Command/CommandParser.cs`（`/扩图`） | 记录 mainImage / current / crop / passes |
+| D4 钩子 | `ZivAiEditor.Agent/Execution/Executor.cs`（`BuildRerunPlanAsync`） | 记录 NavigateTo 前/后、parse 时、恢复后 current |
+| D5 钩子 | `ZivAiEditor.App/Flows/FlowRunner.Rerun.cs`（`/扩图` 预检） | 记录 node / parent / parentCrop |
+| D6 钩子 | `python/server/handlers.py`（`_run_submit`） | `ZIV_AI_DIAG=1` 记录实际 image_path（backend.log） |
+| D7 钩子 | `ZivAiEditor.Backend/IpcSubmitMapper.cs`（`BuildSubmitRequest`） | 记录 C# submit payload image_path / mask_path |
+
+- **移除条件**：`/扩图` 重跑丢蓝底定位并修复后，随钩子一并删除；`DiagLog` 放 Contracts 仅为跨 Agent/App/Backend 可达（Z8）。
+
+---
+
+## 修复登记（`/扩图` 重跑丢蓝底 · A+B，2026-09-26）
+
+> 非契约行为修正；不改冻结签名、不新增契约。
+
+- **A（`ZivAiEditor.App/Flows/FlowRunner.Rerun.cs`）**：重跑成功**不再清 `Crop` / `Mask`**，不再删 `oldCrop` / `oldMask`
+  文件；仅保留子树 cascade 删除 + 旧输出图删除（9C.8-A2）。语义：crop/mask 为用户编辑（9C.6-B / 9C.7），重跑只换输出图。
+- **B（`ZivAiEditor.App/Flows/FlowRunner.Submit.cs` / `ZivAiEditor.App/MainWindow.Chat.cs`）**：提交取消后追加非错误
+  System 提示「已取消。输入框内容已恢复，再次发送即可重试。」；气泡「重新生成」ToolTip = `重跑此节点：{Command}`。
+- **未做**：C（`RerunSpec` 存源图）/ D（重跑不切父）；未改 `PipelinePath` / `ChatFlowRules` 裁切回退 / 其它命令 / Python / IPC。
+- **D1–D7 诊断钩子**：定位完成、修复已落，但**本步未移除**；移除为后续独立改动（见上方「临时诊断钩子登记」）。
+
+---
+
+## 功能登记（气泡 X 删除节点 + 子树，2026-09-26）
+
+> 契约**尾部追加**，不改既有签名；Z8 单文件 < 600。
+
+| 类型 | 位置 | 说明 |
+|---|---|---|
+| `IEditSessionWriter.RemoveNodeAndSubtree`（契约追加） | `ZivAiEditor.Contracts/Session/IEditSessionWriter.cs` | 删自身 + 全部后代；返回被删节点；未知 → 空；不抛 |
+| `IImagingService.CleanupNode`（契约追加） | `ZivAiEditor.Contracts/Imaging/IImagingService.cs` | 逐节点删 crop/mask 临时文件；never-throw |
+| `IEditFlowRunner.DeleteNodeAsync`（UI 端口追加） | `ZivAiEditor.UI/Chat/IEditFlowRunner.cs` | 删 DAG + 清文件 + 刷新；返回是否成功 |
+| `EditSession.RemoveNodeAndSubtree`（实现） | `ZivAiEditor.Agent/Session/EditSession.Subtree.cs` | 与 `RemoveSubtree` 共用 `RemoveRange`；删根清空；current 回退父 |
+| `ImagingService.CleanupNode`（实现） | `ZivAiEditor.Imaging/ImagingService.cs` | `ResolveCropPath` / `ResolveMaskPath` + 容错删 |
+| `FlowRunner.Delete.cs`（新） | `ZivAiEditor.App/Flows/FlowRunner.Delete.cs` | busy / 未知 / root 拒绝；清理 + 刷新 |
+| `MainWindow.Delete.cs`（新，partial） | `ZivAiEditor.App/MainWindow.Delete.cs` | 确认框 + 预览关窗 + 状态 |
+| 气泡 × UI（非契约） | `ZivAiEditor.App/MainWindow.Chat.cs` / `Styles/ChromeStyles.axaml` | `bubble` hover + `bubbleDelete`（`IconClose`） |
+
+- **确认框归属**：view 层（MainWindow），非 FlowRunner —— 后者按类契约不引用 shell / view。
+- **清理范围**：App 临时区 crop/mask + 项目副本（含 refs）；**不动**用户目录输出图（Z24）。
+- **无 IPC / Python 改动**；`FlowRunner` ctor 追加可选 `IImagingService? imaging`（末位，默认 null，既有调用不变）。

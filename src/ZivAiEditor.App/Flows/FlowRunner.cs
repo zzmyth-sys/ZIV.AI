@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using ZivAiEditor.Agent.Execution;
 using ZivAiEditor.Contracts.Execution;
+using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.UI.Chat;
 
@@ -40,6 +41,7 @@ internal sealed partial class FlowRunner : IEditFlowRunner
     private readonly IPromptExpander? _promptExpander;
     private readonly ILlmPreflight? _llmPreflight;
     private readonly Action<string, IReadOnlyCollection<string>, bool>? _nodeArtifactsCleaner;
+    private readonly IImagingService? _imaging;
 
     public FlowRunner(
         SessionViewModel vm,
@@ -49,7 +51,8 @@ internal sealed partial class FlowRunner : IEditFlowRunner
         IExecutor executor,
         IPromptExpander? promptExpander = null,
         ILlmPreflight? llmPreflight = null,
-        Action<string, IReadOnlyCollection<string>, bool>? nodeArtifactsCleaner = null)
+        Action<string, IReadOnlyCollection<string>, bool>? nodeArtifactsCleaner = null,
+        IImagingService? imaging = null)
     {
         _vm = vm ?? throw new ArgumentNullException(nameof(vm));
         _session = session ?? throw new ArgumentNullException(nameof(session));
@@ -59,6 +62,7 @@ internal sealed partial class FlowRunner : IEditFlowRunner
         _promptExpander = promptExpander;
         _llmPreflight = llmPreflight;
         _nodeArtifactsCleaner = nodeArtifactsCleaner;
+        _imaging = imaging;
     }
 
     /// <summary>

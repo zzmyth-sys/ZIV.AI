@@ -247,3 +247,42 @@
 - **行为更正**：`ShowSuggestions` 先 `CommandAvailability.Evaluate` **剔除不可用**（不渲染，取代置灰）；
   再 `CommandOrdering.Order`；`CommitSelection` 成功后 `Record(name)`。
 - **无契约追加 / 无 IPC 改动**。
+
+## 18. 追加说明（模板系统 T5 收口 · 非契约登记索引）
+
+> 本节为**追加**（只增不改）。T5 收口索引；新增文件均已在前述节登记，本节不重复契约描述。
+
+- **非契约新增（汇总）**：
+  - `ZivAiEditor.UI.Editing.CommandSuggestions`（§15）/ `CommandOrdering`（§17）——纯逻辑；
+  - `ZivAiEditor.App.CommandAvailability`（§15）/ `CommandUsageStore`（§17）——App 层；
+  - `ZivAiEditor.App.MainWindow.CommandList`（§16）——`/` 候选列表 UI（partial）；
+  - `{AppContext.BaseDirectory}/commands.usage.json`（§17）——使用次数状态文件（非契约）。
+- **Z-021 / Z-030 关闭**（见 `FROZEN.md`「T5 收口」）。
+- **无契约追加 / 无 IPC 改动**。
+
+---
+
+## 19. 追加说明（`/扩图` 重跑修复 A+B，2026-09-26）
+
+> 非契约行为修正（无签名 / 契约变更）。
+
+- **重跑保留 crop/mask**：`FlowRunner.RerunNodeAsync` 成功分支不再 `SetNodeCrop/SetNodeMask(null)`，不再删
+  `oldCrop` / `oldMask` 文件；仍 cascade 删除子树与旧输出图。理由：crop/mask 为节点用户编辑（9C.6-B / 9C.7），
+  重跑只更换输出图。
+- **取消引导（非契约 UI）**：提交取消后追加非错误 System 提示；气泡「重新生成」ToolTip = `重跑此节点：{Command}`。
+
+## 20. 追加说明（气泡 X 删除节点 + 子树，2026-09-26）
+
+> 本节为**追加**（只增不改）。
+
+- **契约追加（尾部）**：
+  - `ZivAiEditor.Contracts.Session.IEditSessionWriter.RemoveNodeAndSubtree(string nodeId) → IReadOnlyList<IEditNode>`：
+    删除 `nodeId` 自身 + 全部后代，返回被删节点（含自身）；未知 → 空表（no-op）；不抛；删 root 等价清空。
+  - `ZivAiEditor.Contracts.Imaging.IImagingService.CleanupNode(string? sessionId, IReadOnlyList<string> nodeIds)`：
+    删 `_cache/crops|masks/{sessionId}/{nodeId}.png`；目录不存在 no-op、逐文件容错、never-throw。
+- **UI 端口追加（尾部）**：`ZivAiEditor.UI.Chat.IEditFlowRunner.DeleteNodeAsync(string nodeId) → Task<bool>`。
+- **实现（非契约）**：`EditSession.Subtree` 增 `RemoveNodeAndSubtree`（与 `RemoveSubtree` 共用 `RemoveRange`）；
+  `ImagingService.CleanupNode`；`FlowRunner.Delete.cs`；`MainWindow.Delete.cs`（partial）；气泡 × 样式（`Border.bubble` +
+  `Button.bubbleDelete`）。
+- **构造追加（非契约）**：`FlowRunner` ctor 末位增可选 `IImagingService? imaging = null`。
+- **无 IPC / Python 改动**。

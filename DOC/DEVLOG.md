@@ -5875,3 +5875,165 @@ S4 候选列表三项收尾：① 不可用命令**不渲染**（而非置灰）
 
 - 未改命令集 / `CommandParser` / 契约 / IPC / Python；未新增 NuGet；改动文件均 < 600（Z8）。
 - `FROZEN.md` 追加「模板系统 T5·S4-fix」+ **Z-030 关闭**；`INTERFACES.md` §17；`ACCEPTANCE.MD` 追加验收段。
+
+---
+
+## [模板系统 T5 收口] - 2026-09-26：整段收口（装配 + `/` 候选列表）
+
+### 目标
+
+T5（模板系统 UI / 接线）整段收口：汇总 S1–S4 + S4-fix 的交付、决策与遗留。**本段只写文档**，
+不改代码 / 契约 / `commands.json` / IPC / Python；**无 GPU**（Z29 / Z30）。
+
+### 五步清单与验证（Z29 / Z30：无 GPU）
+
+| 步 | 内容 | 状态 | 验证 |
+|---|---|---|---|
+| S1 | 装配：`CommandParser` 列表 ctor（内置 + 用户合并视图）；`AppContext` 构 `CommandTemplateService` + 暴露 `CommandTemplates` | ✅ | build 0/0 |
+| S2 | `CommandAvailability` 纯函数（四轴）+ `CommandRequirements` 复用 | ✅ | `CommandAvailabilityTests` 10 |
+| S3 | `CommandSuggestions` 前缀筛选纯函数 | ✅ | `CommandSuggestionsTests` 4 |
+| S4 | `/` 候选列表 UI（Popup + Tunnel 键盘 + 自绘行 + 输入框自持焦点） | ✅ | 受影响 82；全量 **535** |
+| S4-fix | 不可用**剔除**（取代置灰）+ `/扩图` 置顶 + 次数排序 + 计数持久化 | ✅ | 受影响 92；全量 **545** |
+| S5（CRUD 设置台） | 用户明确不做设置台 | ✖（不做） | — |
+
+- 最终：`dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**；非 GPU 全量 **545 通过 / 0 失败**。
+
+### 关键决策
+
+1. **热重载不做**：UI 编辑 `commands.user.json` 后**重启生效**（重建 parser 需重分发到 `Executor` / `MainWindow`，
+   收益低）→ **Z-030 关闭**。
+2. **置灰改为剔除**：不可用命令**不渲染**（而非置灰 + ToolTip + ↑↓ 跳过），列表更干净；`CommandAvailability`
+   仍为唯一判定源。
+3. **次数排序而非 MRU**：按累计使用次数降序（稳定并列），非最近使用顺序；计数落盘 `commands.usage.json`。
+
+### 遗留（登记）
+
+- **计数死键**：命令改名后旧计数键成为死数据（无害，不清除；无次数清除 UI）。
+- **同步写盘**：`CommandUsageStore.Record` 每次选择同步小写盘；命令集大 / 频繁时可异步化（当前无必要）。
+- **无头探针盲区**：测试工程无 `Avalonia.Headless` 基础设施，UI 交互无自动化回归，依赖真机验收。
+
+### 备注
+
+- 未改命令集 / `CommandParser` 解析逻辑 / 契约 / IPC / Python；未新增 NuGet；改动文件均 < 600（Z8）。
+- `FROZEN.md` 追加「T5 收口」+ Z-021 / Z-030 关闭；`INTERFACES.md` §18；`ACCEPTANCE.MD` 追加 T5 收口验收段。
+
+---
+
+## [临时诊断钩子 · `/扩图` 重跑丢蓝底] - 2026-09-26：纯观察 D1–D7
+
+### 目标
+
+为「`/扩图` 重跑丢外扩蓝底 / 输出变原图尺寸」做**纯调试埋点**：一次复现拿全证据。**零行为改变**（不加校验、不提前
+return、不改异常路径、不改 `PipelinePath` 回退、不改 `RerunSpec`）；默认静默，`ZIV_AI_DIAG=1` 才写。
+
+### 做了什么
+
+- **新增 `DiagLog`（诊断专用，后续随钩子移除）**：`ZivAiEditor.Contracts/Diagnostics/DiagLog.cs`。写
+  `{AppContext.BaseDirectory}/_cache/diag.log`，`[diag] 时间戳 标签 字段` 单行；never-throw；`ZIV_AI_DIAG=1` 门控。
+  放 Contracts 的唯一原因：Agent / App / Backend 三个钩子点只有它可达（Z8：一个助手，勿散落）。
+- **D1 `EditSession.PipelinePath`**（`Agent/Session/EditSession.cs`）：记录 `node` / `crop=null|{result,outpaint,exists}` /
+  picked=`cropResult|imagePath` / result。
+- **D2 `CommandParser` `/扩图` 图源**（`Agent/Execution/Command/CommandParser.cs:242` 附近）：记录 `current` / 当前节点 crop /
+  `mainImage`。
+- **D3 `CommandParser` `/扩图` gate**（同文件 `:206` 附近）：记录 `current` / crop / `passes`。
+- **D4 `Executor.BuildRerunPlanAsync`**（`Agent/Execution/Executor.cs`）：记录 NavigateTo 前 current + parent、
+  NavigateTo 后 current、ParseAsync 时 current + command、parse 结果 + `mainImage`、finally 恢复后 current。
+- **D5 `FlowRunner.Rerun` `/扩图` 预检**（`App/Flows/FlowRunner.Rerun.cs`）：记录 `node` / `parent` / parentCrop。
+- **D6 Python `handlers._run_submit`**（`python/server/handlers.py`）：`_DIAG` 门控，记录实际喂入的 `image_path` / `mask_path`
+  （stderr → `_cache/backend.log`）。
+- **D7 `IpcSubmitMapper.BuildSubmitRequest`**（`Backend/IpcSubmitMapper.cs`）：记录 C# 实际发出的 submit `image_path` / `mask_path`，
+  与 D6 对照。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 受影响类（CommandParser / CommandOutpaint / CommandRequirements / Executor / SessionViewModel）→ **116 通过 / 0 失败**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **545 通过 / 0 失败**（基线 545，无回归）。
+- `python -m py_compile python/server/handlers.py` 通过。未启动后端 / 未加载模型。
+
+### 备注
+
+- **临时**：`DiagLog` + D1–D7 为诊断埋点，**定位后随钩子移除**；不新增契约类型、不改任何冻结签名。
+- 未改 `/扩图` 行为 / `PipelinePath` / `RerunSpec` / 其它命令；无新 NuGet；改动文件均 < 600（Z8，`EditSession.cs` 584）。
+- `FROZEN.md` 追加「临时诊断钩子」登记；`ACCEPTANCE.MD` 追加临时诊断验收段。
+
+---
+
+## [修复 · `/扩图` 重跑丢蓝底] - 2026-09-26：A 保留 crop/mask + B 取消引导
+
+### diag 结论（D1–D7 真实复现，会话 `57f750…`）
+
+取消的是一次「在节点 **P** 上画裁切 + `/扩图`」（D2/D7 `image_path=_cache/crops/{sid}/{P}.png`）；点「重新生成」实际
+重跑的是**上一个节点 P**（D5 `node=P`），而重跑会先切到 **P 的父节点**取图（D4 `afterNavigate parent`、
+D2/D7 `image_path=parent_crop.png`）。两者图源不同；且重跑成功 `SetNodeCrop(P,null)` + 删 P 的裁切文件
+（事后 `_cache/crops/{sid}/` 为空）。D6（Python 收到）与 D7（C# 发出）完全一致 → **C#↔Python 无改图**，
+根因 = 重跑选源 + 重跑清用户裁切。
+
+### 做了什么
+
+- **A 重跑不清 crop/mask**（`App/Flows/FlowRunner.Rerun.cs`）：
+  - 删成功分支的 `SetNodeCrop(nodeId, null)` / `SetNodeMask(nodeId, null)`（`ReplaceNodeImage` 本即保留 crop/mask）。
+  - 删 `DeleteArtifact(oldCrop?.ResultImagePath)` 与 `DeleteArtifact(oldMask?.MaskImagePath)`（保留 mask 就不能删其文件）。
+  - 保留：子树 cascade 删除、`oldImagePath`（旧输出图）删除（9C.8-A2 语义）。
+  - 注释说明：crop/mask 为用户编辑，重跑只换输出图；坐标可能不再匹配新尺寸，留待下次发送校验（本轮不实现）。
+- **B 取消后明确引导**：
+  - `FlowRunner.Submit.cs` 两个取消分支：`RebuildContext()` 后 `AddInfo("已取消。输入框内容已恢复，再次发送即可重试。")`（非错误 System）。
+  - `MainWindow.Chat.cs` 气泡「重新生成」ToolTip：`重新生成` → `重跑此节点：{Command}`。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 受影响类（SessionViewModel / CommandParser / Executor / CommandOutpaint）→ **111 通过 / 0 失败**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **545 通过 / 0 失败**（基线 545，无回归）。
+- `SessionViewModelTests`：`RerunNode_Clears_Crop_And_Mask` → `RerunNode_Keeps_Crop_And_Mask`；取消用例补 B 提示断言。
+
+### 不做（登记）
+
+- 不做 C（`RerunSpec` 存源图）/ D（重跑不切父）；不改 `PipelinePath` / `ChatFlowRules` 裁切回退、其它命令、Python / IPC。
+- D1–D7 临时诊断钩子**仍在**（定位已完成但未移除）；修复后是否移除见 `FROZEN.md`。
+
+---
+
+## [功能 · 气泡 X 删除节点 + 子树] - 2026-09-26
+
+### 做了什么
+
+- **契约追加（尾部，不改既有签名）**：
+  - `IEditSessionWriter.RemoveNodeAndSubtree(string nodeId)` → `IReadOnlyList<IEditNode>`（删自身 + 全部后代；未知 no-op 空表；不抛）。
+  - `IImagingService.CleanupNode(string? sessionId, IReadOnlyList<string> nodeIds)`（逐节点删 `_cache/crops|masks/{sid}/{nodeId}.png`；never-throw）。
+  - `IEditFlowRunner.DeleteNodeAsync(string nodeId)` → `Task<bool>`（UI 侧端口）。
+- **实现**：
+  - `EditSession.Subtree.cs`：抽 `RemoveRange(nodeId, includeStart)`，`RemoveSubtree`（不含自身）/ `RemoveNodeAndSubtree`（含自身）共用 BFS；
+    删根 → `_rootNode` / `CurrentNodeId` 置空；当前节点被删 → 回退父节点。
+  - `ImagingService.CleanupNode`：复用 `ImageCropper.ResolveCropPath` / `MaskExporter.ResolveMaskPath`，逐文件 `File.Exists + Delete` 容错。
+  - `FlowRunner.Delete.cs`（新）：`DeleteNodeAsync` —— busy / 未知 / root → `false`；`RemoveNodeAndSubtree` → `Task.Run` 清理
+    （`_imaging.CleanupNode` + `_nodeArtifactsCleaner(..., includeReferences:true)`，各 try-catch）→ `RefreshHistory` + `RebuildContext`。
+  - `SessionViewModel.Rerun.cs`：`DeleteNodeAsync` 薄转发。
+  - `MainWindow.Chat.cs`：气泡根 `Border` 加 `Classes="bubble"`；完成态 AI 气泡（`NodeId != null && !IsPending && 有父`）右上角叠
+    `bubbleDelete` ×（`IconClose`），hover 显示；`BuildDeleteButton` → `DeleteNodeAsync`。
+  - `MainWindow.Delete.cs`（新）：确认框 → `_vm.DeleteNodeAsync` → 若预览节点已不在会话则关窗 → 状态提示。
+  - `ChromeStyles.axaml`：`Button.bubbleDelete` 默认隐藏 + `Border.bubble:pointerover Button.bubbleDelete` 显示。
+  - `FlowRunner` ctor 追加可选 `IImagingService? imaging`（末位）；`MainWindow` / `FlowRunnerHarness` 传入。
+
+### 与计划的偏差
+
+- **确认框放 MainWindow 而非 FlowRunner**：`FlowRunner` 类注释明确「不引用 shell facade 或任何 view；UI 交互按调用注入」，
+  故确认在 view 层；FlowRunner 只做 DAG / 文件 / 刷新。净行为与计划一致，且与「`SessionViewModel.DeleteNodeAsync` 测试无需注入确认」
+  的用例设计一致。
+
+### 文件清理范围
+
+- 删：`_cache/crops/{sid}/{nodeId}.png`、`_cache/masks/{sid}/{nodeId}.png`（每个被删节点）；项目副本 `{nodeId}.png` /
+  `_crop.png` / `_mask.png` / `_used/` / `refs/`（`includeReferences:true`）。
+- **不动**：用户目录里的输出图 / 源图（Z24）；只清 App 临时区与项目副本。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 受影响类（EditSessionTests / ImagingServiceTests / SessionViewModelTests）→ **123 通过 / 0 失败**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **554 通过 / 0 失败**（基线 545 + 9：EditSession 4 / ImagingService 2 / SessionViewModel 3）。
+- 未启动 Python / 未加载模型。
+
+### 不做（登记）
+
+- 不做 root 删除入口 / multi-select 删除 / 还原（回收站）；不改 `RerunSpec` / `PipelinePath` / `ChatFlowRules` 回退 / 命令集 / IPC / Python。

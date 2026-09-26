@@ -46,4 +46,10 @@ public sealed partial class SessionViewModel
     /// runner, module-boundary migration step 6).
     /// </summary>
     public bool CancelCurrent() => Runner().CancelCurrent();
+
+    /// <summary>
+    /// Deletes the DAG node <paramref name="nodeId"/> and its whole subtree (delegates to the
+    /// flow runner). The confirmation dialog is handled by the view before this is called.
+    /// </summary>
+    public Task<bool> DeleteNodeAsync(string nodeId) => Runner().DeleteNodeAsync(nodeId);
 }

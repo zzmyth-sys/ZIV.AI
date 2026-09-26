@@ -25,7 +25,7 @@ internal static class FlowRunnerHarness
         Action<string, IReadOnlyCollection<string>, bool>? nodeArtifactsCleaner = null)
     {
         var vm = new SessionViewModel(session, writer, imaging);
-        var flow = new FlowRunner(vm, session, writer, parser, executor, null, null, nodeArtifactsCleaner);
+        var flow = new FlowRunner(vm, session, writer, parser, executor, null, null, nodeArtifactsCleaner, imaging);
         vm.AttachFlowRunner(flow);
         return vm;
     }

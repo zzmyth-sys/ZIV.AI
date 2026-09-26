@@ -64,4 +64,12 @@ public interface IImagingService
 
     /// <summary>Deletes every crop + mask session directory (startup orphan cleanup). Never throws.</summary>
     void CleanupAll();
+
+    /// <summary>
+    /// Deletes one or more nodes' crop + mask temp files
+    /// (<c>_cache/crops/{sessionId}/{nodeId}.png</c> and
+    /// <c>_cache/masks/{sessionId}/{nodeId}.png</c>). A missing directory / file is a no-op and
+    /// each delete is guarded individually. Never throws.
+    /// </summary>
+    void CleanupNode(string? sessionId, IReadOnlyList<string> nodeIds);
 }

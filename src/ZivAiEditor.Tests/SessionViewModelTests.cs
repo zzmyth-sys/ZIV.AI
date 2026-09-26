@@ -1120,7 +1120,7 @@ public class SessionViewModelTests
     }
 
     [Fact]
-    public async Task RerunNode_Clears_Crop_And_Mask()
+    public async Task RerunNode_Keeps_Crop_And_Mask()
     {
         const string rerunOutput = @"C:\img\rerun.png";
         var session = new EditSession();
@@ -1132,10 +1132,15 @@ public class SessionViewModelTests
         vm.SetNodeCrop(nodeId, new CropSpec { Width = 10, Height = 10, ResultImagePath = @"C:\img\c.png" });
         vm.SetNodeMask(nodeId, new MaskSpec { MaskImagePath = @"C:\img\m.png", Width = 8, Height = 8 });
 
-        await vm.RerunNodeAsync(nodeId);
+        var ok = await vm.RerunNodeAsync(nodeId);
 
-        Assert.Null(session.Nodes[nodeId].Crop);
-        Assert.Null(session.Nodes[nodeId].Mask);
+        Assert.True(ok);
+        // Crop / mask are user edits (9C.6-B / 9C.7): a re-run must preserve them.
+        var crop = session.Nodes[nodeId].Crop;
+        Assert.NotNull(crop);
+        Assert.Equal(10, crop!.Width);
+        Assert.Equal(@"C:\img\c.png", crop.ResultImagePath);
+        Assert.NotNull(session.Nodes[nodeId].Mask);
     }
 
     [Fact]
@@ -1317,6 +1322,11 @@ public class SessionViewModelTests
         Assert.DoesNotContain(vm.Messages, m => m.Role == ChatRole.User && m.Text == "/去水印");
         Assert.DoesNotContain(vm.Messages, m => m.IsPending);
         Assert.DoesNotContain(vm.Messages, m => m.Text == "已取消。");
+        // B: a non-error system pointer tells the user to resend to retry.
+        Assert.Contains(
+            vm.Messages,
+            m => m.Role == ChatRole.System && !m.IsError
+                 && m.Text == "已取消。输入框内容已恢复，再次发送即可重试。");
         Assert.False(vm.CancelCurrent());    // nothing in flight after completion
     }
 
@@ -1359,5 +1369,53 @@ public class SessionViewModelTests
         Assert.True(bubble.IsError);
         Assert.Equal(Output, bubble.ImagePath);              // old image kept
         Assert.False(vm.IsBusy);
+    }
+
+    [Fact]
+    public async Task DeleteNodeAsync_Rejects_Root_And_Unknown()
+    {
+        var session = new EditSession();
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var rootId = session.CurrentNodeId!;
+
+        Assert.False(await vm.DeleteNodeAsync(rootId));
+        Assert.False(await vm.DeleteNodeAsync("missing"));
+        Assert.True(session.Nodes.ContainsKey(rootId));
+    }
+
+    [Fact]
+    public async Task DeleteNodeAsync_Rejects_When_Busy()
+    {
+        var session = new EditSession();
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        await vm.SubmitAsync("/去水印");
+        var nodeId = session.CurrentNodeId!;
+        vm.SetBusy(true);
+
+        Assert.False(await vm.DeleteNodeAsync(nodeId));
+        Assert.True(session.Nodes.ContainsKey(nodeId));
+    }
+
+    [Fact]
+    public async Task DeleteNodeAsync_Removes_Node_And_Subtree_And_Refreshes()
+    {
+        var session = new EditSession();
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var rootId = session.CurrentNodeId!;
+        var child = session.AppendNode(rootId, @"C:\img\child.png", "child");
+        var grand = session.AppendNode(child.NodeId, @"C:\img\g.png", "g");
+        vm.RefreshHistory();
+        Assert.Contains(vm.History, h => h.Node.NodeId == child.NodeId);
+
+        var ok = await vm.DeleteNodeAsync(child.NodeId);
+
+        Assert.True(ok);
+        Assert.False(session.Nodes.ContainsKey(child.NodeId));
+        Assert.False(session.Nodes.ContainsKey(grand.NodeId));
+        Assert.True(session.Nodes.ContainsKey(rootId));
+        Assert.DoesNotContain(vm.History, h => h.Node.NodeId == child.NodeId);
     }
 }

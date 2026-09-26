@@ -72,7 +72,10 @@ public partial class MainWindow
                 Classes = { "bubbleAction" },
                 Content = new Path { Classes = { "bubbleIcon" }, Data = BubbleIcon("IconRefresh") },
             };
-            ToolTip.SetTip(regenerate, "重新生成");
+            // Distinguish "re-run this historical node" from "retry the op just canceled":
+            // name the node's command in the tooltip.
+            var command = ChatFlowRules.FindNode(_vm.Session, rerunNodeId)?.Command;
+            ToolTip.SetTip(regenerate, string.IsNullOrWhiteSpace(command) ? "重跑此节点" : $"重跑此节点：{command}");
             regenerate.Click += (_, _) => _ = RerunAsync(rerunNodeId);
             return regenerate;
         }
@@ -80,16 +83,48 @@ public partial class MainWindow
         return null;
     }
 
-    private static Border BuildBubbleBorder(ChatMessage message, Control child) => new()
+    private static Border BuildBubbleBorder(ChatMessage message, Control child, Control? overlay = null)
     {
-        Background = message.Role == ChatRole.User ? UserBubbleBrush : AssistantBubbleBrush,
-        CornerRadius = new CornerRadius(6),
-        Padding = new Thickness(7, 6),
-        HorizontalAlignment = message.Role == ChatRole.User
-            ? HorizontalAlignment.Right
-            : HorizontalAlignment.Left,
-        Child = child,
-    };
+        var content = child;
+        if (overlay is not null)
+        {
+            var grid = new Grid();
+            grid.Children.Add(child);
+            overlay.HorizontalAlignment = HorizontalAlignment.Right;
+            overlay.VerticalAlignment = VerticalAlignment.Top;
+            overlay.Margin = new Thickness(2);
+            grid.Children.Add(overlay);
+            content = grid;
+        }
+
+        return new Border
+        {
+            Classes = { "bubble" },
+            Background = message.Role == ChatRole.User ? UserBubbleBrush : AssistantBubbleBrush,
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(7, 6),
+            HorizontalAlignment = message.Role == ChatRole.User
+                ? HorizontalAlignment.Right
+                : HorizontalAlignment.Left,
+            Child = content,
+        };
+    }
+
+    /// <summary>
+    /// The hover-revealed × that deletes a completed AI bubble's node (and its subtree). The
+    /// confirmation + status live in <see cref="DeleteNodeAsync"/>.
+    /// </summary>
+    private Button BuildDeleteButton(string nodeId)
+    {
+        var delete = new Button
+        {
+            Classes = { "bubbleAction", "bubbleClose", "bubbleDelete" },
+            Content = new Path { Classes = { "bubbleIcon" }, Data = BubbleIcon("IconClose") },
+        };
+        ToolTip.SetTip(delete, "删除此节点");
+        delete.Click += (_, _) => _ = DeleteNodeAsync(nodeId);
+        return delete;
+    }
 
     private void AddPreview(Panel panel, string path, string? maskPath = null, int maskFeatherPx = 0)
     {

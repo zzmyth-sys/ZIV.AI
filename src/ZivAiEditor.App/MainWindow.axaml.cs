@@ -123,7 +123,7 @@ public partial class MainWindow : Window
         _vm = new SessionViewModel(session, sessionWriter, _imaging);
         _flow = new FlowRunner(
             _vm, session, sessionWriter, commandParser, executor,
-            _promptExpander, _llmPreflight, _store.DeleteNodeArtifacts);
+            _promptExpander, _llmPreflight, _store.DeleteNodeArtifacts, _imaging);
         _vm.AttachFlowRunner(_flow);
 
         InitializeComponent();
@@ -313,6 +313,12 @@ public partial class MainWindow : Window
         var canRerun = rerunNodeId is { Length: > 0 } id && _vm.CanRerun(id);
         var hasAction = message.IsPending || canRerun;
 
+        // The delete-X is only on a completed AI bubble whose node still has a parent (root /
+        // T2I-first bubbles, and the in-flight bubble, get none).
+        var deleteButton = !message.IsPending && canRerun && rerunNodeId is { Length: > 0 }
+            ? BuildDeleteButton(rerunNodeId)
+            : null;
+
         var textBlock = string.IsNullOrWhiteSpace(message.Text)
             ? null
             : new TextBlock
@@ -338,7 +344,7 @@ public partial class MainWindow : Window
 
             AddMessageImages(panel, message);
 
-            return BuildBubbleBorder(message, panel);
+            return BuildBubbleBorder(message, panel, deleteButton);
         }
 
         // Image(s) first, then one row with the status text and the action button
@@ -363,7 +369,7 @@ public partial class MainWindow : Window
         var action = BuildBubbleAction(message, canRerun ? rerunNodeId : null);
         panel.Children.Add(BuildActionRow(textBlock, action));
 
-        return BuildBubbleBorder(message, panel);
+        return BuildBubbleBorder(message, panel, deleteButton);
     }
 
     private void RenderHistory()
