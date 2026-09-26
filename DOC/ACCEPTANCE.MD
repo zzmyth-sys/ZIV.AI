@@ -4121,3 +4121,132 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 ### 验收后动作
 
 1. 真机 9C.17.1–9C.17.5 通过后，在「验收记录」追加“Step 9C.17 通过，日期：____”（待签）。
+
+## Step 9C.18 验收：Python 显存生命周期修复（A3 + A4）
+
+**目标**：`engine.py` 的 `unload()` 收拢 busy 检查 + 清空 + `_release_vram()` 到同一临界区；`ensure_loaded()` 异常分支补释放且不掩盖原异常。纯 CPU / mock 测试，无 GPU / 无 comfy（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.18.1 | A3 忙拒绝 | `python -m unittest test_engine` | busy 为真时 unload 返回 False 且组件保留 | ✅ |
+| 9C.18.2 | A3 释放原子性 | 同上（并发用例） | 释放期间并发 ensure_loaded 被阻塞，完成后加载新组件 | ✅ |
+| 9C.18.3 | A4 失败释放 | 同上 | 加载抛异常时 `_release_vram` 被调用、状态复位、原异常重抛 | ✅ |
+| 9C.18.4 | A4 释放异常不掩盖 | 同上 | 释放抛异常时原加载异常仍传播 | ✅ |
+| 9C.18.5 | idle watcher 集成 | 同上 | busy 时跳过、空闲时卸载 | ✅ |
+| 9C.18.6 | Python 语法 | `py_compile engine.py idle_watcher.py test_engine.py` | exit 0 | ✅ |
+| 9C.18.7 | 构建 | `dotnet build src/ZIV.AI.sln -c Release` | 0 错误 0 警告 | ✅ |
+| 9C.18.8 | 回归 | 非 GPU 过滤 | **617 通过 / 0 失败**（与 9C.17 基线一致） | ✅ |
+| 9C.18.9 | 无 GPU 负载 | 本轮 | 未启动后端 / 未加载模型 | ✅ |
+
+### 通过标准
+
+- 构建 0 错误 0 警告；非 GPU 全量 **617 通过 / 0 失败**；`test_engine` **7 通过 / 0 失败**；9C.18.6–9C.18.9 通过。
+
+### 验收后动作
+
+1. 若需真机确认 A3 / A4 端到端（空闲卸载后重载、加载失败后重试不 OOM），在本节追加记录（待用户确认）。
+
+## Step 9C.19 验收：IPC 断连检测（A1）+ 超时语义拆分（A2）
+
+**目标**：A1 客户端断开 → Python 立即中断任务 → 释放显存 → 退出（C1）；A2 加载 / 采样超时拆分、超时主动 cancel、迟到 result 可观测丢弃（C2）。纯 CPU / mock，无 GPU / 无 Python（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.19.1 | A1 三态判定 | `python -m unittest test_disconnect` | peek 失败→CLOSED、无数据→NO_DATA、有帧→HAS_FRAME | ✅ |
+| 9C.19.2 | A1 主循环断连 | 同上 | CLOSED 抛 EOFError；NO_DATA 返回 None | ✅ |
+| 9C.19.3 | A1 采样中中断 | 同上 | 取消轮询收到 CLOSED 触发中断 | ✅ |
+| 9C.19.4 | A1 退出释放显存 | 同上 | `_cleanup` 调 `engine.unload()`（失败被 guard） | ✅ |
+| 9C.19.5 | A2 超时转发 cancel | `dotnet test --filter BackendTimeoutTests` | 加载超时→收到 cancel 帧→抛 TimeoutException | ✅ |
+| 9C.19.6 | A2 迟到 result 丢弃 | 同上 | 超时后到达的 result 不再投递 | ✅ |
+| 9C.19.7 | A2 采样不误判 | 同上 | sampling 后超过加载预算不失败，result 成功 | ✅ |
+| 9C.19.8 | Python 语法 | `py_compile ipc.py main.py handlers.py test_disconnect.py` | exit 0 | ✅ |
+| 9C.19.9 | 构建 | `dotnet build src/ZIV.AI.sln -c Release` | 0 错误 0 警告 | ✅ |
+| 9C.19.10 | 回归 | 非 GPU 过滤 | **619 通过 / 0 失败**（617 基线 + 2 新增） | ✅ |
+| 9C.19.11 | 无 GPU 负载 | 本轮 | 未启动后端 / 未加载模型 | ✅ |
+
+### 通过标准
+
+- 构建 0 错误 0 警告；非 GPU 全量 **619 通过 / 0 失败**；`test_disconnect`（14）+ `test_engine`（7）通过；9C.19.8–9C.19.11 通过。
+
+### 验收后动作
+
+1. 若需真机确认 A1 断连退出、A2 超时 cancel 端到端，在本节追加记录（待用户确认）。
+2. 已知测试缺口（非阻断）：`TryForwardCancelAsync` 写失败 → `RequestRestartAsync` 分支未直接单测（超时转发 cancel 本身已覆盖）。
+
+## Step 9C.20 验收：卡死判据 + 兜底机制（L1/L2/L3/L4 + U1/U2）
+
+**目标**：采样阶段 60s 无 progress 自动 cancel + 重启；AcceleratorError/OOM 同路径；JSONL 失败日志；采样超时无上限；5min 用户耐心弹窗。纯 CPU / mock（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.20.1 | 采样无上限（L4） | `dotnet test --filter BackendTimeoutTests` | 采样超加载预算不失败 | ✅ |
+| 9C.20.2 | watchdog 恢复 | 同上 | 停住采样 → cancel 帧 + 事件 + `action=cancel_ok` | ✅ |
+| 9C.20.3 | 加载阶段不触发（D2） | 同上 | 仅 `stage=loading_model` 时不触发 | ✅ |
+| 9C.20.4 | 机制失效（L2/D1） | 同上 | `reason=accelerator_error` + 日志 | ✅ |
+| 9C.20.5 | 关键字识别 | 同上（Theory） | `AcceleratorError` / `out of memory` 命中 | ✅ |
+| 9C.20.6 | 失败日志（L3） | 同上 | JSONL 含 reason/action | ✅ |
+| 9C.20.7 | 构建 | `dotnet build src/ZIV.AI.sln -c Release` | 0 错误 0 警告 | ✅ |
+| 9C.20.8 | 回归 | 非 GPU 过滤 | **626 通过 / 0 失败**（619 基线 + 7 净增） | ✅ |
+| 9C.20.9 | Python 零改 | `py_compile python/server/*.py` | exit 0；本步未改 Python | ✅ |
+| 9C.20.10 | 无 GPU 负载 | 本轮 | 未启动后端 / 未加载模型 / 未启动 App | ✅ |
+
+### 通过标准
+
+- 构建 0 错误 0 警告；非 GPU 全量 **626 通过 / 0 失败**；9C.20.7–9C.20.10 通过；U1/U2 与 L1/L2 端到端由用户真机确认。
+
+### 真机验收清单（用户执行）
+
+1. 正常生成 → 不打扰（60s 内无异常、5min 内完成）。
+2. 模拟卡住 → 60s 后自动 cancel + 重启；气泡显示「生成失败，已重启后端」。
+3. 模拟慢任务（多图 4 / outpaint）→ 5min 时弹窗「任务已运行 5 分钟，是否继续等待？」。
+4. 选「继续等待」→ 任务继续，之后不再弹。
+5. 选「结束任务」→ 任务取消，UI 恢复。
+6. 检查 `_cache/backend_failure.log`（若触发）JSONL 内容正确。
+7. 回归：正常 inpaint / 多图 / outpaint 不受影响。
+
+### 验收后动作
+
+1. 真机 1–7 通过后，在「验收记录」追加“Step 9C.20 通过，日期：____”（待签）。
+2. 已知余量：`PythonProcessManager.cs` 599/600（Z8 剩 1 行）。
+
+## Step 9C.21 验收：EditNode 重构（record）+ 耗时持久化（DurationMs）
+
+**目标**：阶段 1 EditNode 改 record + 抽文件 + 6 站点 `with`（行为不变）；阶段 2 每节点耗时经 `session.json` 持久化并在重开项目后显示。纯 CPU / mock（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.21.1 | 阶段 1 构建 | `dotnet build src/ZIV.AI.sln -c Release` | 0 错误 0 警告 | ✅ |
+| 9C.21.2 | 阶段 1 回归 | 非 GPU 过滤 | **626 通过 / 0 失败**（重构无回归） | ✅ |
+| 9C.21.3 | record / 抽文件 | 代码 | `EditNode.cs` 为 record；`EditSession.cs` 删除内嵌定义 | ✅ |
+| 9C.21.4 | 6 站点 with | 代码 | SetNodeCrop/Mask/Rerun/ReplaceNodeImage/UsedImages/Rebuild 全用 `with` | ✅ |
+| 9C.21.5 | DurationMs 往返 | `dotnet test --filter DurationMsTests` | Save→Load 保留 | ✅ |
+| 9C.21.6 | 旧项目兼容 | 同上 | 缺 `duration_ms` → null（JSON 无字段） | ✅ |
+| 9C.21.7 | 重建保留 | 同上 | 改 crop/mask/rerun/images 后 DurationMs 仍在 | ✅ |
+| 9C.21.8 | 气泡文案 | `SessionViewModelTests` | 有耗时「XX.X秒 完成」/无耗时「完成」 | ✅ |
+| 9C.21.9 | 阶段 2 回归 | 非 GPU 过滤 | **634 通过 / 0 失败**（626 + 8 新增） | ✅ |
+| 9C.21.10 | 无 GPU 负载 | 本轮 | 未启动后端 / 未加载模型 / 未启动 App | ✅ |
+
+### 通过标准
+
+- 构建 0 错误 0 警告；非 GPU 全量 **634 通过 / 0 失败**；9C.21.1–9C.21.10 通过；气泡持久化由用户真机确认。
+
+### 真机验收清单（用户执行）
+
+1. 完成一次生成 → 气泡显示「XX.X秒 完成」。
+2. 保存 → 关闭 → 重开 → 气泡仍显示原耗时（非「完成」）。
+3. 重跑该节点 → 气泡显示新耗时（覆盖旧值）。
+4. 打开旧项目（无 `duration_ms`）→ 气泡显示「完成」（不造假）。
+5. 回归：改遮罩 / 裁切 / 重跑后其它字段（Crop/Mask/Rerun/UsedImagePaths）不丢。
+
+### 验收后动作
+
+1. 真机 1–5 通过后，在「验收记录」追加“Step 9C.21 通过，日期：____”（待签）。
+2. 已知测试缺口（非阻断）：`SetNodeDurationMs` 的根重指分支与 App 层 `elapsed` 采样无单测（需真机/App 环境）。

@@ -5039,3 +5039,46 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **反推与下游依赖**：反推在 `config.py` import 时完成，故 `TE_SPEED_NODE_DIR` / `TAGGER_MODEL_DIR`
   （config.py:109-122，拼 COMFY_ROOT）随之一致，无冲突。
 - **未做**：`MODEL_ROOT`（config.py:7）仍硬编码；`config.py` 开发默认值保留（GitHub 收尾步统一清）。
+
+---
+
+## Python 显存生命周期修复（A3 + A4，2026-09-27，只增）
+
+- **A3 `ModelEngine.unload(is_busy=None)`**：新增可选 busy 谓词并在 `self._lock` 内求值；busy 为真返回 `False`、不清组件。`_release_vram()` 由锁外移入锁内（`engine.py` 锁块 192-210），使「busy 检查 → 清字段 → 释放」原子化。`ensure_loaded` 内部换模型调用 `self.unload()`（`is_busy=None`），语义不变。
+- **A4 `ensure_loaded` 异常分支**（engine.py:130-147）：清字段 / 置 `NOT_LOADED` 后调 `_release_vram()`，用 `try/except Exception` 包住以免掩盖原始加载异常，最后 `raise` 原异常。
+- **`idle_watcher._tick`**：将 `self._is_busy` 传入 `engine.unload(...)`，引擎内二次原子校验；拒绝时下个 tick 重试。
+- **测试**：新增 `python/server/test_engine.py`（7 例，纯 CPU / mock，无 torch / comfy）。
+- **不做**：不引入 `STATE_UNLOADING` 状态机（持锁方案更小且确定）；不改 `handlers.py` submit 主流程（`_set_active` 先于 `ensure_loaded` 的既有顺序已足够）。
+
+---
+
+## IPC 断连检测（A1）+ 超时语义拆分（A2，2026-09-27，只增）
+
+- **A1 `FrameIO.poll_state()`**（`python/server/ipc.py`）：三态 `PIPE_NO_DATA` / `PIPE_HAS_FRAME` / `PIPE_CLOSED`；`PeekNamedPipe` 失败一律 `PIPE_CLOSED`（fail-closed；等价于 ERROR_BROKEN_PIPE / ERROR_NO_DATA 判据，避免孤儿空转）。`main._next_message` CLOSED→`EOFError`；`handlers._make_cancel_poller` CLOSED→`_interrupt_processing()`；`main._cleanup()` 退出前调 `handlers._ENGINE.unload()` 释放 ComfyUI 注册表（C1：中断 → 释放 → 退出）。
+- **A2 超时拆分**：`PythonBackendOptions.ModelLoadTimeoutMs=180_000`（仅加载阶段）+ 新增 `SamplingTimeoutMs=1_800_000`（30 min，采样阶段安全网；cancel 为首要停止手段）。`SubmitEditAsync` 收到首个 `progress.stage=="sampling"` 时由接收循环重臂采样预算（`PendingTask.ArmSamplingTimeout`，disposed 容忍）。
+- **A2 超时处置（C2）**：超时分支调 `TryForwardCancelAsync`（`Task<bool>`：`true` = cancel 帧已写出，`false` = 写失败）；仅写失败才 `_ = Process.RequestRestartAsync()`（尊重 `AutoRestartEnabled` / 重启预算），随后抛 `TimeoutException`。未知 task 的迟到帧 `Debug.WriteLine` 记录后丢弃。
+- **测试缝**：`PythonProcessManager` 新增 internal `EnsureStartedOverride`（生产 null，行为不变；供 `ZivAiEditor.Tests` 经 `InternalsVisibleTo` 用命名管道伪后端驱动 `IpcInferenceClient`）。未改 `IInferenceClient` / 公开签名 / IPC 契约。
+- **测试**：`python/server/test_disconnect.py`（14 例）+ `src/ZivAiEditor.Tests/BackendTimeoutTests.cs`（2 例，类名不含 `Ipc` 以进入非 GPU 过滤）。
+- **残余**：`Debug.WriteLine` 在 Release 被裁剪；加载阶段断连依赖加载后首个 write 失败（非轮询即时），sampling 阶段由取消轮询即时中断；`TryForwardCancelAsync` 写失败→重启分支未直接单测。
+
+---
+
+## 卡死判据 + 兜底机制（Step 9C.20，2026-09-27，只增）
+
+- **L1 watchdog**（新文件 `IpcInferenceClient.Watchdog.cs`）：`_lastProgressAt` 仅由 progress/preview 更新（heartbeat 不更新）；**仅采样阶段武装**（首个 `stage=="sampling"`）；轮询 `min(5000, StuckTimeoutMs/4)`；无 progress 超 `StuckTimeoutMs`（默认 60s）→ `HandleStuckAsync`：L3 日志 → `TryForwardCancelAsync`（写受 `ackTimeoutMs` 上限）→ 等 `CancelConfirmTimeoutMs`（5s）→ 未确认 `Process.RequestRestartAsync()` → 触发 `StuckRecoveryTriggered`。
+- **L2（D1）**：`IpcInferenceClient.IsMechanismFailure(message)` = 含 `acceleratorerror` / `out of memory`（忽略大小写）；error 帧命中 → `Task.Run(HandleStuckAsync)`（同 L1）。**Python `_oom_types()` 零改**（补 AcceleratorError 会触发降分辨率重试，属行为变化，已按 D1 排除）。
+- **L3**：`RecordFailure` 追加一行 JSONL 到 `FailureLogPath ?? <BaseDirectory>/_cache/backend_failure.log`（`File.AppendAllText`，try/catch 不抛）。字段：`{ts, reason, last_progress{stage,sub_stage,fraction,ts}, last_vram_mb, elapsed_since_accepted_ms, action}`。
+- **L4**：采样首帧 `PendingTask.DisableTimeout()`（`CancelAfter(Timeout.Infinite)`）；移除 `PythonBackendOptions.SamplingTimeoutMs`。`ModelLoadTimeoutMs=180_000` 仅管加载。`TryForwardCancelAsync` 返回 `(Sent, Acked)`。
+- **U1/U2**：`ConfirmDialog.ShowAsync(owner, message, yesText, noText)`（追加，复用现有类型）；`MainWindow.RunWithPatienceAsync` 以独立 watcher 计时 `UserPromptAfterMs=300_000`，到点且 `_vm.IsBusy` → 模态弹窗「任务已运行 5 分钟，是否继续等待？/ 继续等待 / 结束任务」；「结束任务」→ `_vm.CancelCurrent()`；watcher 随 run 结束取消（每任务一次，非阻塞）。
+- **恢复可见性**：`IpcInferenceClient.StuckRecoveryTriggered` → `AppContext.StuckRecovery` → `App` marshal → `MainWindow.NotifyStuckRecovery()` → `FlowRunner.NotifyStuckRecovery()`；失败/取消气泡文案替换为「生成失败，已重启后端」。
+- **测试**：`src/ZivAiEditor.Tests/BackendTimeoutTests.cs`（9 例，纯 CPU / 命名管道伪后端）。不改 `IInferenceClient` / IPC 契约 / 命令集。
+
+---
+
+## EditNode 重构（record）+ 耗时持久化（Step 9C.21，2026-09-27，只增）
+
+- **EditNode → record**：`public sealed record EditNode : IEditNode`，抽到独立 `src/ZivAiEditor.Agent/Session/EditNode.cs`（字段逐字保留，`EditSession.cs` 删除内嵌 47 行）。6 个「原地重建」站点改为 `node with { … }`：SetNodeCrop / SetNodeMask / SetNodeRerun / ReplaceNodeImage（`EditSession.cs`）、SetNodeUsedImages（`EditSession.Images.cs`）、Rebuild（`SessionLoader.cs`）。全新构造站点（ResetToRoot / SetRoot / AppendNode / Restore / SessionLoader DTO 边界）保留手动构造。`ReferenceEquals(_rootNode, node)` 重指逻辑不变（`with` 返回新实例，检查旧实例）。
+- **DurationMs（契约只追加）**：`IEditNode` 尾部追加 `int? DurationMs { get; }`；`IEditSessionWriter` 尾部追加 `void SetNodeDurationMs(string nodeId, int? durationMs)`；`EditNode` 加 `int? DurationMs { get; init; }`；`EditSession.SetNodeDurationMs` 用 `node with { DurationMs = … }`（未知 id no-op）。
+- **持久化（格式仍 v2，additive）**：`SessionFileNode.duration_ms`（`[JsonIgnore(WhenWritingNull)]`）；`SessionStore.WriteProjectAsync` 写；`SessionLoader` 读；`Restore` 复制 `node.DurationMs`。
+- **UI**：`SessionViewModel.RebuildContext` 气泡 `node.DurationMs is int ms ? $"{ms / 1000.0:F1}秒 完成" : "完成"`；`FlowRunner.Submit.cs` / `FlowRunner.Rerun.cs` 结束处 `SetNodeDurationMs`（重跑覆盖旧值）。旧项目无字段 → null → 「完成」。
+- **不做**：不改 CropSpec/MaskSpec/RerunSpec；不持久化失败/取消；不用 positional record。

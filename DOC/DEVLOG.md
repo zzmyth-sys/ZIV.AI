@@ -6600,3 +6600,151 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 
 - 未改 Contracts / `python/server`；未编辑运行期 `settings.ini`；未 commit。
 - 债务（A10）：`COMFY_ROOT` / `REPO_ROOT` 不在本期范围（v1）。
+
+---
+
+## [Step 9C.18] - 2026-09-27：Python 显存生命周期修复（A3 空闲卸载竞态 + A4 加载异常不释放）
+
+> 编号说明：`[Step 9C.16]` / `[Step 9C.17]` 见 ACCEPTANCE 记录；本节取下一个空闲编号 **9C.18**。
+
+### 目标
+
+- A3：`ModelEngine.unload()` 的 busy 检查与「清空组件 + `_release_vram()`」收进同一把 `self._lock` 临界区。
+- A4：`ModelEngine.ensure_loaded()` 加载异常分支补 `_release_vram()`，且不吞掉原始加载异常。
+
+### 变更（仅 `python/server`）
+
+- `engine.py` `unload(is_busy=None)`：新增可选 busy 谓词，**锁内**求值；busy 为真则返回 `False` 且不清组件；`_release_vram()` 移到锁内（锁块 192-210），使「busy 检查 → 清字段 → 释放显存」成为一个原子区。`ensure_loaded` 内部换模型的 `self.unload()` 走默认 `is_busy=None`，行为不变。
+- `engine.py` `ensure_loaded` 异常分支（130-147）：清字段 / 置 `NOT_LOADED` 后，`try: _release_vram() except Exception: log`，再 `raise` 原异常。
+- `idle_watcher.py` `_tick`：把 `self._is_busy` 传给 `engine.unload(...)`，让引擎二次原子校验；被拒则下一 tick 重试。
+
+### 不变量落实
+
+- INV1：busy 检查与清空同在 `self._lock` 内（engine.py:192-196）。submit 在 `_set_active`（handlers.py:127）之后才调 `ensure_loaded`，故已置 busy 的提交不会被清空。
+- INV2：`_release_vram()` 在锁内（engine.py:210），`ensure_loaded` 争同一把锁 → 释放期间新 submit 只能等待，拿不到「已清空」组件。
+- INV3：异常分支 `try/except Exception` 包住释放调用，日志记录，随后 `raise` 原异常（engine.py:143-147）。
+- INV4：释放仅阻塞并发懒加载（约 1-2s），不阻塞运行中的任务；未采用 `STATE_UNLOADING` 状态机（本轮权衡：持锁更小、更确定）。
+
+### 测试（纯 CPU / mock，Z29 / Z30）
+
+- 新增 `python/server/test_engine.py`（7 例，`python -m unittest test_engine`）：A3 锁内忙拒绝、释放阻塞并发加载、idle watcher 忙跳过 / 空闲卸载；A4 失败释放并重抛、释放异常不掩盖加载异常。
+- `python -m py_compile engine.py idle_watcher.py test_engine.py` → exit 0。
+- `python -m unittest test_engine` → **7 通过 / 0 失败**。
+
+### 验证
+
+- `dotnet build src/ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test ... --filter "FullyQualifiedName!~Ipc"` → **617 通过 / 0 失败**（与 9C.17 基线一致，无回归）。
+
+### 备注
+
+- 未改 IPC 契约 / C# / 命令集；未启动 Python 后端 / 未加载模型（Z29 / Z30）。
+
+---
+
+## [Step 9C.19] - 2026-09-27：IPC 断连检测（A1）+ 超时语义拆分（A2）
+
+### 目标
+
+- A1：客户端断开后 Python 端立即中断在飞任务 → 释放显存 → 退出（C1），不再孤儿空转。
+- A2：拆分加载 / 采样超时；超时主动转发 cancel（C2）；迟到 result 可观测地丢弃。
+
+### 变更
+
+- `python/server/ipc.py`：`has_pending_frame()`（bool）→ `poll_state()` 三态 `PIPE_NO_DATA` / `PIPE_HAS_FRAME` / `PIPE_CLOSED`；`PeekNamedPipe` 失败一律判 `PIPE_CLOSED`（fail-closed，等价于原 ERROR_BROKEN_PIPE / NO_DATA 判据，且避免孤儿空转）。无 handle → `PIPE_NO_DATA`（非 Windows 阻塞路径不变）。
+- `python/server/main.py`：`_next_message` 收到 `PIPE_CLOSED` 抛 `EOFError`、`PIPE_NO_DATA` 返回 None；`_cleanup()` 先调 `handlers._ENGINE.unload()`（guarded）释放 ComfyUI 注册表，再做 torch/gc。
+- `python/server/handlers.py`：`_make_cancel_poller` 收到 `PIPE_CLOSED` → `_interrupt_processing()`（立即中断在飞采样）。
+- `src/ZivAiEditor.Backend/PythonProcessManager.cs`：新增 `SamplingTimeoutMs = 1_800_000`（加载仍 `ModelLoadTimeoutMs = 180_000`）；新增 internal `EnsureStartedOverride` 测试缝（生产为 null，行为不变）。
+- `IpcInferenceClient.cs`：`SubmitEditAsync` 初始按加载预算武装 CTS 并把 CTS 交给 `PendingTask`；超时分支调 `TryForwardCancelAsync`（改为 `Task<bool>`，`true` = cancel 帧已写出；仅在写失败时为 `false`），写失败才 `_ = Process.RequestRestartAsync()`（尊重 `AutoRestartEnabled` / 重启预算），随后抛 `TimeoutException`。
+- `IpcInferenceClient.Receive.cs`：`progress` 且 `stage=="sampling"` 时 `PendingTask.ArmSamplingTimeout(SamplingTimeoutMs)`（重臂采样预算；disposed 容忍）；未知 task 的迟到帧 `Debug.WriteLine` 记录后丢弃。
+
+### 测试（纯 CPU / mock，Z29 / Z30）
+
+- `python/server/test_disconnect.py`（14 例）：三态判定（patch peek）、`_next_message` CLOSED/NO_DATA/HAS_FRAME、取消轮询 CLOSED 中断、`_cleanup` 释放模型（含失败 guard）。
+- `src/ZivAiEditor.Tests/BackendTimeoutTests.cs`（2 例，命名不含 `Ipc` 以进入非 GPU 过滤）：命名管道伪后端；(a) 加载超时→转发 cancel→抛 TimeoutException→迟到 result 被丢弃；(b) `stage=="sampling"` 后超过加载预算不误判，随后 result 成功。
+
+### 验证
+
+- `python -m py_compile ipc.py main.py handlers.py test_disconnect.py` → exit 0。
+- `python -m unittest test_disconnect test_engine test_models test_loras test_mask_feather test_multi_image test_outpaint` → **59 通过 / 0 失败**。
+- `dotnet build src/ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test ... --filter "FullyQualifiedName!~Ipc"` → **619 通过 / 0 失败**（617 基线 + 2 新增，无回归）。
+
+### 备注
+
+- 未改 IPC 契约 / `IInferenceClient` 公开签名 / 命令集；未启动 Python 后端 / 未加载模型（Z29 / Z30）。
+- 残余：`Debug.WriteLine` 在 Release 被裁剪（迟到帧丢弃为观测性诊断）；加载阶段断连依赖加载后首个 write 失败，非轮询即时；`TryForwardCancelAsync` 写失败→重启分支可达性窄，未直接单测（超时转发 cancel 已覆盖）。
+
+---
+
+## [Step 9C.20] - 2026-09-27：卡死判据 + 兜底机制（L1/L2/L3/L4 + U1/U2）
+
+### 目标
+
+- L1：采样阶段 60s 无 progress → 判卡 → cancel + 重启（自动，静默）。
+- L2：Dynamic VRAM 机制失效（AcceleratorError / OOM）→ 同 L1 动作（C# 侧；Python 零改）。
+- L3：每次触发追加一行 JSONL 到 `_cache/backend_failure.log`。
+- L4：删除 30min 全局上限（采样超时→无上限），保留 `ModelLoadTimeoutMs=180s`。
+- U1/U2：5min 弹窗「继续等待 / 结束任务」（模态外壳，任务不中断）。
+
+### 变更
+
+- `PythonProcessManager.cs`：追加 `StuckTimeoutMs=60_000` / `CancelConfirmTimeoutMs=5_000`；移除 `SamplingTimeoutMs`。
+- `IpcInferenceClient.cs`：任务创建记录 `AcceptedAt/LastProgressAt`；加载超时消息更新；`TryForwardCancelAsync` 改为返回 `(Sent, Acked)` 且写入受 `ackTimeoutMs` 上限（挂死后端不会永久阻塞恢复）。
+- 新增 `IpcInferenceClient.Watchdog.cs`：`_lastProgressAt` 仅在 progress/preview 更新（heartbeat 不更新）；5s 轮询（`min(5000, StuckTimeoutMs/4)`）；**仅采样阶段武装**（首个 `stage=="sampling"` 帧）；触发 → L3 → cancel → 等 `CancelConfirmTimeoutMs` → 未确认 `RequestRestartAsync` → 事件。
+- `IpcInferenceClient.Receive.cs`：sampling 帧 `SamplingArmed=true` + `DisableTimeout()`（L4）；error 帧 message 命中机制失效关键字 → `Task.Run(HandleStuckAsync)`（L2）；heartbeat 记 `_lastVramMb`。
+- `FlowRunner`（`FlowRunner.StuckRecovery.cs` + Submit/Rerun）：`NotifyStuckRecovery()` + flag；失败/取消气泡替换为「生成失败，已重启后端」。
+- `AppContext`（`StuckRecovery` 事件）、`App.axaml.cs`（订阅 + UI 线程 marshal）、`MainWindow`（`NotifyStuckRecovery`；新增 `MainWindow.Patience.cs` 的 U1 计时器）接线。
+- `ConfirmDialog`：追加重载支持自定义按钮文案（复用现有类型，未新建 dialog）。
+
+### 说明
+
+- L1 武装时机：`IpcInferenceClient.Receive.cs` 的 progress 分支，仅当 `detail.Stage=="sampling"` 时 `SamplingArmed=true`；watchdog 对 `!SamplingArmed` 直接跳过 → 加载阶段不触发（D2）。
+- L2 关键字：`"acceleratorerror"` / `"out of memory"`（`OrdinalIgnoreCase`，`IsMechanismFailure`）。
+- 弹窗非阻塞（D4）：U1 计时器在 `RunWithPatienceAsync` 内以独立 task 运行，`ShowDialog` 只阻塞该 watcher 的 await，生成任务在另一 task 继续；run 结束后 `cts.Cancel()` 使 watcher 立即退出（每任务一次）。
+
+### 测试（纯 CPU / mock，Z29 / Z30）
+
+- `BackendTimeoutTests`（9 例）：加载超时转发 cancel、采样无上限（L4）、watchdog 恢复停住采样任务（cancel 帧 + `reason=stuck` + `action=cancel_ok` + 日志）、加载阶段不触发（D2）、机制错误恢复（`reason=accelerator_error` + 日志）、`IsMechanismFailure` 理论用例。
+- `dotnet build src/ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test ... --filter "FullyQualifiedName!~Ipc"` → **626 通过 / 0 失败**（619 基线 + 7 净增，无回归）。
+- Python 零改：`py_compile` 既有 `python/server/*.py` 通过。
+
+### 备注
+
+- 未改 IPC 契约 / `IInferenceClient` 签名 / 命令集；未启动 Python 后端 / 未加载模型（Z29 / Z30）。
+- 残余：`PythonProcessManager.cs` 599/600（Z8 余量 1 行）；L2-Python 按 D1 明确不改 `_oom_types()`。
+
+---
+
+## [Step 9C.21] - 2026-09-27：EditNode 重构（record）+ 耗时持久化（DurationMs）
+
+### 目标
+
+- 阶段 1（纯重构，行为不变）：`EditNode` 改 nominal `record` + 抽独立文件 + 6 个重建站点改 `node with { … }`。
+- 阶段 2：每节点端到端耗时 `DurationMs` 持久化到 `session.json`，重开项目后气泡仍显示耗时。
+
+### 变更
+
+- 新增 `src/ZivAiEditor.Agent/Session/EditNode.cs`：`public sealed record EditNode : IEditNode`（字段与旧内嵌类逐字一致；`EditSession.cs` 删除该 47 行内嵌定义，599 → 517）。
+- 6 个重建站点改 `with`：`EditSession.cs` SetNodeCrop / SetNodeMask / SetNodeRerun / ReplaceNodeImage；`EditSession.Images.cs` SetNodeUsedImages；`SessionLoader.cs` Rebuild。5 处全新构造（ResetToRoot / SetRoot / AppendNode / Restore / SessionLoader DTO 边界）保留手动构造。
+- 契约追加：`IEditNode.DurationMs`（`int?`，尾部）；`IEditSessionWriter.SetNodeDurationMs`（尾部）。`EditNode` 加 `int? DurationMs { get; init; }`；`EditSession.SetNodeDurationMs` 用 `node with { DurationMs = … }` 实现。
+- 管道：`SessionFileNode.duration_ms`（`[JsonIgnore(WhenWritingNull)]`，格式仍 v2）；`WriteProjectAsync` 写；`SessionLoader` 读；`Restore` 复制。
+- UI：`SessionViewModel.RebuildContext` 气泡文案 `node.DurationMs is int ms ? $"{ms / 1000.0:F1}秒 完成" : "完成"`；`FlowRunner.Submit.cs`（AppendNode 后）/ `FlowRunner.Rerun.cs`（`elapsed` 后）调 `SetNodeDurationMs`。
+- 兼容：旧项目无 `duration_ms` → `null` → 显示「完成」（不造假）。
+
+### 阶段门槛
+
+- 阶段 1 全绿后（build 0/0 + 非 GPU 626/0）才进行阶段 2。
+
+### 测试（纯 CPU / mock，Z29 / Z30）
+
+- 新增 `src/ZivAiEditor.Tests/DurationMsTests.cs`（6 例）：设置并保留字段、未知 id no-op、5 个重建站点保留 DurationMs、Save→Load 往返、旧项目缺字段→null（并断言 JSON 无 `duration_ms`）、重挂根保留 DurationMs。
+- `SessionViewModelTests` 追加 2 例：有耗时才显示「XX.X秒 完成」、无耗时显示「完成」。
+- `dotnet build src/ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test ... --filter "FullyQualifiedName!~Ipc"` → **634 通过 / 0 失败**（626 基线 + 8 新增，无回归）。
+
+### 备注
+
+- 未改 IPC / 命令集 / Contracts 其它类型；未跑 GPU / 未启动 Python / 未启动 App。
+- `EditNode` 改为 record 后具备值相等语义，但全仓无 `==`/Equals/HashSet<EditNode>/Dictionary<EditNode,_> 依赖（评审确认）。

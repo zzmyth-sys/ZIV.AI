@@ -379,3 +379,26 @@
 - `AppContext.BuildBackendEnvironment(settings, templateDirectory)` 注入 `ZIV_AI_COMFY_ROOT`（目录存在才注入）。
 - Python：`config._resolve_comfy_root()`（env `ZIV_AI_COMFY_ROOT` > 开发默认 > `sys.executable` 反推）；
   `model_loader.prepare_environment` 对无效根抛可读 `RuntimeError`。
+
+## 27. 追加说明：卡死判据 + 兜底机制（2026-09-27）
+
+- **`PythonBackendOptions`**（追加）：`StuckTimeoutMs=60_000`（L1 无 progress 判卡，仅采样阶段）、
+  `CancelConfirmTimeoutMs=5_000`（等 canceled 确认）；**移除** `SamplingTimeoutMs`（L4：采样首帧 `CancelAfter(Infinite)`，采样无上限，由 L1 兜底）。
+- **`IpcInferenceClient`**（追加，不改既有签名）：
+  - `public event Action<StuckRecoveryInfo>? StuckRecoveryTriggered`；`public sealed record StuckRecoveryInfo(string TaskId, string Reason, string Action)`。
+  - `internal string? FailureLogPath`（测试缝）；`internal static bool IsMechanismFailure(string? message)`（L2 关键字）。
+  - `internal void EnsureWatchdogStarted()`；私有 `HandleStuckAsync` / `RecordFailure`（L3）。
+- **`AppContext`**（追加）：`public event Action? StuckRecovery`（转发 client 事件）。
+- **`FlowRunner`**（追加）：`public void NotifyStuckRecovery()`；私有 flag + `internal string TakeFailureText(string)`。
+- **`ConfirmDialog`**（追加）：`static Task<bool?> ShowAsync(Window, string message, string yesText, string noText)`。
+- **`MainWindow`**（追加）：`internal int UserPromptAfterMs=300_000`（U1）；`internal void NotifyStuckRecovery()`；
+  私有 `RunWithPatienceAsync<T>` / `WatchPatienceAsync`。
+- 不改 `IInferenceClient` / IPC 契约 / 命令集；`diag_vram.py` 零改。
+
+## 28. 追加说明：EditNode record 化 + 每节点耗时（2026-09-27）
+
+- **`IEditNode`**（尾部追加）：`int? DurationMs { get; }`（端到端耗时毫秒；旧项目 → null）。
+- **`IEditSessionWriter`**（尾部追加）：`void SetNodeDurationMs(string nodeId, int? durationMs)`（原地重建；未知 id no-op；null 清除）。
+- **`EditNode`**：由 `EditSession.cs` 内嵌类改为独立文件 `src/ZivAiEditor.Agent/Session/EditNode.cs` 的 `public sealed record EditNode : IEditNode`；新增 `public int? DurationMs { get; init; }`。原有字段/`init` 语义不变；6 个原地重建站点改用 `with`。
+- **持久化**：`SessionFileNode` 追加 `duration_ms`（`[JsonIgnore(WhenWritingNull)]`）；项目格式保持 **v2**（additive，同 `source_image` 先例）。
+- **行为**：`RebuildContext` 气泡按 `DurationMs` 显示「XX.X秒 完成」；无则「完成」。
