@@ -6237,6 +6237,10 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
   「图标在上 + `Orientation="Vertical"` Slider(28×120) 在下」，两列等宽（Width=28）、`Spacing=12`、
   左缘垂直居中；数值无常驻文字，悬停 Slider 的 tooltip 显示当前值
   （`MaskModePanel.axaml.cs` `ToolTip.SetTip` 随 `ValueProperty` 更新）。
+- **F1-b 改双独立竖条**（`MaskModePanel.axaml`）：由「同一 Border 内两列并排」改为
+  「`StackPanel Orientation=Vertical Spacing=8` 下两个独立 `Border` 上下堆叠」——笔刷在上、羽化在下；
+  每面板 `Padding=8,10` / `CornerRadius=6` / `Width=28` 一致；左缘 `Top` 起排（`Margin=8,8,0,0`）。
+  数值范围 / 事件 / `SyncMaskPanel` 回推 / 可见性 / 底部三件套均不变。
 - **F2 返回图标 = 左箭头**：`Assets/Icons/TablerIcons.axaml` 追加 `IconArrowLeft`
   （`M5 12l14 0 M5 12l6 6 M5 12l6 -6`）；`CropModePanel` / `MaskModePanel` 底部 [返回] 改用
   `IconArrowLeft`；撤销仍用 `IconUndo`/`IconArrowBackUp`（视觉区分）。

@@ -28,15 +28,18 @@
       </StackPanel>
     </Border>
 
-    <!-- Left vertical mask params: icon above a vertical slider, no persistent text; the
-         value is discoverable via the hover tooltip. Both columns share the same width. -->
-    <Border HorizontalAlignment="Left"
-            VerticalAlignment="Center"
-            Margin="8,0,0,0"
-            Padding="8,10"
-            CornerRadius="6"
-            Background="{StaticResource ZivOverlayBrush}">
-      <StackPanel Orientation="Horizontal" Spacing="12">
+    <!-- Left vertical mask params: two separate stacked panels (brush on top, feather
+         below), each an icon above a vertical slider. No persistent text; the value is
+         discoverable via the hover tooltip. Both panels share identical padding / radius /
+         width for visual symmetry. -->
+    <StackPanel Orientation="Vertical"
+                Spacing="8"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Margin="8,8,0,0">
+      <Border Padding="8,10"
+              CornerRadius="6"
+              Background="{StaticResource ZivOverlayBrush}">
         <StackPanel Orientation="Vertical"
                     Spacing="6"
                     Width="28"
@@ -55,6 +58,10 @@
                   IsSnapToTickEnabled="True"
                   HorizontalAlignment="Center" />
         </StackPanel>
+      </Border>
+      <Border Padding="8,10"
+              CornerRadius="6"
+              Background="{StaticResource ZivOverlayBrush}">
         <StackPanel Orientation="Vertical"
                     Spacing="6"
                     Width="28"
@@ -73,8 +80,8 @@
                   IsSnapToTickEnabled="True"
                   HorizontalAlignment="Center" />
         </StackPanel>
-      </StackPanel>
-    </Border>
+      </Border>
+    </StackPanel>
 
     <Border HorizontalAlignment="Center"
             VerticalAlignment="Bottom"
