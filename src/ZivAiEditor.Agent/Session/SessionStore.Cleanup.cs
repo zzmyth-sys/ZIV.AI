@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using ZivAiEditor.Agent.Project;
 
 namespace ZivAiEditor.Agent.Session;
 
@@ -28,6 +29,13 @@ public sealed partial class SessionStore
         bool includeReferences)
     {
         if (string.IsNullOrWhiteSpace(sessionId) || nodeIds is null || nodeIds.Count == 0)
+        {
+            return;
+        }
+
+        // A5: an unsafe id resolves to an impossible directory (Exists == false) — reject here
+        // so the no-op is explicit rather than relying on the sentinel path.
+        if (!PathSanitizer.IsSafe(sessionId, RootDirectory))
         {
             return;
         }

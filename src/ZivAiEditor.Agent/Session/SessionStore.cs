@@ -70,9 +70,10 @@ public sealed partial class SessionStore : ISessionPersistence, IProjectMetadata
     /// <summary>
     /// The directory of one project. Module-boundary migration step 3: the public accessor moved
     /// to <see cref="ProjectService.GetDirectory"/>; this stays private to the store's own
-    /// save / load paths.
+    /// save / load paths. Defense-in-depth (A5): an unsafe id resolves to a structurally
+    /// impossible directory, so store file IO can never reach outside the root.
     /// </summary>
-    private string GetDirectory(string sessionId) => Path.Combine(RootDirectory, sessionId);
+    private string GetDirectory(string sessionId) => PathSanitizer.ResolveDirectory(sessionId, RootDirectory);
 
     /// <summary>
     /// Writes the session as a project (overwriting an existing one) and returns its info.
@@ -82,6 +83,11 @@ public sealed partial class SessionStore : ISessionPersistence, IProjectMetadata
     public async Task<ProjectSummary> SaveAsync(IEditSession session, string name, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(session);
+        if (!PathSanitizer.IsSafe(session.SessionId, RootDirectory))
+        {
+            throw new ProjectCorruptException("项目 id 非法，已拒绝写入。");
+        }
+
         var directory = GetDirectory(session.SessionId);
         await WriteProjectAsync(directory, session, name, ct).ConfigureAwait(false);
         return new ProjectSummary(session.SessionId, name, session.CreatedAt);
@@ -94,6 +100,12 @@ public sealed partial class SessionStore : ISessionPersistence, IProjectMetadata
     /// </summary>
     public async Task<SessionLoadResult> LoadAsync(string sessionId, CancellationToken ct = default)
     {
+        // A5: an unsafe id can never name a project under the root — reject before any file IO.
+        if (!PathSanitizer.IsSafe(sessionId, RootDirectory))
+        {
+            throw new ProjectCorruptException("无法读取项目文件。");
+        }
+
         var directory = GetDirectory(sessionId);
         var path = Path.Combine(directory, SessionFileName);
         string json;

@@ -35,8 +35,14 @@ public sealed class ProjectService : IProjectService
     /// <summary>The directory holding every project.</summary>
     public string RootDirectory => _store.RootDirectory;
 
-    /// <summary>The directory of one project.</summary>
-    public string GetDirectory(string sessionId) => Path.Combine(_store.RootDirectory, sessionId);
+    /// <summary>
+    /// The directory of one project. Defense-in-depth (A5): an unsafe id (a separator, a
+    /// <c>..</c>, or one escaping the root) resolves to a structurally impossible directory
+    /// so <c>Directory.Exists</c> is false and no caller can touch outside the root. The
+    /// <c>string</c> signature is frozen (contract), so the rejection is expressed as a
+    /// sentinel path rather than an exception.
+    /// </summary>
+    public string GetDirectory(string sessionId) => PathSanitizer.ResolveDirectory(sessionId, _store.RootDirectory);
 
     /// <summary>Scans the project root and returns the readable projects, newest first.</summary>
     public async Task<IReadOnlyList<ProjectSummary>> ListAsync(CancellationToken ct = default)
@@ -67,6 +73,13 @@ public sealed class ProjectService : IProjectService
             {
                 try
                 {
+                    // A5: reject an unsafe id before resolving — never recursive-delete outside root.
+                    if (!PathSanitizer.IsSafe(sessionId, _store.RootDirectory))
+                    {
+                        Debug.WriteLine("[project] delete rejected (unsafe id)");
+                        return;
+                    }
+
                     var directory = GetDirectory(sessionId);
                     if (Directory.Exists(directory))
                     {
@@ -82,7 +95,9 @@ public sealed class ProjectService : IProjectService
 
     /// <summary>Renames a saved project (rewrites <c>name</c> in its JSON). No-op when missing.</summary>
     public Task RenameAsync(string sessionId, string newName, CancellationToken ct = default)
-        => _store.WriteMetadataNameAsync(GetDirectory(sessionId), newName, ct);
+        => PathSanitizer.IsSafe(sessionId, _store.RootDirectory)
+            ? _store.WriteMetadataNameAsync(GetDirectory(sessionId), newName, ct)
+            : Task.CompletedTask;
 
     /// <summary>The last opened project id, or <c>null</c> when none / unreadable.</summary>
     public string? GetLastProjectId()
@@ -152,6 +167,13 @@ public sealed class ProjectService : IProjectService
                     File.Delete(path);
                 }
 
+                return;
+            }
+
+            // A5 hardening: never persist an id that could later resolve outside the root.
+            if (!PathSanitizer.IsSafe(sessionId, _store.RootDirectory))
+            {
+                Debug.WriteLine("[project] write last-project rejected (unsafe id)");
                 return;
             }
 
