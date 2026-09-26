@@ -793,4 +793,58 @@ public class EditSessionTests
         Assert.Empty(session.RemoveNodeAndSubtree("missing"));
         Assert.Single(session.Nodes);
     }
+
+    [Fact]
+    public void RemoveSubtree_Current_Inside_Removed_Descendants_Repoints_To_Start()
+    {
+        // A6: RemoveSubtree keeps the start node, so a current node inside the deleted
+        // descendants must be re-pointed at the retained start (no dangling CurrentNodeId).
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        var a = session.AppendNode(rootId, @"C:\img\a.png", "a");
+        var b = session.AppendNode(a.NodeId, @"C:\img\b.png", "b");
+        var c = session.AppendNode(b.NodeId, @"C:\img\c.png", "c");
+        session.NavigateTo(c.NodeId);
+
+        session.RemoveSubtree(a.NodeId);
+
+        Assert.Equal(a.NodeId, session.CurrentNodeId);
+        Assert.True(session.Nodes.ContainsKey(a.NodeId));
+        Assert.NotNull(session.GetHistory());
+    }
+
+    [Fact]
+    public void RemoveSubtree_Current_Outside_Subtree_Is_Unchanged()
+    {
+        // A6: a current node outside the removed subtree must not move.
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        var a = session.AppendNode(rootId, @"C:\img\a.png", "a");
+        var b = session.AppendNode(a.NodeId, @"C:\img\b.png", "b");
+        var sibling = session.AppendNode(rootId, @"C:\img\s.png", "s");
+        session.NavigateTo(sibling.NodeId);
+
+        session.RemoveSubtree(a.NodeId);
+
+        Assert.Equal(sibling.NodeId, session.CurrentNodeId);
+        Assert.False(session.Nodes.ContainsKey(b.NodeId));
+    }
+
+    [Fact]
+    public void RemoveSubtree_Current_Is_Start_Is_Unchanged()
+    {
+        // A6: the start node is kept, so a current node equal to it stays put.
+        var session = new EditSession();
+        session.SetRoot(@"C:\img\root.png");
+        var rootId = session.CurrentNodeId!;
+        var a = session.AppendNode(rootId, @"C:\img\a.png", "a");
+        session.AppendNode(a.NodeId, @"C:\img\b.png", "b");
+        session.NavigateTo(a.NodeId);
+
+        session.RemoveSubtree(a.NodeId);
+
+        Assert.Equal(a.NodeId, session.CurrentNodeId);
+    }
 }

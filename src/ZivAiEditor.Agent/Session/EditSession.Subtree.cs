@@ -18,7 +18,9 @@ public sealed partial class EditSession
     /// keeping the node itself — and returns the removed nodes (Step 9C.8-A2). A no-op that
     /// returns an empty list when <paramref name="nodeId"/> is unknown. The BFS is bounded
     /// by the node count (a cycle cannot arise from <see cref="AppendNode"/>; the
-    /// <c>seen</c> set is purely defensive).
+    /// <c>seen</c> set is purely defensive). When the current node was among the removed
+    /// descendants it is re-pointed at the retained <paramref name="nodeId"/> (A6), so
+    /// <c>CurrentNodeId</c> never dangles.
     /// </summary>
     public IReadOnlyList<IEditNode> RemoveSubtree(string nodeId)
         => RemoveRange(nodeId, includeStart: false);
@@ -94,11 +96,18 @@ public sealed partial class EditSession
             _rootNode = Nodes.Values.FirstOrDefault(candidate => string.IsNullOrEmpty(candidate.ParentNodeId));
         }
 
-        if (includeStart && CurrentNodeId is not null && !Nodes.ContainsKey(CurrentNodeId))
+        if (CurrentNodeId is not null && !Nodes.ContainsKey(CurrentNodeId))
         {
-            CurrentNodeId = string.IsNullOrEmpty(parentId)
-                ? _rootNode?.NodeId
-                : (Nodes.ContainsKey(parentId) ? parentId : null);
+            // Invariant (A6): CurrentNodeId must never dangle after a subtree removal.
+            // - RemoveNodeAndSubtree (includeStart): the current node was deleted → fall back
+            //   to its (kept) parent, or the root / null when there is none.
+            // - RemoveSubtree (!includeStart): the start node is kept, so a current node that
+            //   was inside the deleted descendants re-points at the retained start.
+            CurrentNodeId = includeStart
+                ? (string.IsNullOrEmpty(parentId)
+                    ? _rootNode?.NodeId
+                    : (Nodes.ContainsKey(parentId) ? parentId : null))
+                : nodeId;
         }
 
         return removed;
