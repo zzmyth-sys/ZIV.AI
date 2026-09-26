@@ -25,10 +25,6 @@
   <c:ChromeTitleBar x:Name="PART_Chrome">
     <c:ChromeTitleBar.LeftContent>
       <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-        <Image Source="avares://ZivAiEditor.App/Assets/logo.png"
-               Width="20"
-               Height="20"
-               VerticalAlignment="Center" />
         <TextBlock Text="ZIV.AI Editor"
                    Margin="6,0,0,0"
                    VerticalAlignment="Center"
