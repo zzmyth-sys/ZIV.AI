@@ -135,6 +135,15 @@ class ModelEngine:
                 self._vae = None
                 self._model_id = None
                 self._model_paths = None
+                # A4: a failed load can leave the partially registered weights in
+                # ComfyUI's registry; release them so a retry does not stack a
+                # second copy and OOM (mirrors `unload`). Guarded so a release
+                # error cannot mask the original load exception, which must still
+                # propagate.
+                try:
+                    _release_vram()
+                except Exception:
+                    _LOG.exception("vram release after a failed model load raised")
                 raise
             finally:
                 self._notify = None
@@ -160,15 +169,30 @@ class ModelEngine:
                 return None
         return (datetime.now(timezone.utc) - last_used).total_seconds()
 
-    def unload(self):
+    def unload(self, is_busy=None):
         """Release DiT / TE / VAE and drop back to `not_loaded` (Z21).
 
         The process and pipe stay alive; `ensure_loaded()` reloads lazily on the
         next submit. The last-used timestamp is kept so the watch can reason
-        about reload timing. Returns ``True`` when something was unloaded.
+        about reload timing.
+
+        ``is_busy`` is an optional predicate. When supplied it is evaluated
+        **inside the engine lock**, i.e. in the same critical section as the
+        component clearing, and a busy engine refuses the unload (returns
+        ``False``). A submit sets its busy flag before calling `ensure_loaded`
+        (handlers.handle_submit), so clearing can never race ahead of a task that
+        has already claimed the in-flight slot.
+
+        The VRAM release runs under the **same lock**: no concurrent
+        `ensure_loaded()` can observe a half-released engine — it waits for the
+        release to finish and then loads a fresh triple. The release is short
+        (~1-2 s) and only delays a lazy load, never a running task. Returns
+        ``True`` when something was unloaded.
         """
         with self._lock:
             if self._state != STATE_LOADED:
+                return False
+            if is_busy is not None and is_busy():
                 return False
             self._notify = None
             self._dit = None
@@ -180,7 +204,11 @@ class ModelEngine:
             self._model_id = None
             self._model_paths = None
 
-        _release_vram()
+            # A3: keep the release inside the busy-check/clear critical section so
+            # no new submit can obtain the (now cleared) components while the
+            # ComfyUI registry is being emptied.
+            _release_vram()
+
         _LOG.info("model unloaded (Z21 idle release)")
         return True
 

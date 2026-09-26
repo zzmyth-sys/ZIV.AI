@@ -39,5 +39,8 @@ class IdleWatcher(threading.Thread):
         idle = self._engine.seconds_idle()
         if idle is None or idle < self._idle_seconds:
             return
-        if self._engine.unload():
+        # Pass the busy predicate so the engine re-checks it atomically with the
+        # unload (A3): the fast check above can be stale when a submit flips busy
+        # just after it. A refused unload simply retries on the next tick.
+        if self._engine.unload(self._is_busy):
             _LOG.info("idle unload after %.1fs (threshold %.1fs)", idle, self._idle_seconds)
