@@ -6,6 +6,7 @@ import threading
 import uuid
 
 import config
+import diag_vram
 import engine as engine_module
 import ipc
 import loras
@@ -150,6 +151,7 @@ def handle_cancel(message, frame_io):
 def _run_submit(frame_io, task_id, payload, op="inpaint"):
     try:
         frame_io.write_json({"type": "accepted", "task_id": task_id})
+        diag_vram.record("accepted", get_vram_used_mb, task_id=task_id)
         # Must precede any `import comfy.model_management`: it fixes the
         # smart-memory flag at import time (see model_loader).
         model_loader.prepare_environment()
@@ -181,6 +183,16 @@ def _run_submit(frame_io, task_id, payload, op="inpaint"):
                 "sub_stage": "ready",
             }
         )
+        diag_vram.record(
+            "progress",
+            get_vram_used_mb,
+            stage="sampling",
+            sub_stage="ready",
+            fraction=1.0,
+            step=0,
+            total=0,
+            task_id=task_id,
+        )
 
         model, clip, vae = _ENGINE.components
         try:
@@ -200,6 +212,7 @@ def _run_submit(frame_io, task_id, payload, op="inpaint"):
                 "seed": result["seed"],
             }
         )
+        diag_vram.record("result", get_vram_used_mb, task_id=task_id)
     except BaseException as exc:
         # `InterruptProcessingException` derives from BaseException, so the
         # cancellation path must be caught here (never `except Exception`).
@@ -307,6 +320,15 @@ def _make_sampling_progress(frame_io, task_id):
                 "sub_stage": None,
             }
         )
+        diag_vram.record(
+            "progress",
+            get_vram_used_mb,
+            stage=stage,
+            step=step,
+            total=total,
+            fraction=fraction,
+            task_id=task_id,
+        )
 
     return push
 
@@ -314,6 +336,7 @@ def _make_sampling_progress(frame_io, task_id):
 def _make_preview(frame_io, task_id):
     def push(step, total, jpeg_bytes):
         frame_io.write_preview(task_id, step, total, jpeg_bytes)
+        diag_vram.record("preview", get_vram_used_mb, step=step, total=total, task_id=task_id)
 
     return push
 
@@ -428,6 +451,7 @@ def _write_error(frame_io, task_id, code, exc):
             "message": "%s: %s" % (type(exc).__name__, exc),
         }
     )
+    diag_vram.record("error", get_vram_used_mb, task_id=task_id)
 
 
 def _make_progress_pusher(frame_io, task_id):
@@ -443,6 +467,14 @@ def _make_progress_pusher(frame_io, task_id):
                 "stage": stage,
                 "sub_stage": sub_stage,
             }
+        )
+        diag_vram.record(
+            "progress",
+            get_vram_used_mb,
+            stage=stage,
+            sub_stage=sub_stage,
+            fraction=fraction,
+            task_id=task_id,
         )
 
     return push

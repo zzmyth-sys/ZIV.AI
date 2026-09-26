@@ -14,6 +14,7 @@ import logging
 import threading
 
 import config
+import diag_vram
 
 _LOG = logging.getLogger("zivai.server")
 
@@ -43,6 +44,11 @@ class HeartbeatSender(threading.Thread):
                         "vram_used_mb": float(self._vram_provider()),
                         "current_task_id": self._task_id_provider(),
                     }
+                )
+                diag_vram.record(
+                    "heartbeat",
+                    self._vram_provider,
+                    task_id=self._task_id_provider(),
                 )
             except Exception as exc:
                 # A dead pipe ends the heartbeat; the main loop will exit too.
