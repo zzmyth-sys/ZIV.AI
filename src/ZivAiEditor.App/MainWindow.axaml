@@ -21,6 +21,7 @@
     </Style>
   </Window.Styles>
 
+  <Panel>
   <c:ChromeTitleBar x:Name="PART_Chrome">
     <c:ChromeTitleBar.LeftContent>
       <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
@@ -172,4 +173,16 @@
       </Grid>
     </c:ChromeTitleBar.Body>
   </c:ChromeTitleBar>
+
+    <!-- F6: dim the whole client area (title bar included) while the preview window is
+         open. Purely visual — the disable logic is F5.1 — so it never intercepts input.
+         Rounded to match the chrome root; opacity is #80000000 (50% black). -->
+    <Border x:Name="PART_ModalDim"
+            Background="#80000000"
+            CornerRadius="8"
+            IsVisible="False"
+            IsHitTestVisible="False"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch" />
+  </Panel>
 </Window>

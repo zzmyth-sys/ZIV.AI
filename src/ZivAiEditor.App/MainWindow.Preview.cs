@@ -49,6 +49,7 @@ public partial class MainWindow
                 // F5.1: restore the main window on every close path (user X, project switch,
                 // node delete, owner close). Unconditional: some paths null the field first.
                 IsEnabled = true;
+                SetModalDim(false);
 
                 MaskDiagnostics.Log(
                     $"[close] preview closed edited={_maskEditedInPreview} busy={_vm.IsBusy} closing={_closing}");
@@ -112,6 +113,21 @@ public partial class MainWindow
         // F5.1: while the preview is open it is the only interactive window (main window,
         // including its self-drawn title bar, is disabled). Idempotent across the reuse path.
         IsEnabled = false;
+
+        // F6: dim the main window so the preview reads as a distinct layer. Visual only.
+        SetModalDim(true);
+    }
+
+    /// <summary>
+    /// F6: shows / hides the full-client-area dim overlay (<c>PART_ModalDim</c>) on the main
+    /// window. Visual only (<c>IsHitTestVisible=false</c>); the real disable is F5.1.
+    /// </summary>
+    private void SetModalDim(bool visible)
+    {
+        if (this.FindControl<Border>("PART_ModalDim") is { } dim)
+        {
+            dim.IsVisible = visible;
+        }
     }
 
     /// <summary>

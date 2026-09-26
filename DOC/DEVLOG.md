@@ -6293,3 +6293,20 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 ### 实测（Z29/Z30：无 GPU）
 - `dotnet build src\ZIV.AI.sln -c Release` → 0 错误 0 警告。
 - 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **563 通过 / 0 失败**（无测试受影响，纯 App 层）。
+
+---
+
+## [Step 9C.13-F6] - 2026-09-26（预览窗打开时主窗加暗化遮罩）
+
+纯视觉，不改 F5 三件套（禁用 / Owner / ShowInTaskbar）。
+
+- **MainWindow.axaml**：在 `Window` 内容外包一层 `Panel`；`PART_Chrome` 之后加
+  `Border x:Name="PART_ModalDim"`：`Background="#80000000"`（50% 黑）、`CornerRadius="8"`（对齐 chrome 圆角，
+  避免方角压到透明圆角）、`IsVisible="False"`、`IsHitTestVisible="False"`、对齐 `Stretch` 撑满客户区
+  （含自绘标题栏）。
+- **MainWindow.Preview.cs**：`OpenImagePreview` 尾部（`IsEnabled=false` 同处）`SetModalDim(true)`；
+  `Closed` 处理器（`IsEnabled=true` 同处）`SetModalDim(false)`；新增私有 `SetModalDim(bool)`
+  经 `FindControl<Border>("PART_ModalDim")` 幂等设置，首建/复用共用。
+- **边界**：E1 复用（公共尾部设 true，幂等）；E2 切项目/删节点（走 `Closed` 恢复）；E3 主窗关闭（Owner 联动，
+  遮罩随主窗关闭）；E4 遮罩 `IsHitTestVisible=false` 不拦点击，Alt+F4+dirty 行为不变。
+- **实测**：build 0 错误 0 警告；非 GPU 全量 **563 通过 / 0 失败**（不变）。
