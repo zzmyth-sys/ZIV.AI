@@ -41,7 +41,7 @@ public partial class MainWindow
         var progress = new Progress<TaskProgress>(OnProgress);
         try
         {
-            outcome = await _flow.GenerateAsync(
+            outcome = await RunWithPatienceAsync(() => _flow.GenerateAsync(
                 text,
                 progress,
                 expanded => PromptConfirmDialog.ShowAsync(this, expanded),
@@ -57,7 +57,7 @@ public partial class MainWindow
 
                     input.Text = "";
                     SetBusy(true);
-                });
+                }));
         }
         catch (Exception ex)
         {

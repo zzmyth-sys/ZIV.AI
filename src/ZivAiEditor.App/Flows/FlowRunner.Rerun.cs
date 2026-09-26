@@ -119,7 +119,7 @@ internal sealed partial class FlowRunner
                 _vm.ReplacePending(target, new ChatMessage
                 {
                     Role = ChatRole.Assistant,
-                    Text = ChatFlowRules.BuildFailureMessage(state),
+                    Text = TakeFailureText(ChatFlowRules.BuildFailureMessage(state)),
                     ImagePath = target.ImagePath,
                     IsError = true,
                     NodeId = nodeId,
@@ -191,7 +191,7 @@ internal sealed partial class FlowRunner
             _vm.ReplacePending(target, new ChatMessage
             {
                 Role = ChatRole.Assistant,
-                Text = "已取消。",
+                Text = TakeFailureText("已取消。"),
                 ImagePath = target.ImagePath,
                 IsError = true,
                 NodeId = nodeId,
@@ -203,7 +203,7 @@ internal sealed partial class FlowRunner
             _vm.ReplacePending(target, new ChatMessage
             {
                 Role = ChatRole.Assistant,
-                Text = ex.Message,
+                Text = TakeFailureText(ex.Message),
                 ImagePath = target.ImagePath,
                 IsError = true,
                 NodeId = nodeId,
@@ -212,6 +212,7 @@ internal sealed partial class FlowRunner
         }
         finally
         {
+            _stuckRecoveryPending = false;
             _vm.SetBusy(false);
             if (ReferenceEquals(_inFlightCts, cts))
             {

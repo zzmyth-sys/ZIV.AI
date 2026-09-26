@@ -43,6 +43,10 @@ public partial class App : Application
             _context.PreviewReceived += bytes =>
                 Dispatcher.UIThread.Post(() => window.ShowPreview(bytes));
 
+            // L1/L2 recovery (Step 9C.20) → mark the in-flight bubble as restarted.
+            _context.StuckRecovery += () =>
+                Dispatcher.UIThread.Post(() => window.NotifyStuckRecovery());
+
             // A second instance forwards its request through the pipe; marshal to the UI thread.
             if (Shell is { } shell)
             {

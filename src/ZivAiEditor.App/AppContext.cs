@@ -60,6 +60,8 @@ internal sealed class AppContext : IDisposable
         // App-layer wiring (ARCHITECTURE §6): surface backend preview frames
         // (0x02, JPEG) as plain bytes so the UI never references Backend types (§4).
         client.PreviewReceived += frame => PreviewReceived?.Invoke(frame.JpegBytes);
+        // L1/L2 recovery (Step 9C.20): surface the backend restart to the App shell.
+        client.StuckRecoveryTriggered += _ => StuckRecovery?.Invoke();
         _llmHttp = llmHttp;
         LlmClient = llmClient;
         Planner = planner;
@@ -152,6 +154,9 @@ internal sealed class AppContext : IDisposable
     /// <see cref="byte"/>[] — no Backend type crosses the boundary (§4).
     /// </summary>
     public event Action<byte[]>? PreviewReceived;
+
+    /// <summary>Raised when the backend performed an L1/L2 recovery (Step 9C.20); the shell updates the bubble.</summary>
+    public event Action? StuckRecovery;
 
     public static AppContext Create(IShellContext shell)
     {

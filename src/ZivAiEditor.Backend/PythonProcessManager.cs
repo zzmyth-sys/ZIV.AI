@@ -39,6 +39,10 @@ public sealed class PythonBackendOptions
     /// </summary>
     public int ModelLoadTimeoutMs { get; init; } = 180_000;
 
+    /// <summary>L1 watchdog: cancel + restart a sampling task that emits no progress for this long; CancelConfirmTimeoutMs is the canceled-ack wait.</summary>
+    public int StuckTimeoutMs { get; init; } = 60_000;
+    public int CancelConfirmTimeoutMs { get; init; } = 5_000;
+
     /// <summary>
     /// Raise <see cref="IpcInferenceClient.HeartbeatLost"/> after this long
     /// without a heartbeat frame (Step 3). Python sends every 10 s, so the
@@ -102,6 +106,9 @@ public sealed class PythonProcessManager : IDisposable, IAsyncDisposable
     private int _restarting;
     private PythonBackendState _state = PythonBackendState.Stopped;
     private IpcInferenceClient? _client;
+
+    /// <summary>Test seam: when set, <see cref="EnsureStartedAsync"/> returns its stream (internal; null in production).</summary>
+    internal Func<CancellationToken, Task<Stream>>? EnsureStartedOverride { get; set; }
 
     public PythonProcessManager(PythonBackendOptions options)
     {
@@ -327,6 +334,8 @@ public sealed class PythonProcessManager : IDisposable, IAsyncDisposable
 
     public async Task<Stream> EnsureStartedAsync(CancellationToken ct = default)
     {
+        if (EnsureStartedOverride is { } ensureOverride)
+            return await ensureOverride(ct).ConfigureAwait(false);
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {

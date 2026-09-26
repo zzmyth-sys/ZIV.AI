@@ -136,6 +136,18 @@ internal sealed partial class FlowRunner
 
             if (state.Status == TaskStatus.Canceled)
             {
+                // L1/L2: a recovery cancel is not a user cancel 鈥?surface the restart.
+                if (_stuckRecoveryPending)
+                {
+                    _vm.ReplacePending(pending, new ChatMessage
+                    {
+                        Role = ChatRole.Assistant,
+                        Text = TakeFailureText(""),
+                        IsError = true,
+                    });
+                    return false;
+                }
+
                 // Revert the chat to the pre-send state (no new node, no bubbles); the App
                 // puts the prompt / attachments back into the input (Step 9C.8-B follow-up).
                 _vm.SetLastRunCanceled(true);
@@ -149,7 +161,7 @@ internal sealed partial class FlowRunner
             _vm.ReplacePending(pending, new ChatMessage
             {
                 Role = ChatRole.Assistant,
-                Text = ChatFlowRules.BuildFailureMessage(state),
+                Text = TakeFailureText(ChatFlowRules.BuildFailureMessage(state)),
                 IsError = true,
             });
             return false;
@@ -163,11 +175,17 @@ internal sealed partial class FlowRunner
         }
         catch (Exception ex)
         {
-            _vm.ReplacePending(pending, new ChatMessage { Role = ChatRole.Assistant, Text = ex.Message, IsError = true });
+            _vm.ReplacePending(pending, new ChatMessage
+            {
+                Role = ChatRole.Assistant,
+                Text = TakeFailureText(ex.Message),
+                IsError = true,
+            });
             return false;
         }
         finally
         {
+            _stuckRecoveryPending = false;
             _vm.SetBusy(false);
             if (ReferenceEquals(_inFlightCts, cts))
             {

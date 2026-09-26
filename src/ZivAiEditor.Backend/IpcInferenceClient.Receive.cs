@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using ZivAiEditor.Contracts.Inference;
@@ -165,6 +166,11 @@ public sealed partial class IpcInferenceClient
             lock (_stateLock)
             {
                 _lastHeartbeatAt = DateTimeOffset.UtcNow;
+                var vram = ReadDouble(root, "vram_used_mb");
+                if (vram > 0)
+                {
+                    _lastVramMb = vram;
+                }
             }
 
             Interlocked.Exchange(ref _heartbeatLostRaised, 0);
@@ -195,6 +201,13 @@ public sealed partial class IpcInferenceClient
                         new InvalidOperationException(ReadString(root, "message") ?? "Inference backend returned an error."));
                 }
             }
+            else if (taskId is not null)
+            {
+                // A2: a frame for a task this client no longer tracks (the submit
+                // already timed out / was cancelled) is dropped on purpose; log it
+                // so the drop is observable instead of silent.
+                Debug.WriteLine($"[ipc] dropping late '{messageType}' frame for unknown task {taskId}");
+            }
 
             return;
         }
@@ -206,6 +219,19 @@ public sealed partial class IpcInferenceClient
 
             case "progress":
                 var detail = MapProgress(root);
+                task.LastProgressAt = DateTimeOffset.UtcNow;
+                task.LastStage = detail.Stage;
+                task.LastSubStage = detail.SubStage;
+                task.LastFraction = detail.Fraction;
+                // D2/L4: the watchdog only guards the sampling phase. On the first
+                // sampling frame, arm it and disable the load timeout (the sampling
+                // phase is unbounded; L1 is the safety net).
+                if (string.Equals(detail.Stage, "sampling", StringComparison.Ordinal))
+                {
+                    task.SamplingArmed = true;
+                    task.DisableTimeout();
+                }
+
                 ProgressReceived?.Invoke(detail);
                 task.Progress?.Report(new InferenceProgress
                 {
@@ -216,6 +242,7 @@ public sealed partial class IpcInferenceClient
                 break;
 
             case "preview":
+                task.LastProgressAt = DateTimeOffset.UtcNow;
                 task.PreviewStep = (int)ReadDouble(root, "step");
                 task.PreviewTotal = (int)ReadDouble(root, "total");
                 break;
@@ -242,9 +269,18 @@ public sealed partial class IpcInferenceClient
                 break;
 
             case "error":
-                task.Completion.TrySetException(new InferenceBackendException(
-                    ReadString(root, "code") ?? "backend_error",
-                    ReadString(root, "message") ?? "Inference backend returned an error."));
+                var code = ReadString(root, "code") ?? "backend_error";
+                var message = ReadString(root, "message") ?? "Inference backend returned an error.";
+                task.Completion.TrySetException(new InferenceBackendException(code, message));
+                // L2 (D1): a Dynamic-VRAM mechanism failure (AcceleratorError / out of
+                // memory) is not fixed by the resolution fallback — run the same
+                // cancel + restart recovery as the L1 watchdog. Offloaded so the
+                // receive loop never blocks on the cancel-ack wait.
+                if (IsMechanismFailure(message))
+                {
+                    _ = Task.Run(() => HandleStuckAsync(task, "accelerator_error"));
+                }
+
                 break;
         }
     }
@@ -418,5 +454,43 @@ public sealed partial class IpcInferenceClient
         public int PreviewStep { get; set; }
 
         public int PreviewTotal { get; set; }
+
+        /// <summary>When the submit was accepted (L3 <c>elapsed_since_accepted_ms</c>).</summary>
+        public DateTimeOffset AcceptedAt { get; set; }
+
+        /// <summary>Last time a <c>progress</c> / <c>preview</c> frame touched this task (L1).</summary>
+        public DateTimeOffset LastProgressAt { get; set; }
+
+        /// <summary>Last progress fields, kept for the L3 failure log.</summary>
+        public string? LastStage { get; set; }
+
+        public string? LastSubStage { get; set; }
+
+        public double? LastFraction { get; set; }
+
+        /// <summary>True once the first <c>stage=="sampling"</c> frame arrived (D2: watchdog armed only for sampling).</summary>
+        public bool SamplingArmed { get; set; }
+
+        /// <summary>0/1 latch so the watchdog recovers a given task at most once.</summary>
+        public int StuckRecoveryFlag;
+
+        /// <summary>
+        /// The submit's timeout source; the receive loop disables it on the first
+        /// sampling frame (L4). Null until <c>SubmitEditAsync</c> creates it.
+        /// </summary>
+        public CancellationTokenSource? Timeout { get; set; }
+
+        /// <summary>Disables the submit timeout (L4: sampling is unbounded; L1 is the safety net).</summary>
+        public void DisableTimeout()
+        {
+            try
+            {
+                Timeout?.CancelAfter(System.Threading.Timeout.Infinite);
+            }
+            catch (ObjectDisposedException)
+            {
+                // The submit already completed and disposed the source.
+            }
+        }
     }
 }

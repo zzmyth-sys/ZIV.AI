@@ -274,7 +274,7 @@ public partial class MainWindow
             // uses the window-level task, so it also covers a preview closed after drawing.
             await FlushPendingMaskAsync();
 
-            await _vm.SubmitAsync(text, progress, CancellationToken.None, references);
+            await RunWithPatienceAsync(() => _vm.SubmitAsync(text, progress, CancellationToken.None, references));
 
             if (_vm.LastRunCanceled)
             {

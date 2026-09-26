@@ -30,6 +30,7 @@ public sealed partial class IpcInferenceClient : IInferenceClient
         Process = process ?? throw new ArgumentNullException(nameof(process));
         _ownsProcess = ownsProcess;
         Process.AttachInferenceClient(this);
+        EnsureWatchdogStarted();
     }
 
     public PythonProcessManager Process { get; }
@@ -179,6 +180,8 @@ public sealed partial class IpcInferenceClient : IInferenceClient
             var requestId = Guid.NewGuid().ToString("N");
             var taskId = Guid.NewGuid().ToString("N");
             var pending = new PendingTask(taskId, progress);
+            pending.AcceptedAt = DateTimeOffset.UtcNow;
+            pending.LastProgressAt = pending.AcceptedAt;
             _tasks[taskId] = pending;
             lock (_stateLock)
             {
@@ -189,6 +192,10 @@ public sealed partial class IpcInferenceClient : IInferenceClient
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 timeout.CancelAfter(Process.Options.ModelLoadTimeoutMs);
+                // L4: the receipt loop disables this source on the first sampling frame,
+                // so the 180 s load budget cannot cap the (unbounded) sampling phase.
+                // A genuinely stuck sampling task is handled by the L1 watchdog instead.
+                pending.Timeout = timeout;
                 var token = timeout.Token;
 
                 var submit = IpcSubmitMapper.BuildSubmitRequest(requestId, taskId, request);
@@ -218,12 +225,24 @@ public sealed partial class IpcInferenceClient : IInferenceClient
                     // backend so it interrupts sampling instead of running to
                     // completion (Z18/Z20). Best effort — the task is already
                     // being torn down.
-                    await TryForwardCancelAsync(stream, taskId, pending).ConfigureAwait(false);
+                    await TryForwardCancelAsync(stream, taskId, pending, Process.Options.RequestTimeoutMs).ConfigureAwait(false);
                     throw new OperationCanceledException(ct);
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
-                    throw new TimeoutException($"Inference did not complete within {Process.Options.ModelLoadTimeoutMs} ms.");
+                    // C2: a timeout must actively stop the backend, not just drop
+                    // the eventual result. Forward a cancel; only when the frame
+                    // could not be sent (dead pipe) do we ask for a restart. The
+                    // restart respects AutoRestartEnabled / the attempt budget, so
+                    // a disabled or exhausted backend is left as-is on purpose.
+                    var (sent, _) = await TryForwardCancelAsync(stream, taskId, pending, Process.Options.RequestTimeoutMs).ConfigureAwait(false);
+                    if (!sent)
+                    {
+                        _ = Process.RequestRestartAsync();
+                    }
+
+                    throw new TimeoutException(
+                        $"Inference did not start sampling within {Process.Options.ModelLoadTimeoutMs} ms (L4: the sampling phase itself is unbounded).");
                 }
             }
             finally
@@ -278,25 +297,45 @@ public sealed partial class IpcInferenceClient : IInferenceClient
 
     /// <summary>
     /// Best-effort cancel used when the caller's <see cref="CancellationToken"/>
-    /// fires during <see cref="SubmitInpaintAsync"/>. The cancel frame is sent
-    /// with <see cref="CancellationToken.None"/> so the already-canceled caller
-    /// token cannot block the write, then it waits briefly for the Python
-    /// <c>canceled</c> acknowledgement.
+    /// fires, the submit times out, or the L1 watchdog decides the task is stuck.
+    /// The cancel frame is written under a bounded (independent of the caller)
+    /// token so a stalled / non-reading backend cannot block recovery forever.
+    /// Returns <c>(Sent, Acked)</c>: <c>Sent</c> is false only when the write
+    /// failed / timed out (dead or stuck pipe); <c>Acked</c> is true only when
+    /// Python's <c>canceled</c> frame arrived within <paramref name="ackTimeoutMs"/>.
+    /// The restart decision uses these (a slow / missing ack means a restart).
     /// </summary>
-    private async Task TryForwardCancelAsync(Stream stream, string taskId, PendingTask pending)
+    private async Task<(bool Sent, bool Acked)> TryForwardCancelAsync(
+        Stream stream,
+        string taskId,
+        PendingTask pending,
+        int ackTimeoutMs)
     {
         try
         {
+            using var writeTimeout = new CancellationTokenSource(Math.Max(250, ackTimeoutMs));
             var json = JsonSerializer.Serialize(new CancelRequest("cancel", taskId), IpcJsonContext.Default.CancelRequest);
-            await WriteJsonAsync(stream, json, CancellationToken.None).ConfigureAwait(false);
-
-            using var timeout = new CancellationTokenSource(Process.Options.RequestTimeoutMs);
-            await pending.CancelSignal.Task.WaitAsync(timeout.Token).ConfigureAwait(false);
+            await WriteJsonAsync(stream, json, writeTimeout.Token).ConfigureAwait(false);
         }
         catch (Exception)
         {
-            // Best effort only: the submit path is already unwinding.
+            // The pipe is gone / stuck: report it so the caller can restart the backend.
+            return (false, false);
         }
+
+        var acked = false;
+        try
+        {
+            using var timeout = new CancellationTokenSource(ackTimeoutMs);
+            await pending.CancelSignal.Task.WaitAsync(timeout.Token).ConfigureAwait(false);
+            acked = true;
+        }
+        catch (Exception)
+        {
+            // Best effort: no ack within the window.
+        }
+
+        return (true, acked);
     }
 
     public void Dispose()

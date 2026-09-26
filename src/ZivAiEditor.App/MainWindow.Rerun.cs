@@ -69,7 +69,7 @@ public partial class MainWindow
         var progress = new Progress<TaskProgress>(OnProgress);
         try
         {
-            await _vm.RerunNodeAsync(nodeId, progress, CancellationToken.None);
+            await RunWithPatienceAsync(() => _vm.RerunNodeAsync(nodeId, progress, CancellationToken.None));
         }
         catch (Exception ex)
         {

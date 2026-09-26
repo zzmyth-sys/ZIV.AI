@@ -36,4 +36,25 @@ public partial class ConfirmDialog : Window
     /// <summary>Shows the dialog modally; returns <c>true</c> for "yes", <c>false</c> for "no".</summary>
     public static Task<bool?> ShowAsync(Window owner, string message)
         => new ConfirmDialog(message).ShowDialog<bool?>(owner);
+
+    private ConfirmDialog(string message, string yesText, string noText)
+        : this(message)
+    {
+        if (this.FindControl<Button>("PART_Yes") is { } yes)
+        {
+            yes.Content = yesText;
+        }
+
+        if (this.FindControl<Button>("PART_No") is { } no)
+        {
+            no.Content = noText;
+        }
+    }
+
+    /// <summary>
+    /// Shows the dialog modally with custom button labels; <c>true</c> for the
+    /// first (yes) button, <c>false</c> for the second (no) button.
+    /// </summary>
+    public static Task<bool?> ShowAsync(Window owner, string message, string yesText, string noText)
+        => new ConfirmDialog(message, yesText, noText).ShowDialog<bool?>(owner);
 }
