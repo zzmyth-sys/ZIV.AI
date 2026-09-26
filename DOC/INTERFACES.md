@@ -286,3 +286,17 @@
   `Button.bubbleDelete`）。
 - **构造追加（非契约）**：`FlowRunner` ctor 末位增可选 `IImagingService? imaging = null`。
 - **无 IPC / Python 改动**。
+
+## 21. 追加说明（视图改造 + UI 统一 + 裁切比例 N1–N5，2026-09-26）
+
+> 本节为**追加**（只增不改）。**无契约变更 / 无签名变更 / 无 IPC / Python 改动。**
+
+- **无 Contracts 变化**：本步仅动 App / UI 层。
+- **UI 层新增（非 kernel）**：
+  - `ZivAiEditor.UI.Editing.CropAspectMode`（`Free / R16x9 / R9x16 / R1x1`）——纯 UI 状态。
+  - `ZivAiEditor.UI.Editing.CropState.Aspect` / `SetAspect(CropAspectMode)`——纯状态（`CropState` 改 `partial`）。
+  - `ZivAiEditor.App.Controls.PanZoomCanvas`（UserControl）——替换 `UVtools.AvaloniaControls.AdvancedImageBox`；
+    `UVtools.AvaloniaControls` 依赖已移除（`Directory.Packages.props` / `App.csproj` / `App.axaml`）。
+  - `ZivAiEditor.App.Controls.Modes.CropModePanel` / `MaskModePanel`（UserControl）。
+- **行为修正（非契约）**：`ImageViewModel.ClampOffset` 每轴至少 10% 可见；裁切默认框 `0.75 → 0.85`；
+  进入裁切用标准 `Fit()`；平移（空格+左键 / 中键）在所有模式生效。

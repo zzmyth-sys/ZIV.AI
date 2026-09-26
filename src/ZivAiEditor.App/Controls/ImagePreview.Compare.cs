@@ -164,6 +164,14 @@ public partial class ImagePreview
             {
                 LoadImage(_displayPath);
             }
+
+            // B3: every compare-mode toggle re-fits the view (divider drags also raise
+            // StateChanged, so this is gated on the mode transition).
+            if (_model.HasImage)
+            {
+                _model.Fit();
+                ApplyModel();
+            }
         }
 
         if (_overlay is not null)

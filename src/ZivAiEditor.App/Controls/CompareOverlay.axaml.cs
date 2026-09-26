@@ -9,7 +9,7 @@ namespace ZivAiEditor.App.Controls;
 
 /// <summary>
 /// Self-drawn swipe-compare overlay (Step 9C.2-C). It renders on top of the
-/// <c>AdvancedImageBox</c> (which keeps showing the current image on the right side):
+/// <c>PanZoomCanvas</c> (which keeps showing the current image on the right side):
 /// the overlay draws the <b>parent</b> (reference) image on the left of a vertical
 /// divider.
 ///

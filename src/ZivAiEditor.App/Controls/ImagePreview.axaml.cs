@@ -6,9 +6,6 @@ using Avalonia.Controls.Chrome;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Media.Imaging;
-using Avalonia.Threading;
-using Avalonia.VisualTree;
-using UVtools.AvaloniaControls;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Imaging;
 using ZivAiEditor.UI.Editing;
@@ -19,11 +16,12 @@ namespace ZivAiEditor.App.Controls;
 /// <summary>
 /// Large-image preview window (Step 9C.1), opened by clicking an image in the chat
 /// stream. Behaviour: fit-to-window by default, wheel zoom anchored at the pointer,
-/// left-drag pan, double-click toggles fit / 100%, Esc closes.
+/// Space+left / middle-drag pan (all modes), double-click toggles fit / 100%,
+/// Esc exits crop → compare → window.
 ///
-/// The <see cref="AdvancedImageBox"/> is used for rendering only: all zoom / pan state
+/// The <see cref="PanZoomCanvas"/> is used for rendering only: all zoom / pan state
 /// is computed by the pure, unit-tested <see cref="ImageViewModel"/> (ZivAiEditor.UI)
-/// and applied back to the box. The bitmap is decoded off the UI thread (Z11) and
+/// and applied back to the canvas. The bitmap is decoded off the UI thread (Z11) and
 /// disposed when the window closes (Z9).
 /// </summary>
 public partial class ImagePreview : Window
@@ -35,7 +33,7 @@ public partial class ImagePreview : Window
     private readonly ImageViewModel _model = new();
     private readonly ToolStateMachine _tools = new();
 
-    private AdvancedImageBox? _box;
+    private PanZoomCanvas? _canvas;
     private TextBlock? _emptyLabel;
     private Border? _zoomBadge;
     private TextBlock? _zoomText;
@@ -49,6 +47,9 @@ public partial class ImagePreview : Window
     private Bitmap? _bitmap;
     private string? _path;
     private int _generation;
+
+    /// <summary>Last tool seen by <see cref="OnToolsChanged"/>, so a switch can re-fit once (B3).</summary>
+    private ToolMode _lastToolMode;
 
     /// <summary>
     /// Designer / runtime-loader only (Avalonia requires a public parameterless ctor for an
@@ -146,9 +147,9 @@ public partial class ImagePreview : Window
         }
 
         _bitmap = bitmap;
-        if (_box is not null)
+        if (_canvas is not null)
         {
-            _box.Image = bitmap;
+            _canvas.Image = bitmap;
         }
 
         _model.SetViewport(ViewportWidth(), ViewportHeight());
@@ -156,7 +157,6 @@ public partial class ImagePreview : Window
         ApplyModel();
         RefreshCropBounds();
         RefreshMaskCanvas();
-        ApplyPendingViewRestore();
 
         if (_emptyLabel is not null)
         {
@@ -183,7 +183,7 @@ public partial class ImagePreview : Window
 
     private void Init()
     {
-        _box = this.FindControl<AdvancedImageBox>("PART_ImageBox");
+        _canvas = this.FindControl<PanZoomCanvas>("PART_ImageCanvas");
         _emptyLabel = this.FindControl<TextBlock>("PART_Empty");
         _zoomBadge = this.FindControl<Border>("PART_ZoomBadge");
         _zoomText = this.FindControl<TextBlock>("PART_ZoomText");
@@ -239,9 +239,9 @@ public partial class ImagePreview : Window
 
         _compareState.StateChanged += (_, _) => OnCompareStateChanged();
 
-        if (_box is not null)
+        if (_canvas is not null)
         {
-            ((AvaloniaObject)_box).PropertyChanged += OnBoxPropertyChanged;
+            ((AvaloniaObject)_canvas).PropertyChanged += OnCanvasPropertyChanged;
         }
 
         Loaded += (_, _) =>
@@ -251,24 +251,27 @@ public partial class ImagePreview : Window
         };
 
         KeyDown += OnKeyDown;
+        KeyUp += OnKeyUp;
+        // Losing focus while Space is held must not leave the pan modifier stuck on.
+        Deactivated += (_, _) => _spacePan = false;
         Closed += (_, _) => Cleanup();
 
         ShowEmpty("暂无图像");
     }
 
-    private double ViewportWidth() => _box?.Viewport.Width ?? 0;
+    private double ViewportWidth() => _canvas?.Viewport.Width ?? 0;
 
-    private double ViewportHeight() => _box?.Viewport.Height ?? 0;
+    private double ViewportHeight() => _canvas?.Viewport.Height ?? 0;
 
     private void OnViewportChanged()
     {
-        if (_box is null)
+        if (_canvas is null)
         {
             return;
         }
 
-        var vw = _box.Viewport.Width;
-        var vh = _box.Viewport.Height;
+        var vw = _canvas.Viewport.Width;
+        var vh = _canvas.Viewport.Height;
         if (Math.Abs(vw - _model.ViewportWidth) < 0.5 && Math.Abs(vh - _model.ViewportHeight) < 0.5)
         {
             return;
@@ -278,7 +281,7 @@ public partial class ImagePreview : Window
         ApplyModel();
     }
 
-    private void OnBoxPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    private void OnCanvasPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
         if (e.Property == Visual.BoundsProperty)
         {
@@ -289,49 +292,18 @@ public partial class ImagePreview : Window
     /// <summary>Pushes the model state onto the renderer (Z11: called on the UI thread).</summary>
     private void ApplyModel()
     {
-        if (_box is null)
+        if (_canvas is null)
         {
             return;
         }
 
-        _box.Zoom = _model.ZoomPercent;
-        _box.Offset = new Vector(_model.OffsetX, _model.OffsetY);
+        _canvas.Zoom = _model.ZoomPercent;
+        _canvas.Offset = new Vector(_model.OffsetX, _model.OffsetY);
+        _canvas.InvalidateVisual();
         UpdateZoomBadge();
-        HideScrollBars();
         _overlay?.InvalidateVisual();
         _cropOverlay?.InvalidateVisual();
         _maskOverlay?.InvalidateVisual();
-
-        // The scroll-bar range follows the new zoom one layout pass later; re-apply
-        // the offset then so the anchored position survives the range update.
-        Dispatcher.UIThread.Post(
-            () =>
-            {
-                if (_box is not null)
-                {
-                    _box.Offset = new Vector(_model.OffsetX, _model.OffsetY);
-                    HideScrollBars();
-                }
-            },
-            DispatcherPriority.Background);
-    }
-
-    /// <summary>
-    /// Hides the renderer's own scroll bars (they appear once the image is zoomed past
-    /// the viewport). Zoom / pan are driven by <see cref="ImageViewModel"/>, so the bars
-    /// are redundant; the control's parts stay alive (its code needs them) but invisible.
-    /// </summary>
-    private void HideScrollBars()
-    {
-        if (_box is null)
-        {
-            return;
-        }
-
-        foreach (var bar in _box.GetVisualDescendants().OfType<ScrollBar>())
-        {
-            bar.Visibility = ScrollBarVisibility.Hidden;
-        }
     }
 
     private void UpdateZoomBadge()
@@ -344,7 +316,10 @@ public partial class ImagePreview : Window
         _zoomText.Text = _model.IsAtFit ? $"适配 {_model.ZoomPercent}%" : $"{_model.ZoomPercent}%";
     }
 
-    /// <summary>Reacts to tool-state changes: cursor + right-slot button enablement.</summary>
+    /// <summary>
+    /// Reacts to tool-state changes: cursor, right-slot button enablement and (B3) a
+    /// standard fit on every tool <b>switch</b> so each mode starts from a known view.
+    /// </summary>
     private void OnToolsChanged()
     {
         UpdateCursor();
@@ -353,11 +328,21 @@ public partial class ImagePreview : Window
         {
             _resetView.IsEnabled = _tools.HasImage;
         }
+
+        if (_tools.CurrentTool != _lastToolMode)
+        {
+            _lastToolMode = _tools.CurrentTool;
+            if (_model.HasImage)
+            {
+                _model.Fit();
+                ApplyModel();
+            }
+        }
     }
 
     private void UpdateCursor()
     {
-        if (_box is null)
+        if (_canvas is null)
         {
             return;
         }
@@ -378,19 +363,17 @@ public partial class ImagePreview : Window
             type = StandardCursorType.SizeWestEast;
         }
 
-        _box.Cursor = new Cursor(type);
+        _canvas.Cursor = new Cursor(type);
     }
 
     private void ShowEmpty(string message)
     {
         _model.ClearImage();
-        _pendingViewRestore = null;
-        _viewBeforeCrop = null;
         ResetMask();
 
-        if (_box is not null)
+        if (_canvas is not null)
         {
-            _box.Image = null;
+            _canvas.Image = null;
         }
 
         if (_emptyLabel is not null)
@@ -421,9 +404,9 @@ public partial class ImagePreview : Window
 
     private void DisposeBitmap()
     {
-        if (_box is not null)
+        if (_canvas is not null)
         {
-            _box.Image = null;
+            _canvas.Image = null;
         }
 
         _bitmap?.Dispose();

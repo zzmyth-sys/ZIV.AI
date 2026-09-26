@@ -3,7 +3,7 @@
              x:Class="ZivAiEditor.App.Controls.CompareOverlay">
   <!-- Self-drawn swipe-compare overlay (Step 9C.2-C). Render() draws the parent
        (left) image, background-filling the area outside it, and clips everything to
-       the divider's left side; the AdvancedImageBox beneath keeps showing the
+       the divider's left side; the PanZoomCanvas beneath keeps showing the
        right-hand current image. No template children are needed. -->
   <Grid />
 </UserControl>

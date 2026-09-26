@@ -121,31 +121,31 @@ public class ImageViewModelTests
     }
 
     [Fact]
-    public void Pan_Is_Clamped_To_The_Image_Bounds()
+    public void Pan_Is_Clamped_To_Keep_Ten_Percent_Visible()
     {
         var vm = new ImageViewModel();
         vm.SetViewport(400, 400);
         vm.SetImage(1000, 1000);
-        vm.ActualSize(); // 100% -> scaled 1000x1000, max offset 600
+        vm.ActualSize(); // 100% -> scaled 1000x1000; offset range [-300, 900]
 
         Assert.Equal(0, vm.OffsetX);
         Assert.Equal(0, vm.OffsetY);
 
-        vm.PanBy(10_000, 10_000); // drag far right/down -> clamp to 0
-        Assert.Equal(0, vm.OffsetX);
-        Assert.Equal(0, vm.OffsetY);
+        vm.PanBy(10_000, 10_000); // drag far right/down -> clamp at -(400 - 100)
+        Assert.Equal(-300, vm.OffsetX);
+        Assert.Equal(-300, vm.OffsetY);
 
-        vm.PanBy(-10_000, -10_000); // drag far left/up -> clamp to max
-        Assert.Equal(600, vm.OffsetX);
-        Assert.Equal(600, vm.OffsetY);
+        vm.PanBy(-10_000, -10_000); // drag far left/up -> clamp at 1000 * 0.90
+        Assert.Equal(900, vm.OffsetX);
+        Assert.Equal(900, vm.OffsetY);
 
         vm.PanBy(-100, -100); // already at max, stays
-        Assert.Equal(600, vm.OffsetX);
-        Assert.Equal(600, vm.OffsetY);
+        Assert.Equal(900, vm.OffsetX);
+        Assert.Equal(900, vm.OffsetY);
 
         vm.PanBy(100, 100);
-        Assert.Equal(500, vm.OffsetX);
-        Assert.Equal(500, vm.OffsetY);
+        Assert.Equal(800, vm.OffsetX);
+        Assert.Equal(800, vm.OffsetY);
     }
 
     [Fact]
@@ -159,6 +159,43 @@ public class ImageViewModelTests
 
         Assert.Equal(0, vm.OffsetX);
         Assert.Equal(0, vm.OffsetY);
+    }
+
+    [Fact]
+    public void Pan_Clamp_Is_Per_Axis_Ten_Percent()
+    {
+        var vm = new ImageViewModel();
+        vm.SetViewport(400, 400);
+        vm.SetImage(2000, 500);
+        vm.ActualSize(); // 100% -> 2000x500, both axes overflow with different bounds
+
+        vm.PanBy(10_000, 10_000); // drag right/down -> minimum offsets
+        Assert.Equal(-(400 - 2000 * 0.10), vm.OffsetX, 6); // -200
+        Assert.Equal(-(400 - 500 * 0.10), vm.OffsetY, 6);  // -350
+
+        vm.PanBy(-10_000, -10_000); // drag left/up -> maximum offsets
+        Assert.Equal(2000 * 0.90, vm.OffsetX, 6); // 1800
+        Assert.Equal(500 * 0.90, vm.OffsetY, 6);  // 450
+    }
+
+    [Fact]
+    public void Pan_Overflowing_Axis_Clamps_While_Fitted_Axis_Stays_Zero()
+    {
+        var vm = new ImageViewModel();
+        vm.SetViewport(400, 400);
+        vm.SetImage(2000, 500);
+        vm.SetZoomAt(50, 0, 0); // 50% -> 1000x250: X overflows, Y fits
+
+        Assert.True(vm.HasHorizontalScroll);
+        Assert.False(vm.HasVerticalScroll);
+
+        vm.PanBy(10_000, 10_000);
+        Assert.Equal(-(400 - 1000 * 0.10), vm.OffsetX, 6); // -300
+        Assert.Equal(0, vm.OffsetY, 6);                    // fitted axis stays 0
+
+        vm.PanBy(-10_000, -10_000);
+        Assert.Equal(1000 * 0.90, vm.OffsetX, 6); // 900
+        Assert.Equal(0, vm.OffsetY, 6);
     }
 
     [Fact]
@@ -260,7 +297,8 @@ public class ImageViewModelTests
 
         vm.RestoreView(100, 99999, -99999);
 
-        Assert.Equal(1000 - 400, vm.OffsetX, 6);
-        Assert.Equal(0, vm.OffsetY, 6);
+        // X: [-(400 - 100), 900] = [-300, 900]; Y: [-(300 - 100), 900] = [-200, 900].
+        Assert.Equal(900, vm.OffsetX, 6);
+        Assert.Equal(-200, vm.OffsetY, 6);
     }
 }

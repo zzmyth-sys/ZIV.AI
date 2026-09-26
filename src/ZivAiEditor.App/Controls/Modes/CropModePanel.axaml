@@ -1,0 +1,61 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ZivAiEditor.App.Controls.Modes.CropModePanel">
+  <!-- Crop-mode chrome (N4): dumb panel — it raises events and displays pushed state.
+       Top-center holds the aspect dropdown; bottom-center holds reset / return / confirm;
+       the left slot is reserved (empty). The root Grid has no background so empty areas
+       stay transparent to the canvas hit-test (pan still works around it). -->
+  <Grid>
+    <Border HorizontalAlignment="Center"
+            VerticalAlignment="Top"
+            Margin="0,8,0,0"
+            Padding="4"
+            CornerRadius="6"
+            Background="{StaticResource ZivOverlayBrush}">
+      <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+        <Button x:Name="PART_BtnAspect"
+                Classes="tool"
+                Width="NaN"
+                MinWidth="52"
+                Padding="10,0"
+                ToolTip.Tip="宽高比">
+          <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+            <Path Classes="toolIcon" Data="{StaticResource IconCrop}" />
+            <TextBlock x:Name="PART_AspectLabel"
+                       FontSize="11"
+                       Foreground="{StaticResource ZivTextBrush}"
+                       VerticalAlignment="Center" />
+            <Path Classes="chevronIcon" Data="{StaticResource IconChevronDown}" />
+          </StackPanel>
+        </Button>
+      </StackPanel>
+    </Border>
+
+    <!-- Reserved left vertical slot (empty placeholder for a future crop sub-toolbar). -->
+    <StackPanel x:Name="PART_Left"
+                Orientation="Vertical"
+                Spacing="6"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Center"
+                Margin="8,0,0,0" />
+
+    <Border HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            Margin="8"
+            Padding="4"
+            CornerRadius="6"
+            Background="{StaticResource ZivOverlayBrush}">
+      <StackPanel Orientation="Horizontal" Spacing="2">
+        <Button x:Name="PART_BtnReset" Classes="tool" ToolTip.Tip="重置裁切框">
+          <Path Classes="toolIcon" Data="{StaticResource IconRefresh}" />
+        </Button>
+        <Button x:Name="PART_BtnReturn" Classes="tool" ToolTip.Tip="返回">
+          <Path Classes="toolIcon" Data="{StaticResource IconArrowLeft}" />
+        </Button>
+        <Button x:Name="PART_BtnConfirm" Classes="tool" ToolTip.Tip="确认裁切">
+          <Path Classes="toolIcon" Data="{StaticResource IconCheck}" />
+        </Button>
+      </StackPanel>
+    </Border>
+  </Grid>
+</UserControl>

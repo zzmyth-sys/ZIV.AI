@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using ZivAiEditor.App.Controls.Modes;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.UI.Editing;
@@ -34,23 +35,18 @@ public sealed class CropCompletedEventArgs : EventArgs
 ///
 /// <para>The crop is the node's intrinsic property: confirming updates the current node's
 /// crop (via <see cref="CropCompleted"/>) and never appends a node. The initial rectangle
-/// is the node's previous crop when present, otherwise a 75% centered box. Crop coordinates
+/// is the node's previous crop when present, otherwise an 85% centered box. Crop coordinates
 /// are relative to the node's original image, so crop mode shows that image.</para>
 /// </summary>
 public partial class ImagePreview
 {
     private const double CropHandlePaddingPx = 8.0;
 
-    /// <summary>Fit factor applied while cropping so the gray margin is reachable (D3 · relaxed).</summary>
-    private const double CropViewMarginFactor = 0.5;
-
     private CropState? _crop;
     private CropOverlay? _cropOverlay;
-    private Border? _cropActions;
+    private CropModePanel? _cropPanel;
     private Border? _cropToast;
     private TextBlock? _cropToastText;
-    private Button? _cropConfirm;
-    private Button? _cropCancel;
 
     private bool _cropPointerDown;
     private bool _cropBusy;
@@ -70,12 +66,6 @@ public partial class ImagePreview
 
     /// <summary>What the preview shows when compare is off: the crop result, else the original.</summary>
     private string? _displayPath;
-
-    /// <summary>View (zoom / offset) saved on entering crop, restored on exit (D3).</summary>
-    private (int Zoom, double OffsetX, double OffsetY)? _viewBeforeCrop;
-
-    /// <summary>View to restore after the next preview load completes (exit-crop path).</summary>
-    private (int Zoom, double OffsetX, double OffsetY)? _pendingViewRestore;
 
     /// <summary>Raised after a crop is written (App stores it on the node).</summary>
     public event EventHandler<CropCompletedEventArgs>? CropCompleted;
@@ -98,24 +88,40 @@ public partial class ImagePreview
         _cropOverlay?.Attach(_model);
         _cropOverlay?.SetState(_crop);
 
-        _cropActions = this.FindControl<Border>("PART_CropActions");
         _cropToast = this.FindControl<Border>("PART_CropToast");
         _cropToastText = this.FindControl<TextBlock>("PART_CropToastText");
-        _cropConfirm = this.FindControl<Button>("PART_BtnCropConfirm");
-        _cropCancel = this.FindControl<Button>("PART_BtnCropCancel");
 
-        if (_cropConfirm is not null)
+        // N4: the crop chrome is a dumb panel; wire its events once here.
+        _cropPanel = this.FindControl<CropModePanel>("PART_CropPanel");
+        if (_cropPanel is not null)
         {
-            _cropConfirm.Click += async (_, _) => await ConfirmCropAsync();
-        }
-
-        if (_cropCancel is not null)
-        {
-            _cropCancel.Click += (_, _) => ExitCropMode();
+            _cropPanel.ConfirmRequested += (_, _) => _ = ConfirmCropAsync();
+            _cropPanel.ResetRequested += (_, _) => ResetCropRect();
+            _cropPanel.ReturnRequested += (_, _) => ExitCropMode();
+            _cropPanel.AspectChanged += (_, mode) => OnCropAspectChanged(mode);
         }
 
         _tools.StateChanged += (_, _) => UpdateCropMode();
         UpdateCropMode();
+    }
+
+    /// <summary>Resets the selection to the default box, re-applying the active aspect lock.</summary>
+    private void ResetCropRect()
+    {
+        if (_crop is null || !_crop.IsActive)
+        {
+            return;
+        }
+
+        _crop.SetDefaultRect();
+        _crop.SetAspect(_crop.Aspect);
+        _cropOverlay?.InvalidateVisual();
+    }
+
+    private void OnCropAspectChanged(CropAspectMode mode)
+    {
+        _crop?.SetAspect(mode);
+        _cropOverlay?.InvalidateVisual();
     }
 
     private bool IsCropActive => _crop is { IsActive: true };
@@ -135,8 +141,6 @@ public partial class ImagePreview
         _nodeOriginalPath = originalPath;
         _nodeCrop = crop;
         _displayPath = crop is { ResultImagePath.Length: > 0 } ? crop.ResultImagePath : originalPath;
-        _pendingViewRestore = null;
-        _viewBeforeCrop = null;
 
         SetNodeMaskSource(mask);
 
@@ -158,7 +162,7 @@ public partial class ImagePreview
     /// <summary>
     /// Reacts to the tool state: entering <see cref="ToolMode.Crop"/> (with an image)
     /// shows the overlay on the node's <b>original</b> image (crop coordinates are relative
-    /// to it) and seeds the rectangle (previous crop or 75%); leaving it hides the chrome
+    /// to it) and seeds the rectangle (previous crop or 85%); leaving it hides the chrome
     /// and restores the displayed image. Compare mode is exited first so the two modes
     /// never overlap.
     /// </summary>
@@ -181,11 +185,8 @@ public partial class ImagePreview
             _crop.Enter();
             _lastClickAt = DateTime.MinValue;
 
-            // Save the current view before any (async) load so it can be restored on exit;
-            // the 65% crop fit is applied later by RefreshCropBounds, after the decode.
-            _viewBeforeCrop = (_model.ZoomPercent, _model.OffsetX, _model.OffsetY);
-            _pendingViewRestore = null;
-
+            // B3: no view snapshot. Entering crop always fits (RefreshCropBounds /
+            // OnToolsChanged) and leaving crop fits again.
             // Crop on the node's ORIGINAL image so the rectangle is in original-image
             // coordinates and re-cropping never chains onto a previous crop result.
             if (!string.IsNullOrWhiteSpace(_nodeOriginalPath)
@@ -200,7 +201,6 @@ public partial class ImagePreview
             }
 
             ShowCropChrome(true);
-            ShowCropToast("拖到图像边界外可外扩");
         }
         else if (!wantCrop && IsCropActive)
         {
@@ -210,7 +210,7 @@ public partial class ImagePreview
         _cropOverlay?.InvalidateVisual();
     }
 
-    /// <summary>Leaves crop mode (cancel / Esc / after a successful crop).</summary>
+    /// <summary>Leaves crop mode (返回 / Esc). A confirmed crop closes the window instead.</summary>
     private void ExitCropMode()
     {
         if (_crop is null)
@@ -228,46 +228,17 @@ public partial class ImagePreview
             _tools.SetTool(ToolMode.None);
         }
 
-        // Restore the pre-crop view once the display image is (re)loaded; the load is async,
-        // so the restore is applied by LoadAsync via ApplyPendingViewRestore.
-        if (_viewBeforeCrop is { } view)
-        {
-            _pendingViewRestore = view;
-            _viewBeforeCrop = null;
-        }
-
-        // Show the node's crop result (or its original when uncropped) again.
+        // B3: no view restore. Show the node's crop result (or its original) again and fit.
         if (!string.IsNullOrWhiteSpace(_displayPath)
             && !string.Equals(_path, _displayPath, StringComparison.OrdinalIgnoreCase))
         {
             LoadImage(_displayPath);
         }
-        else
+        else if (_model.HasImage)
         {
-            ApplyPendingViewRestore();
+            _model.Fit();
+            ApplyModel();
         }
-    }
-
-    /// <summary>
-    /// Applies the view saved when crop mode was entered (D3), once the display image is
-    /// loaded. Called from <c>LoadAsync</c> after a load completes and directly on the
-    /// no-reload exit path. No-op when nothing is pending or no image is shown.
-    /// </summary>
-    private void ApplyPendingViewRestore()
-    {
-        if (_pendingViewRestore is not { } view)
-        {
-            return;
-        }
-
-        _pendingViewRestore = null;
-        if (!_model.HasImage)
-        {
-            return;
-        }
-
-        _model.RestoreView(view.Zoom, view.OffsetX, view.OffsetY);
-        ApplyModel();
     }
 
     private void ShowCropChrome(bool visible)
@@ -277,9 +248,14 @@ public partial class ImagePreview
             _cropOverlay.IsVisible = visible;
         }
 
-        if (_cropActions is not null)
+        if (_cropPanel is not null)
         {
-            _cropActions.IsVisible = visible;
+            _cropPanel.IsVisible = visible;
+            if (visible && _crop is not null)
+            {
+                _cropPanel.SetAspect(_crop.Aspect);
+                _cropPanel.SetEnabled(true);
+            }
         }
 
         if (!visible)
@@ -288,7 +264,7 @@ public partial class ImagePreview
         }
     }
 
-    /// <summary>Restores the node's previous crop rectangle, or seeds a 75% box.</summary>
+    /// <summary>Restores the node's previous crop rectangle, or seeds an 85% box.</summary>
     private void RestoreOrDefaultCrop()
     {
         if (_crop is null)
@@ -311,7 +287,7 @@ public partial class ImagePreview
 
     private void CropOnPressed(Point viewportPoint, PointerPressedEventArgs e)
     {
-        if (_crop is null || !_crop.IsActive || _box is null)
+        if (_crop is null || !_crop.IsActive || _canvas is null)
         {
             return;
         }
@@ -324,7 +300,7 @@ public partial class ImagePreview
         }
 
         _cropPointerDown = true;
-        e.Pointer.Capture(_box);
+        e.Pointer.Capture(_canvas);
         _cropOverlay?.InvalidateVisual();
     }
 
@@ -342,7 +318,7 @@ public partial class ImagePreview
 
     private void CropOnReleased(PointerReleasedEventArgs e)
     {
-        if (_crop is null || !_cropPointerDown || _box is null)
+        if (_crop is null || !_cropPointerDown || _canvas is null)
         {
             return;
         }
@@ -350,7 +326,7 @@ public partial class ImagePreview
         _cropPointerDown = false;
         e.Pointer.Capture(null);
 
-        var point = e.GetPosition(_box);
+        var point = e.GetPosition(_canvas);
         var (ix, iy) = _model.ViewportToImage(point.X, point.Y);
         var tolerance = CropHandlePaddingPx / Math.Max(_model.Zoom, 0.0001);
         var onBox = _crop.HasRect && _crop.HitTest(ix, iy, tolerance) != CropHandle.None;
@@ -395,8 +371,7 @@ public partial class ImagePreview
         var nodeId = _nodeId;
         var source = _nodeOriginalPath;
         _cropBusy = true;
-        SetCropActionsEnabled(false);
-        SetCropConfirmText("裁切中…");
+        _cropPanel?.SetEnabled(false);
         try
         {
             // Crop + encode run off the UI thread through the imaging port (Z11). The rectangle
@@ -425,45 +400,20 @@ public partial class ImagePreview
 
             _nodeCrop = spec;
             _displayPath = output;
-
-            // ExitCropMode reloads the display image (the crop result). While cropping the
-            // preview shows the original, so the path changes and the fresh (overwritten)
-            // temp file is decoded; the saved view is restored once that load completes.
-            ExitCropMode();
             CropCompleted?.Invoke(this, new CropCompletedEventArgs(nodeId, spec));
+
+            // N4: a successful crop closes the preview; a failure keeps it open with the toast.
+            Close();
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[crop] {ex.Message}");
-            ExitCropMode();
             ShowCropToast($"裁切失败：{ex.Message}");
         }
         finally
         {
             _cropBusy = false;
-            SetCropActionsEnabled(true);
-            SetCropConfirmText("确认裁切");
-        }
-    }
-
-    private void SetCropConfirmText(string text)
-    {
-        if (_cropConfirm is not null)
-        {
-            _cropConfirm.Content = text;
-        }
-    }
-
-    private void SetCropActionsEnabled(bool enabled)
-    {
-        if (_cropConfirm is not null)
-        {
-            _cropConfirm.IsEnabled = enabled;
-        }
-
-        if (_cropCancel is not null)
-        {
-            _cropCancel.IsEnabled = enabled;
+            _cropPanel?.SetEnabled(true);
         }
     }
 
@@ -517,8 +467,8 @@ public partial class ImagePreview
         RestoreOrDefaultCrop();
         _cropPointerDown = false;
 
-        // Shrink to half of fit so the gray margin around the image is reachable by dragging.
-        _model.FitWithMargin(CropViewMarginFactor);
+        // Standard fit while cropping; the gray margin on the non-filling axis stays reachable.
+        _model.Fit();
         ApplyModel();
         _cropOverlay?.InvalidateVisual();
     }

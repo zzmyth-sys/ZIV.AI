@@ -1,0 +1,12 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ZivAiEditor.App.Controls.PanZoomCanvas">
+  <!-- Self-drawn bitmap canvas for the image preview (no third-party image box).
+       Render() fills the bounds with the canvas background and draws the bitmap using the
+       same centering / offset rule as ImageViewModel.OriginX/OriginY. It owns no zoom / pan
+       logic: ImagePreview keeps a shared ImageViewModel and pushes Zoom / Offset here, and
+       routes all pointer input via AddHandler on this control. The transparent Grid makes
+       the whole surface hit-testable so pointer events bubble to the UserControl; it draws
+       nothing (Render fills the background). -->
+  <Grid Background="Transparent" />
+</UserControl>

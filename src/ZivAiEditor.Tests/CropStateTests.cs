@@ -4,7 +4,7 @@ using Xunit;
 namespace ZivAiEditor.Tests;
 
 /// <summary>
-/// Step 9C.6-B pure crop-state tests: 75% default, restore via SetRect, move + 8-handle
+/// Step 9C.6-B pure crop-state tests: 85% default, restore via SetRect, move + 8-handle
 /// resize, clamping and min size.
 /// </summary>
 public class CropStateTests
@@ -39,17 +39,18 @@ public class CropStateTests
     }
 
     [Fact]
-    public void SetDefaultRect_Is_75_Percent_Centered()
+    public void SetDefaultRect_Is_85_Percent_Centered()
     {
         var state = NewState();
 
         state.SetDefaultRect();
 
+        // 1000x800 image → 850x680, centered at (75, 60).
         Assert.True(state.HasRect);
-        Assert.Equal(125, state.X);
-        Assert.Equal(100, state.Y);
-        Assert.Equal(750, state.Width);
-        Assert.Equal(600, state.Height);
+        Assert.Equal(75, state.X);
+        Assert.Equal(60, state.Y);
+        Assert.Equal(850, state.Width);
+        Assert.Equal(680, state.Height);
     }
 
     [Fact]
@@ -116,15 +117,16 @@ public class CropStateTests
     public void SetDefaultRect_Not_Capped_For_Large_Source()
     {
         var state = new CropState();
-        state.SetImageBounds(6000, 6000); // 75% = 4500x4500 = 20.25 MP > 16 MP
+        state.SetImageBounds(6000, 6000); // 85% = 5100x5100 = 26.01 MP
         state.Enter();
 
         state.SetDefaultRect();
 
-        Assert.Equal(4500, state.Width);
-        Assert.Equal(4500, state.Height);
-        Assert.Equal(750, state.X);
-        Assert.Equal(750, state.Y);
+        // The default box is an inner crop, so the outpaint pixel cap must not scale it.
+        Assert.Equal(5100, state.Width);
+        Assert.Equal(5100, state.Height);
+        Assert.Equal(450, state.X);
+        Assert.Equal(450, state.Y);
     }
 
     [Fact]

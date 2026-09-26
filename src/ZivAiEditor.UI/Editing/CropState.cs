@@ -24,7 +24,7 @@ public enum CropHandle
 /// <para><b>Interaction</b> (user ruling): the rectangle can be moved as a whole and
 /// resized by its 8 handles (4 corners + 4 edge midpoints); pressing outside it starts a
 /// new rectangle. The initial rectangle is the node's previous crop when one exists,
-/// otherwise a 75% centered box (<see cref="SetDefaultRect"/>).</para>
+/// otherwise an 85% centered box (<see cref="SetDefaultRect"/>).</para>
 ///
 /// <para><b>Outpaint</b> (Step 9C.4-B): the rectangle may extend <b>outside</b> the image,
 /// producing a larger output canvas whose remaining area is filled (see <c>ImageCropper</c>).
@@ -37,13 +37,13 @@ public enum CropHandle
 /// <see cref="Exit"/>. The rectangle is never smaller than <see cref="MinSize"/> on either
 /// edge.
 /// </summary>
-public sealed class CropState
+public sealed partial class CropState
 {
     /// <summary>Smallest allowed selection edge, in image pixels.</summary>
     public const double MinSize = 16.0;
 
     /// <summary>Fraction of the image used by the default (centered) rectangle.</summary>
-    public const double DefaultFraction = 0.75;
+    public const double DefaultFraction = 0.85;
 
     /// <summary>Largest output edge, as a multiple of the corresponding image edge (D2 · relaxed).</summary>
     public const double MaxExpandFactor = 3.0;
@@ -117,7 +117,7 @@ public sealed class CropState
         _x = _y = _width = _height = 0;
     }
 
-    /// <summary>Leaves crop mode and drops the rectangle.</summary>
+    /// <summary>Leaves crop mode and drops the rectangle; the aspect lock resets to Free.</summary>
     public void Exit()
     {
         IsActive = false;
@@ -126,6 +126,7 @@ public sealed class CropState
         DragHandle = CropHandle.None;
         _building = false;
         _x = _y = _width = _height = 0;
+        Aspect = CropAspectMode.Free;
     }
 
     /// <summary>
@@ -295,6 +296,23 @@ public sealed class CropState
 
         if (_building)
         {
+            // Aspect lock (N5): build around the press point, the shorter drag axis being
+            // the basis, so the box never exceeds the drag range.
+            if (Aspect != CropAspectMode.Free)
+            {
+                var rawW = Math.Abs(imageX - _startX);
+                var rawH = Math.Abs(imageY - _startY);
+                if (rawW > 0 && rawH > 0)
+                {
+                    var (w, h) = AspectDimensions(Aspect, Math.Min(rawW, rawH));
+                    _x = imageX >= _startX ? _startX : _startX - w;
+                    _y = imageY >= _startY ? _startY : _startY - h;
+                    _width = w;
+                    _height = h;
+                    return;
+                }
+            }
+
             // Raw build: the rect may be outside the image; EndDrag → Normalize limits it.
             var left = Math.Min(_startX, imageX);
             var top = Math.Min(_startY, imageY);
@@ -344,6 +362,24 @@ public sealed class CropState
         if (DragHandle is CropHandle.Bottom or CropHandle.BottomLeft or CropHandle.BottomRight)
         {
             bottomE = Math.Max(imageY, topE + MinSize);
+        }
+
+        // Aspect lock (N5): derive both edges from the shorter drag axis, keeping the
+        // anchor edge(s) fixed (the edges the handle does not move).
+        if (Aspect != CropAspectMode.Free)
+        {
+            var rawW = rightE - leftE;
+            var rawH = bottomE - topE;
+            if (rawW > 0 && rawH > 0)
+            {
+                var (w, h) = AspectDimensions(Aspect, Math.Min(rawW, rawH));
+                var leftMoved = DragHandle is CropHandle.Left or CropHandle.TopLeft or CropHandle.BottomLeft;
+                var topMoved = DragHandle is CropHandle.Top or CropHandle.TopLeft or CropHandle.TopRight;
+                leftE = leftMoved ? rightE - w : leftE;
+                topE = topMoved ? bottomE - h : topE;
+                rightE = leftE + w;
+                bottomE = topE + h;
+            }
         }
 
         _x = leftE;

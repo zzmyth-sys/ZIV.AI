@@ -7,15 +7,16 @@ using ZivAiEditor.UI.Editing;
 namespace ZivAiEditor.App.Controls;
 
 /// <summary>
-/// Pointer half of <see cref="ImagePreview"/> (Step 9C.7-B): wheel zoom, the left-button
-/// routing (crop → mask draw → divider → pan), the middle-button pan and the mask hover
+/// Pointer half of <see cref="ImagePreview"/> (Step 9C.7-B / N3): wheel zoom, the pan
+/// (Space+left or middle button, active in every mode including crop), the left-button
+/// routing when not panning (crop build / mask draw / divider drag) and the mask hover
 /// circle. Split out of the main file to keep each file under the Z8 line budget; the halves
 /// share the same partial-class members (fields, the image model, the tool state).
 ///
 /// <para><b>R1 both-buttons rule.</b> A <see cref="PointerArbiter"/> guarantees at most one
-/// owner: a left press that starts a mask stroke (or a plain left pan) claims <c>Draw</c>, a
-/// middle press claims <c>Pan</c>. The first to go down wins; the other is ignored until the
-/// first releases, and each release only ends its own mode.</para>
+/// owner: a mask stroke claims <c>Draw</c>, a pan claims <c>Pan</c>. The first to go down
+/// wins; the other is ignored until the first releases, and each release only ends its own
+/// mode. A pan is always checked first so it works in crop mode too (N3).</para>
 /// </summary>
 public partial class ImagePreview
 {
@@ -27,32 +28,35 @@ public partial class ImagePreview
     private Point _lastPanPoint;
     private DateTime _lastClickAt = DateTime.MinValue;
 
-    /// <summary>True while a middle-button pan owns the pointer (R1).</summary>
-    private bool _panMiddleDown;
+    /// <summary>True while a pan (middle button or Space+left) owns the pointer (R1/B3).</summary>
+    private bool _panDown;
 
-    /// <summary>Registers the pointer handlers on the image box. Called from <see cref="Init"/>.</summary>
+    /// <summary>The button that started the active pan, so only its release ends it (R1/B3).</summary>
+    private MouseButton _panButton;
+
+    /// <summary>Registers the pointer handlers on the image canvas. Called from <see cref="Init"/>.</summary>
     private void InitPointerHandlers()
     {
-        if (_box is null)
+        if (_canvas is null)
         {
             return;
         }
 
-        _box.AddHandler(PointerWheelChangedEvent, OnWheel, RoutingStrategies.Bubble, handledEventsToo: true);
-        _box.AddHandler(PointerPressedEvent, OnPressed, RoutingStrategies.Bubble, handledEventsToo: true);
-        _box.AddHandler(PointerMovedEvent, OnMoved, RoutingStrategies.Bubble, handledEventsToo: true);
-        _box.AddHandler(PointerReleasedEvent, OnReleased, RoutingStrategies.Bubble, handledEventsToo: true);
-        _box.AddHandler(PointerExitedEvent, OnPointerExited, RoutingStrategies.Bubble, handledEventsToo: true);
+        _canvas.AddHandler(PointerWheelChangedEvent, OnWheel, RoutingStrategies.Bubble, handledEventsToo: true);
+        _canvas.AddHandler(PointerPressedEvent, OnPressed, RoutingStrategies.Bubble, handledEventsToo: true);
+        _canvas.AddHandler(PointerMovedEvent, OnMoved, RoutingStrategies.Bubble, handledEventsToo: true);
+        _canvas.AddHandler(PointerReleasedEvent, OnReleased, RoutingStrategies.Bubble, handledEventsToo: true);
+        _canvas.AddHandler(PointerExitedEvent, OnPointerExited, RoutingStrategies.Bubble, handledEventsToo: true);
     }
 
     private void OnWheel(object? sender, PointerWheelEventArgs e)
     {
-        if (_box is null || !_model.HasImage || e.Delta.Y == 0)
+        if (_canvas is null || !_model.HasImage || e.Delta.Y == 0)
         {
             return;
         }
 
-        var point = e.GetPosition(_box);
+        var point = e.GetPosition(_canvas);
         _model.SetViewport(ViewportWidth(), ViewportHeight());
         _model.ZoomBy(e.Delta.Y > 0 ? WheelStep : 1.0 / WheelStep, point.X, point.Y);
         ApplyModel();
@@ -61,16 +65,39 @@ public partial class ImagePreview
 
     private void OnPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (_box is null || !_model.HasImage)
+        if (_canvas is null || !_model.HasImage)
         {
             return;
         }
 
-        var properties = e.GetCurrentPoint(_box).Properties;
-        var point = e.GetPosition(_box);
+        var properties = e.GetCurrentPoint(_canvas).Properties;
+        var point = e.GetPosition(_canvas);
 
-        // Crop mode owns the pointer: build / move / resize the selection (no pan). Middle
-        // pan is ignored while cropping so it cannot fight the crop drag.
+        // B3: pan claims the pointer in EVERY mode, including crop. The middle button always
+        // pans; the left button pans while Space is held. It is checked before the crop
+        // branch so a crop drag cannot swallow an active pan.
+        var wantsPan = properties.IsMiddleButtonPressed
+            || (properties.IsLeftButtonPressed && _spacePan);
+        if (wantsPan)
+        {
+            // R1: at most one owner. A left draw stroke that already owns the surface makes
+            // an overlapping press a no-op until it releases.
+            if (!_arbiter.TryBeginPan())
+            {
+                return;
+            }
+
+            _panDown = true;
+            _panButton = properties.IsMiddleButtonPressed ? MouseButton.Middle : MouseButton.Left;
+            _pressed = true;
+            _dragged = false;
+            _pressPoint = point;
+            _lastPanPoint = point;
+            e.Pointer.Capture(_canvas);
+            return;
+        }
+
+        // Left WITHOUT Space in crop mode builds / moves / resizes the selection.
         if (IsCropActive)
         {
             if (properties.IsLeftButtonPressed)
@@ -83,24 +110,6 @@ public partial class ImagePreview
             return;
         }
 
-        // R1: the middle button claims a pan only when nothing else owns the surface. A left
-        // draw stroke that already owns it makes the middle press a no-op until it releases.
-        if (properties.IsMiddleButtonPressed)
-        {
-            if (!_arbiter.TryBeginPan())
-            {
-                return;
-            }
-
-            _panMiddleDown = true;
-            _pressed = true;
-            _dragged = false;
-            _pressPoint = point;
-            _lastPanPoint = point;
-            e.Pointer.Capture(_box);
-            return;
-        }
-
         if (!properties.IsLeftButtonPressed)
         {
             return;
@@ -109,8 +118,8 @@ public partial class ImagePreview
         _pressPoint = point;
         _lastPanPoint = point;
 
-        // R1: a left press starts a draw stroke (mask) or a plain left pan. If a middle pan
-        // already owns the surface, the left press is ignored until the middle releases.
+        // R1: a left press starts a draw stroke (mask) or a plain left pan. If a pan already
+        // owns the surface, the left press is ignored until it releases.
         if (!_arbiter.TryBeginDraw())
         {
             return;
@@ -129,23 +138,23 @@ public partial class ImagePreview
             _draggingDivider = true;
             _pressed = true;
             _dragged = false;
-            e.Pointer.Capture(_box);
+            e.Pointer.Capture(_canvas);
             return;
         }
 
         _pressed = true;
         _dragged = false;
-        e.Pointer.Capture(_box);
+        e.Pointer.Capture(_canvas);
     }
 
     private void OnMoved(object? sender, PointerEventArgs e)
     {
-        if (_box is null)
+        if (_canvas is null)
         {
             return;
         }
 
-        var point = e.GetPosition(_box);
+        var point = e.GetPosition(_canvas);
 
         // Mask hover: the brush circle follows the cursor whenever a brush / eraser tool is
         // active (even with no button down, and even when the mask is empty).
@@ -154,10 +163,10 @@ public partial class ImagePreview
             _maskOverlay.SetPointer(point.X, point.Y);
         }
 
-        // Middle pan applies immediately (no drag threshold) and in every tool mode,
-        // including mask mode (R1: middle pan is not exclusive with drawing). It must run
-        // before the crop / mask branches, which would otherwise swallow the move.
-        if (_panMiddleDown)
+        // Pan (middle / Space+left) applies immediately (no drag threshold) and in every
+        // tool mode, including crop (B3). It must run before the crop / mask branches, which
+        // would otherwise swallow the move.
+        if (_panDown)
         {
             _model.PanBy(point.X - _lastPanPoint.X, point.Y - _lastPanPoint.Y);
             _lastPanPoint = point;
@@ -211,32 +220,32 @@ public partial class ImagePreview
 
     private void OnReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_box is null)
+        if (_canvas is null)
         {
             return;
         }
 
         var button = e.InitialPressMouseButton;
 
-        if (IsCropActive)
+        // B3: a pan owns the pointer in every mode, so end it before any mode handler. Only
+        // the button that started the pan ends it (R1: the other button's release is a no-op).
+        if (_panDown)
         {
-            CropOnReleased(e);
+            if (button == _panButton)
+            {
+                _panDown = false;
+                _pressed = false;
+                _dragged = false;
+                _arbiter.EndPan();
+                e.Pointer.Capture(null);
+            }
+
             return;
         }
 
-        // R1: a middle release only ends a middle pan; it must not end a draw stroke.
-        if (button == MouseButton.Middle)
+        if (IsCropActive)
         {
-            if (!_panMiddleDown)
-            {
-                return;
-            }
-
-            _panMiddleDown = false;
-            _pressed = false;
-            _dragged = false;
-            _arbiter.EndPan();
-            e.Pointer.Capture(null);
+            CropOnReleased(e);
             return;
         }
 

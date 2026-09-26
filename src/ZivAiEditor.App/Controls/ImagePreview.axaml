@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:uv="clr-namespace:UVtools.AvaloniaControls;assembly=UVtools.AvaloniaControls"
         xmlns:c="clr-namespace:ZivAiEditor.App.Controls"
+        xmlns:m="clr-namespace:ZivAiEditor.App.Controls.Modes"
         x:Class="ZivAiEditor.App.Controls.ImagePreview"
         Title="ZIV.AI - 大图预览"
         Icon="avares://ZivAiEditor.App/Assets/logo.png"
@@ -18,7 +18,7 @@
 
   <!-- Large-image preview window (Step 9C.1), opened by clicking an image in the chat
        stream. It reuses the same self-drawn chrome as MainWindow (no OS title bar).
-       The AdvancedImageBox only renders; all zoom / pan state lives in
+       The PanZoomCanvas only renders; all zoom / pan state lives in
        ZivAiEditor.UI.Imaging.ImageViewModel and is applied here (Z4). -->
   <c:ChromeTitleBar x:Name="PART_Chrome">
     <c:ChromeTitleBar.LeftContent>
@@ -47,49 +47,23 @@
     <c:ChromeTitleBar.Body>
       <!-- Image content -->
       <Grid Background="{StaticResource ZivCanvasBackgroundBrush}">
-        <uv:AdvancedImageBox x:Name="PART_ImageBox"
-                             Background="Transparent"
-                             AutoCenter="True"
-                             AutoPan="False"
-                             AutoZoomToFit="False"
-                             ShowGrid="False"
-                             SelectionMode="None"
-                             ZoomWithMouseWheelBehaviour="None"
-                             PanWithMouseButtons="None"
-                             ConstrainZoomOutToFitLevel="False" />
+        <c:PanZoomCanvas x:Name="PART_ImageCanvas" />
 
         <c:CompareOverlay x:Name="PART_Compare"
                           BackgroundFill="{StaticResource ZivCanvasBackgroundBrush}"
                           IsVisible="False" />
 
-        <!-- Crop overlay + floating confirm / cancel actions (Step 9C.4). -->
+        <!-- Crop overlay (Step 9C.4). The crop chrome is CropModePanel (N4) below. -->
         <c:CropOverlay x:Name="PART_CropOverlay" IsVisible="False" />
 
         <!-- Mask overlay (Step 9C.7): semi-transparent red where painted. -->
         <c:MaskOverlay x:Name="PART_MaskOverlay" IsVisible="False" />
 
-        <!-- Floating mask toolbar (Step 9C.7-B): brush size + feather, top-center above the
-             image. Hit-test-visible; the image box owns the pointer handlers so clicks here
-             never pan / zoom the image. -->
-        <c:MaskToolbar x:Name="PART_MaskToolbar"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Top"
-                       Margin="0,8,0,0"
-                       IsVisible="False" />
-
-        <Border x:Name="PART_CropActions"
-                Margin="8"
-                Padding="6"
-                CornerRadius="6"
-                Background="{StaticResource ZivOverlayBrush}"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Bottom"
-                IsVisible="False">
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button x:Name="PART_BtnCropCancel" Content="取消" />
-            <Button x:Name="PART_BtnCropConfirm" Content="确认裁切" />
-          </StackPanel>
-        </Border>
+        <!-- Mode chrome (N4): dumb panels that raise events and render pushed state; hidden
+             unless their tool is active. They are hit-test-visible only on their bars, so
+             pan / zoom still works everywhere else. -->
+        <m:CropModePanel x:Name="PART_CropPanel" IsVisible="False" />
+        <m:MaskModePanel x:Name="PART_MaskPanel" IsVisible="False" />
 
         <Border x:Name="PART_CropToast"
                 Margin="8"

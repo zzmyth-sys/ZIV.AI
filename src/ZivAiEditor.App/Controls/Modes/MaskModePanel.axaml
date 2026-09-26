@@ -1,0 +1,98 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ZivAiEditor.App.Controls.Modes.MaskModePanel">
+  <!-- Mask-mode chrome (N4): dumb panel — it raises events and displays pushed state.
+       Top-center: brush / eraser / clear / undo. Left: brush-size + feather sliders
+       (icons only, tooltips). Bottom-center: reset / return / confirm. The root Grid has
+       no background so empty areas stay transparent to the canvas hit-test. -->
+  <Grid>
+    <Border HorizontalAlignment="Center"
+            VerticalAlignment="Top"
+            Margin="0,8,0,0"
+            Padding="6"
+            CornerRadius="6"
+            Background="{StaticResource ZivOverlayBrush}">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <ToggleButton x:Name="PART_BtnBrush" Classes="tool" ToolTip.Tip="画笔">
+          <Path Classes="toolIcon" Data="{StaticResource IconBrush}" />
+        </ToggleButton>
+        <ToggleButton x:Name="PART_BtnEraser" Classes="tool" ToolTip.Tip="橡皮">
+          <Path Classes="toolIcon" Data="{StaticResource IconEraser}" />
+        </ToggleButton>
+        <Button x:Name="PART_BtnClear" Classes="tool" ToolTip.Tip="清空遮罩">
+          <Path Classes="toolIcon" Data="{StaticResource IconTrash}" />
+        </Button>
+        <Button x:Name="PART_BtnUndo" Classes="tool" ToolTip.Tip="撤销">
+          <Path Classes="toolIcon" Data="{StaticResource IconUndo}" />
+        </Button>
+      </StackPanel>
+    </Border>
+
+    <!-- Left vertical mask params: icon above a vertical slider, no persistent text; the
+         value is discoverable via the hover tooltip. Both columns share the same width. -->
+    <Border HorizontalAlignment="Left"
+            VerticalAlignment="Center"
+            Margin="8,0,0,0"
+            Padding="8,10"
+            CornerRadius="6"
+            Background="{StaticResource ZivOverlayBrush}">
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <StackPanel Orientation="Vertical"
+                    Spacing="6"
+                    Width="28"
+                    ToolTip.Tip="笔刷大小">
+          <Path Classes="toolIcon"
+                Data="{StaticResource IconCircle}"
+                HorizontalAlignment="Center" />
+          <Slider x:Name="PART_BrushSlider"
+                  Orientation="Vertical"
+                  Width="28"
+                  Height="120"
+                  Minimum="5"
+                  Maximum="200"
+                  Value="40"
+                  TickFrequency="1"
+                  IsSnapToTickEnabled="True"
+                  HorizontalAlignment="Center" />
+        </StackPanel>
+        <StackPanel Orientation="Vertical"
+                    Spacing="6"
+                    Width="28"
+                    ToolTip.Tip="羽化">
+          <Path Classes="toolIcon"
+                Data="{StaticResource IconFeather}"
+                HorizontalAlignment="Center" />
+          <Slider x:Name="PART_FeatherSlider"
+                  Orientation="Vertical"
+                  Width="28"
+                  Height="120"
+                  Minimum="0"
+                  Maximum="15"
+                  Value="0"
+                  TickFrequency="1"
+                  IsSnapToTickEnabled="True"
+                  HorizontalAlignment="Center" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <Border HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            Margin="8"
+            Padding="4"
+            CornerRadius="6"
+            Background="{StaticResource ZivOverlayBrush}">
+      <StackPanel Orientation="Horizontal" Spacing="2">
+        <Button x:Name="PART_BtnReset" Classes="tool" ToolTip.Tip="重置遮罩">
+          <Path Classes="toolIcon" Data="{StaticResource IconRefresh}" />
+        </Button>
+        <Button x:Name="PART_BtnReturn" Classes="tool" ToolTip.Tip="返回">
+          <Path Classes="toolIcon" Data="{StaticResource IconArrowLeft}" />
+        </Button>
+        <Button x:Name="PART_BtnConfirm" Classes="tool" ToolTip.Tip="完成">
+          <Path Classes="toolIcon" Data="{StaticResource IconCheck}" />
+        </Button>
+      </StackPanel>
+    </Border>
+  </Grid>
+</UserControl>

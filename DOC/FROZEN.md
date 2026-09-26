@@ -4845,3 +4845,27 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
   `ImagePreview.Pointer.cs` 平移入口、`ImagePreview.Crop.cs`。
 - **渲染层约束**：UVtools 5.0.1（commit `60baad40`）`UpdateViewPort` 为 private 且 ScrollBar 会 coerce offset；
   故须在 `ApplyModel` 侧扩范围，并在 `Dispatcher.Post` / resize 后重应用。
+- **注**：本节（平移外扩 50% + 回弹）已于 Step 9C.11 回滚；见 `DEVLOG.md`「[Step 9C.11 回滚]」。
+
+---
+
+## 功能登记（视图改造 + UI 统一 + 裁切比例，N1–N5，2026-09-26）
+
+> 契约**尾部追加**，不改既有签名；Z8 单文件 < 600（面板 < 300）。**无 Contracts 变化。**
+> 备份基线 commit `6f78213`。
+
+| 类型 | 位置 | 说明 |
+|---|---|---|
+| `ImageViewModel.ClampOffset`（改实现） | `ZivAiEditor.UI/Imaging/ImageViewModel.cs` | 每轴至少 10% 可见；缩态轴恒 0 |
+| `CropState.DefaultFraction`（改值） | `ZivAiEditor.UI/Editing/CropState.cs` | `0.75 → 0.85`；类改 `partial` |
+| `CropAspectMode`（UI 追加） | `ZivAiEditor.UI/Editing/CropAspectMode.cs` | `Free/R16x9/R9x16/R1x1` |
+| `CropState.Aspect` / `SetAspect`（UI 追加） | `ZivAiEditor.UI/Editing/CropState.Aspect.cs` | 保中心 + 短边基准吸附 + 重钳；`Exit()` 重置 Free |
+| `PanZoomCanvas`（App 新增） | `ZivAiEditor.App/Controls/PanZoomCanvas.axaml(.cs)` | 自绘渲染（`#161616`），唯一 owner 持有位图 |
+| `CropModePanel` / `MaskModePanel`（App 新增） | `ZivAiEditor.App/Controls/Modes/` | 模式专用面板；事件 out / 状态 in |
+| `EditorToolbar`（改） | `ZivAiEditor.App/Controls/EditorToolbar.axaml(.cs)` | 精简为 [裁切][遮罩] 入口 |
+| 图标追加（非契约） | `ZivAiEditor.App/Assets/Icons/TablerIcons.axaml` | `IconCheck/IconArrowBackUp/IconCircle/IconFeather` |
+
+- **删除**：`UVtools.AvaloniaControls`（包/using/xmlns/StyleInclude/ScrollBar 处理）、`MaskToolbar`、
+  `CropActions` 文字按钮、`EditorToolbar` 橡皮/清空/撤销、裁切视图快照。
+- **保留（判定）**：`ImageViewModel.FitWithMargin` / `RestoreView` 生产无调用但保留（N1 未要求删；删会缩减公开 API 与覆盖）。
+- **无 IPC / Python / Contracts 改动**；`MainWindow.*` 未触碰。

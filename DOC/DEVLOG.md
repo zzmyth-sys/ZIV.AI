@@ -6154,3 +6154,112 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **原因**：需换**自绘方案（固定背景 / 画布移动）**，见后续步骤；本回滚不涉及自绘 / UI 统一 / 裁切比例。
 - **其它未提交改动**（`python/server/handlers.py` / `Agent/*` / `FlowRunner.*` / `Contracts/Diagnostics/` /
   `_test_step2/*` 等）**未触碰**。
+
+---
+
+## [Step 9C.12] - 2026-09-26（视图改造 + UI 统一 + 裁切比例，N1–N5）
+
+### 目标与流程
+
+一次性完成 N1–N5：裁切默认框 85% + 标准 Fit；自绘 `PanZoomCanvas` 替换 `AdvancedImageBox`；
+全局输入统一（空格+左键 / 中键平移、滚轮缩放、双击适配↔100%、Esc 分层）；
+每切工具 Fit；平移边界=每轴至少 10% 可见；UI 统一（底 [重置][返回][✓] / 顶中模式条 / 左竖遮罩参数）；
+✓ 成功即关窗、X 仅关窗；裁切比例 自由/16:9/9:16/1:1（短边基准）。
+
+- 流程：light-rip（Large）—— planner → 前置复审（发现 P0 入口缺失等）→ 用户裁决 4 项 →
+  实现 B2→B3→B4 → verifier 独立复核 → 后置复审。
+- **B1 备份 commit：`6f78213` "backup: before UI/view overhaul (pre N1-N5)"**（未推送）。后续未提交改动在其之上。
+
+### 用户裁决（4 项）
+
+- 模式入口：普通预览顶栏左 = **[裁切][遮罩]** 两个入口（其余按钮拆走）。
+- 10% 语义：**按轴**，每轴至少保留该轴显示长度的 10% 在视口内；缩态（scaled<=viewport）该轴恒定 0（居中不可平移）。
+- 切工具：**退役视图快照**；进入/退出裁切、遮罩、对比切换一律标准 Fit。
+- 裁切 ✓：**仅成功关窗**；失败保留窗口 + toast。
+
+### 做了什么（文件:行号）
+
+- **N1**：`UI/Editing/CropState.cs:46` `DefaultFraction 0.75→0.85`（含 `:27` 注释）；
+  `App/Controls/ImagePreview.Crop.cs` 删 `CropViewMarginFactor`、进入裁切改 `_model.Fit()`（`:472` 区域）。
+- **N2**：新增 `App/Controls/PanZoomCanvas.axaml(.cs)`（82 行）——`Image/Zoom/Offset/Viewport`、
+  固定背景 `#161616`、按 `OriginX/OriginY` 语义绘制（不叠加 AutoCenter）、拥有位图生命周期；
+  `ImagePreview.axaml` 用 `PART_ImageCanvas` 替换原控件、删 `xmlns:uv`；`ImagePreview.*.cs` 全量 `_box→_canvas`；
+  删 `HideScrollBars` / UVtools `using` / `Dispatcher` 重应用；移除 `UVtools.AvaloniaControls` 包
+  （`App.csproj` / `src/Directory.Packages.props` / `App.axaml` StyleInclude）。
+- **N2 边界**：`UI/Imaging/ImageViewModel.cs:285` `ClampOffset` 改为按轴 10% 可见
+  （`Scaled > Viewport ? Clamp(offset, -(V - 0.10·S), 0.90·S) : 0`）。
+- **N3**：`ImagePreview.Pointer.cs` 平移先行（中键或空格+左键，**含裁切**）；`Keys.cs` 增 `_spacePan` + `OnKeyUp`；
+  `ImagePreview.axaml.cs` `OnToolsChanged` 工具变更即 Fit、`Deactivated` 清空格态；
+  `Compare.cs` 对比切换 Fit；删除 `_viewBeforeCrop` / `_pendingViewRestore` / `ApplyPendingViewRestore`。
+- **N4**：新增 `App/Controls/Modes/CropModePanel.axaml(.cs)`（133）与 `MaskModePanel.axaml(.cs)`（189）；
+  `EditorToolbar` 精简为 [裁切][遮罩]；`ImagePreview.axaml` 移除 `MaskToolbar` 与 `CropActions` 文字块、
+  加两面板；`ImagePreview` 单点接线并推送状态；删 `Controls/MaskToolbar.axaml(.cs)`；X 仅关窗。
+- **N5**：新增 `UI/Editing/CropAspectMode.cs`、`UI/Editing/CropState.Aspect.cs`（`CropState` 改 partial）；
+  `SetAspect` 保中心 + 短边基准吸附 + 重钳；拖拽/手柄在非 Free 时按短边约束；`Exit()` 重置 Free；
+  顶部居中 `MenuFlyout` 选择器。
+- **图标**：`Assets/Icons/TablerIcons.axaml` 追加 `IconCheck` / `IconArrowBackUp` / `IconCircle` / `IconFeather`。
+- **测试**：`CropStateTests`（85% 断言）、`ImageViewModelTests`（10% 钳制）、`CropAspectTests`（7 例）。
+
+### 删除项
+- `AdvancedImageBox` / `UVtools.AvaloniaControls`（包 + using + xmlns + StyleInclude + ScrollBar 处理）。
+- `Controls/MaskToolbar.axaml(.cs)`；`PART_CropActions` 文字按钮（取消/确认裁切）。
+- `EditorToolbar` 的橡皮/清空/撤销按钮与 `ClearMaskRequested`/`UndoRequested`。
+- 裁切视图快照字段/方法（`_viewBeforeCrop` / `_pendingViewRestore` / `ApplyPendingViewRestore` / `RestoreView` 生产调用）。
+
+### 新增项
+- `PanZoomCanvas`、`Modes/CropModePanel`、`Modes/MaskModePanel`、`CropAspectMode`、`CropState.Aspect`、4 个 Tabler 图标。
+
+### 实测（Z29 / Z30：无 GPU）
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 受影响类（ImageViewModelTests / CropStateTests / CropAspectTests / CompareStateTests / ToolStateMachineTests）→ **83 通过 / 0 失败**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **563 通过 / 0 失败**（B2 基线 556 + 7 新增）。
+- `git diff 6f78213 -- src` 净 **-214 行**；`MainWindow.*` 未改；所有 .cs < 600（最大 558），面板 < 300。
+
+### 复审结论
+- 前置复审：修正 P0（模式入口缺失由用户裁决为 [裁切][遮罩]）。
+- verifier：Verified（构建/测试/残留/Z8/行为源码核对）。
+- 后置复审：无 P0；P1 为「`FitWithMargin`/`RestoreView` 生产无调用」——判定**保留**（N1 未要求删除；
+  删除会缩减公开 API 与既有覆盖，超出本步范围）。P2 已修：空格态失焦重置、陈旧注释；
+  位图双 Dispose（Avalonia `Bitmap.Dispose` 幂等）与「裁切拖拽中键平移」边界列为未决。
+
+### 未决
+- GUI 坐标 / 面板命中透明 / 渲染布局无法无头验证 → 由真机验收（见 ACCEPTANCE Step 9C.12）。
+- 裁切拖拽进行中触发中键平移的边界（未改，窄场景）。
+- 裁切拖拽进行中中键平移的优先级未专门处理。
+
+---
+
+## [Step 9C.12-F] - 2026-09-26（N1–N5 UI 微调 F1–F4）
+
+纯 UI 调整，不改功能语义 / 坐标 / Contracts / IPC / Python。
+
+- **F1 笔刷/羽化改竖版**（`Controls/Modes/MaskModePanel.axaml`）：左侧由「图标+横向 Slider(120)」改为
+  「图标在上 + `Orientation="Vertical"` Slider(28×120) 在下」，两列等宽（Width=28）、`Spacing=12`、
+  左缘垂直居中；数值无常驻文字，悬停 Slider 的 tooltip 显示当前值
+  （`MaskModePanel.axaml.cs` `ToolTip.SetTip` 随 `ValueProperty` 更新）。
+- **F2 返回图标 = 左箭头**：`Assets/Icons/TablerIcons.axaml` 追加 `IconArrowLeft`
+  （`M5 12l14 0 M5 12l6 6 M5 12l6 -6`）；`CropModePanel` / `MaskModePanel` 底部 [返回] 改用
+  `IconArrowLeft`；撤销仍用 `IconUndo`/`IconArrowBackUp`（视觉区分）。
+- **F3 遮罩顶栏去拥挤**（`MaskModePanel.axaml`）：顶栏 `Border.Padding 4→6`、`StackPanel.Spacing 2→8`
+  （按钮数量/顺序/语义不变）。
+- **F4 裁切顶部删「重置」**（`CropModePanel.axaml(.cs)`）：顶部只留比例选择器；删 `PART_BtnResetTop`
+  及其字段/接线/`SetEnabled` 项；底部 `[重置][返回][✓]` 三件套不变。
+
+实测（Z29/Z30：无 GPU）：`dotnet build src\ZIV.AI.sln -c Release` → 0 错误 0 警告；
+受影响类（CropAspectTests / CropStateTests / ImageViewModelTests）→ 61 通过 / 0 失败；
+非 GPU 全量 → 563 通过 / 0 失败（与基线一致，纯 UI 改动无新增测试）。
+
+### F4-fix：裁切比例按钮文字被裁
+
+- 现象：裁切顶部比例按钮使用 `Classes="tool"`，而 `Button.tool` 样式把 `Width/Height` 固定为 `32`，
+  内含「图标 + 文字（自由/16:9…）+ chevron」被裁字。
+- 修复（`Controls/Modes/CropModePanel.axaml`）：该按钮局部覆盖 `Width="NaN"`（退出固定宽，改自适应）、
+  `MinWidth="52"`、`Padding="10,0"`，`StackPanel.Spacing 3→4`；`Classes="tool"` 保留 hover/背景。
+- 复测：build 0/0；非 GPU 全量 563 通过 / 0 失败。
+
+### F5：移除裁切进入提示 toast
+
+- 现象：进入裁切时顶部居中弹出「拖到图像边界外可外扩」，遮挡顶部比例条 / 操作。
+- 修复（`ImagePreview.Crop.cs:204`）：删除该 `ShowCropToast("拖到图像边界外可外扩")` 调用；
+  保留 `PART_CropToast` 及其它失败 / 提示用途（「请先框选裁切区域」/ 裁切失败）。
+- 复测：build 0/0。

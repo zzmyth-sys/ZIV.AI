@@ -7,11 +7,12 @@ namespace ZivAiEditor.UI.Imaging;
 /// layer renders it and feeds it pointer / wheel input.
 ///
 /// Coordinate convention (identical to the renderer's offset model):
-/// <c>viewportPoint = imagePoint * Zoom - Offset</c>, where <c>Offset</c> is the
-/// scroll offset and is clamped to <c>[0, ScaledSize - ViewportSize]</c>. When the
-/// scaled image is smaller than the viewport on an axis it is <b>centered</b> on that
-/// axis (the renderer does the same), so the effective origin becomes
-/// <c>(ViewportSize - ScaledSize) / 2</c> instead of <c>-Offset</c>.
+/// <c>viewportPoint = imagePoint * Zoom - Offset</c>. The pan offset is clamped so at
+/// least 10% of the scaled image stays visible on each axis that overflows, i.e.
+/// <c>OffsetX ∈ [-(ViewportWidth - ScaledWidth*0.10), ScaledWidth*0.90]</c> (likewise
+/// for Y). When the scaled image is smaller than the viewport on an axis it is
+/// <b>centered</b> on that axis and its offset is forced to 0, so the effective origin
+/// becomes <c>(ViewportSize - ScaledSize) / 2</c> instead of <c>-Offset</c>.
 ///
 /// All dimensions are in device-independent pixels; <see cref="ZoomPercent"/> is an
 /// integer percentage (100 = actual size) to match the renderer's integer zoom levels.
@@ -276,11 +277,19 @@ public sealed class ImageViewModel
         return (imageX * Zoom + OriginX, imageY * Zoom + OriginY);
     }
 
-    /// <summary>Clamps the pan offset to the legal range for the current zoom.</summary>
+    /// <summary>
+    /// Clamps the pan offset for the current zoom: while an axis overflows, at least 10%
+    /// of the scaled image must stay inside the viewport; a fitted axis stays centered
+    /// (offset 0, not pannable).
+    /// </summary>
     public void ClampOffset()
     {
-        OffsetX = Math.Clamp(OffsetX, 0, Math.Max(0, ScaledWidth - ViewportWidth));
-        OffsetY = Math.Clamp(OffsetY, 0, Math.Max(0, ScaledHeight - ViewportHeight));
+        OffsetX = ScaledWidth > ViewportWidth
+            ? Math.Clamp(OffsetX, -(ViewportWidth - ScaledWidth * 0.10), ScaledWidth * 0.90)
+            : 0;
+        OffsetY = ScaledHeight > ViewportHeight
+            ? Math.Clamp(OffsetY, -(ViewportHeight - ScaledHeight * 0.10), ScaledHeight * 0.90)
+            : 0;
     }
 
     /// <summary>

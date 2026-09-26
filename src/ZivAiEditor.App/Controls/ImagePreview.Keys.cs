@@ -4,11 +4,15 @@ using Avalonia.Input;
 namespace ZivAiEditor.App.Controls;
 
 /// <summary>
-/// Keyboard half of <see cref="ImagePreview"/> (Step 9C.6-E): Esc (crop → compare → close)
-/// and Ctrl+Shift+S (save as). Split out of the main file to keep it under the Z8 budget.
+/// Keyboard half of <see cref="ImagePreview"/> (Step 9C.6-E / B3): Esc (crop → compare →
+/// close), Ctrl+Shift+S (save as) and Space (hold to pan in any mode). Split out of the
+/// main file to keep it under the Z8 budget.
 /// </summary>
 public partial class ImagePreview
 {
+    /// <summary>True while Space is held: left-drag then pans instead of using the active tool.</summary>
+    private bool _spacePan;
+
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.S
@@ -17,6 +21,15 @@ public partial class ImagePreview
         {
             e.Handled = true;
             SaveRequested?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        // B3: Space turns the left button into a pan for as long as it is held, in every
+        // tool mode (including crop). Tracked here; Pointer.cs consumes the flag.
+        if (e.Key == Key.Space)
+        {
+            _spacePan = true;
+            e.Handled = true;
             return;
         }
 
@@ -42,5 +55,14 @@ public partial class ImagePreview
         }
 
         Close();
+    }
+
+    private void OnKeyUp(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Space)
+        {
+            _spacePan = false;
+            e.Handled = true;
+        }
     }
 }

@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using ZivAiEditor.App.Controls.Modes;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.UI.Editing;
 using ZivAiEditor.UI.Imaging;
@@ -41,7 +42,7 @@ public partial class ImagePreview
 {
     private MaskState? _mask;
     private MaskOverlay? _maskOverlay;
-    private MaskToolbar? _maskToolbar;
+    private MaskModePanel? _maskPanel;
     private string? _maskSessionId;
     private string? _maskNodeId;
     private MaskSpec? _nodeMask;
@@ -89,11 +90,29 @@ public partial class ImagePreview
             _maskOverlay.SetState(_mask);
         }
 
-        _maskToolbar = this.FindControl<MaskToolbar>("PART_MaskToolbar");
-        if (_maskToolbar is not null)
+        // N4: the mask chrome is a dumb panel; wire its events once here.
+        _maskPanel = this.FindControl<MaskModePanel>("PART_MaskPanel");
+        if (_maskPanel is not null)
         {
-            _maskToolbar.BrushSizeChanged += OnToolbarBrushSizeChanged;
-            _maskToolbar.FeatherChanged += OnToolbarFeatherChanged;
+            // Re-push state after the click: a click on the already-active toggle flips
+            // IsChecked before Click fires, and SetTool is a no-op when the tool is unchanged.
+            _maskPanel.BrushChanged += (_, _) =>
+            {
+                _tools.SetTool(ToolMode.MaskBrush);
+                SyncMaskPanel();
+            };
+            _maskPanel.EraserChanged += (_, _) =>
+            {
+                _tools.SetTool(ToolMode.Eraser);
+                SyncMaskPanel();
+            };
+            _maskPanel.ClearRequested += (_, _) => _mask?.Clear();
+            _maskPanel.UndoRequested += (_, _) => _mask?.Undo();
+            _maskPanel.ResetRequested += (_, _) => _mask?.Clear();
+            _maskPanel.ReturnRequested += (_, _) => _tools.SetTool(ToolMode.None);
+            _maskPanel.ConfirmRequested += (_, _) => Close();
+            _maskPanel.BrushSizeChanged += OnToolbarBrushSizeChanged;
+            _maskPanel.FeatherChanged += OnToolbarFeatherChanged;
         }
 
         // R1: Changed fires during a stroke (incremental repaint only); Committed fires once
@@ -101,12 +120,6 @@ public partial class ImagePreview
         // full (feathered) rebuild.
         _mask.Changed += (_, _) => OnMaskStrokeChanged();
         _mask.Committed += (_, _) => OnMaskCommitted();
-
-        if (_toolbar is not null)
-        {
-            _toolbar.ClearMaskRequested += (_, _) => _mask?.Clear();
-            _toolbar.UndoRequested += (_, _) => _mask?.Undo();
-        }
 
         _tools.StateChanged += (_, _) => UpdateMaskMode();
         UpdateMaskMode();
@@ -130,16 +143,17 @@ public partial class ImagePreview
             || _nodeMask is not null;
     }
 
-    /// <summary>Pushes the toolbar sliders from the live <see cref="MaskState"/> (no events).</summary>
-    private void SyncMaskToolbar()
+    /// <summary>Pushes tool / undo / clear state and the sliders into the mask panel (no events).</summary>
+    private void SyncMaskPanel()
     {
-        if (_mask is null || _maskToolbar is null)
+        if (_mask is null || _maskPanel is null)
         {
             return;
         }
 
-        _maskToolbar.SetBrushSize(_mask.BrushDiameter);
-        _maskToolbar.SetFeather(_mask.FeatherPx);
+        _maskPanel.SetBrushSize(_mask.BrushDiameter);
+        _maskPanel.SetFeather(_mask.FeatherPx);
+        _maskPanel.SetToolState(_tools.CurrentTool, _tools.CanUndo, _tools.CanClearMask);
         _maskOverlay?.SetBrush(_mask.BrushDiameter);
     }
 
@@ -201,19 +215,19 @@ public partial class ImagePreview
                 LoadImage(_displayPath);
             }
 
-            if (_maskToolbar is not null)
+            if (_maskPanel is not null)
             {
-                _maskToolbar.IsVisible = true;
+                _maskPanel.IsVisible = true;
             }
 
-            SyncMaskToolbar();
+            SyncMaskPanel();
             RefreshMaskCanvas();
         }
         else
         {
-            if (_maskToolbar is not null)
+            if (_maskPanel is not null)
             {
-                _maskToolbar.IsVisible = false;
+                _maskPanel.IsVisible = false;
             }
 
             _maskOverlay?.ClearPointer();
@@ -279,7 +293,7 @@ public partial class ImagePreview
             }
         }
 
-        SyncMaskToolbar();
+        SyncMaskPanel();
         _tools.NotifyUndoStackChanged(_mask.CanUndo);
         _tools.NotifyMaskChanged(_mask.CanClear);
         UpdateMaskOverlayVisibility();
@@ -342,7 +356,7 @@ public partial class ImagePreview
             _tools.NotifyMaskChanged(_mask.CanClear);
         }
 
-        SyncMaskToolbar();
+        SyncMaskPanel();
         _maskOverlay?.MarkDirty();
         UpdateMaskOverlayVisibility();
     }
@@ -351,7 +365,7 @@ public partial class ImagePreview
 
     private void MaskOnPressed(Point viewportPoint, PointerPressedEventArgs e)
     {
-        if (_mask is null || !IsMaskActive || _box is null || !_mask.HasImage)
+        if (_mask is null || !IsMaskActive || _canvas is null || !_mask.HasImage)
         {
             return;
         }
@@ -364,7 +378,7 @@ public partial class ImagePreview
         }
 
         _maskPointerDown = true;
-        e.Pointer.Capture(_box);
+        e.Pointer.Capture(_canvas);
         _maskOverlay?.MarkDirty();
     }
 
@@ -381,7 +395,7 @@ public partial class ImagePreview
 
     private void MaskOnReleased(PointerReleasedEventArgs e)
     {
-        if (_mask is null || !_maskPointerDown || _box is null)
+        if (_mask is null || !_maskPointerDown || _canvas is null)
         {
             return;
         }
@@ -389,7 +403,7 @@ public partial class ImagePreview
         _maskPointerDown = false;
         e.Pointer.Capture(null);
 
-        var point = e.GetPosition(_box);
+        var point = e.GetPosition(_canvas);
         var (ix, iy) = _model.ViewportToImage(point.X, point.Y);
         _mask.ContinueStroke(ix, iy);
         _mask.EndStroke();

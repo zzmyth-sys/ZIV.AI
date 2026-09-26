@@ -27,7 +27,6 @@
     <ProjectReference Include="..\..\..\ZIV\src\ZIV.Imaging\ZIV.Imaging.csproj" />
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
-    <PackageReference Include="UVtools.AvaloniaControls" />
   </ItemGroup>
 
   <ItemGroup>
