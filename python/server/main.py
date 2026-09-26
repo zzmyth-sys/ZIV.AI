@@ -29,6 +29,12 @@ def _connect(pipe_path, timeout_s):
 
 
 def _cleanup():
+    # A1/C1: a client disconnect must release the loaded model (ComfyUI registry)
+    # before the process exits, not just tidy the torch allocator.
+    try:
+        handlers._ENGINE.unload()
+    except Exception:
+        LOG.exception("vram release on shutdown failed")
     torch = sys.modules.get("torch")
     if torch is not None:
         try:
@@ -79,15 +85,17 @@ def _next_message(frame_io, pollable):
         return _decode_frame(frame)
 
     while True:
-        if frame_io.has_pending_frame():
-            frame = frame_io.read_frame()
-            if frame is None:
-                raise EOFError("pipe closed")
-            message = _decode_frame(frame)
-            if message is not None:
-                return message
-            continue
-        return None
+        state = frame_io.poll_state()
+        if state == ipc.PIPE_CLOSED:
+            raise EOFError("pipe closed")
+        if state == ipc.PIPE_NO_DATA:
+            return None
+        frame = frame_io.read_frame()
+        if frame is None:
+            raise EOFError("pipe closed")
+        message = _decode_frame(frame)
+        if message is not None:
+            return message
 
 
 def _decode_frame(frame):

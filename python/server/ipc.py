@@ -11,6 +11,11 @@ FRAME_BINARY = 0x02
 
 MAX_FRAME_BYTES = 256 * 1024 * 1024
 
+# `FrameIO.poll_state()` results (A1): distinguish "nothing yet" from "peer gone".
+PIPE_NO_DATA = 0
+PIPE_HAS_FRAME = 1
+PIPE_CLOSED = 2
+
 
 def sanitize(value):
     if isinstance(value, float):
@@ -122,18 +127,28 @@ class FrameIO:
 
     @property
     def pollable(self):
-        """True when `has_pending_frame()` can probe the pipe (Windows handle)."""
+        """True when `poll_state()` can probe the pipe (Windows handle)."""
         return self._handle is not None
 
-    def has_pending_frame(self):
-        """Non-blocking check for at least a frame header on the pipe."""
+    def poll_state(self):
+        """Non-blocking pipe poll: ``PIPE_NO_DATA`` / ``PIPE_HAS_FRAME`` / ``PIPE_CLOSED`` (A1).
+
+        ``PeekNamedPipe`` reports both "no bytes yet" and "peer gone". Only the
+        first is a reason to keep waiting, so a failed peek (broken pipe,
+        disconnected, or an unexpected error) is reported as ``PIPE_CLOSED``.
+        That is deliberately fail-closed: the old boolean could not tell the two
+        apart, so a vanished client left the read loop spinning as "no data"
+        forever and never released the loaded model.
+        """
         if self._handle is None:
-            return False
+            return PIPE_NO_DATA
         available = wintypes.DWORD(0)
         ok = _peek_named_pipe()(
             wintypes.HANDLE(self._handle), None, 0, None, ctypes.byref(available), None
         )
-        return bool(ok) and available.value >= 4
+        if not ok:
+            return PIPE_CLOSED
+        return PIPE_HAS_FRAME if available.value >= 4 else PIPE_NO_DATA
 
     def _read(self, size):
         if self._fd is not None:

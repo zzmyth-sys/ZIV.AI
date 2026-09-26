@@ -345,13 +345,22 @@ def _make_cancel_poller(frame_io):
     """Drain any pending control frames from inside the sampling loop.
 
     Only `cancel` triggers work (sets the interrupt flag); `ping` is answered so
-    the pipe stays clean. `shutdown` during a task is ignored.
+    the pipe stays clean. `shutdown` during a task is ignored. A closed pipe
+    (A1/C1: the client vanished) interrupts the in-flight task at once so the
+    main loop can observe the disconnect and shut the process down.
     """
 
     def poll():
-        while frame_io.has_pending_frame():
+        while True:
+            state = frame_io.poll_state()
+            if state == ipc.PIPE_CLOSED:
+                _interrupt_processing()
+                break
+            if state == ipc.PIPE_NO_DATA:
+                break
             frame = frame_io.read_frame()
             if frame is None:
+                _interrupt_processing()
                 break
             frame_type, payload = frame
             if frame_type != ipc.FRAME_JSON:
