@@ -4250,3 +4250,37 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 
 1. 真机 1–5 通过后，在「验收记录」追加“Step 9C.21 通过，日期：____”（待签）。
 2. 已知测试缺口（非阻断）：`SetNodeDurationMs` 的根重指分支与 App 层 `elapsed` 采样无单测（需真机/App 环境）。
+
+## 批次 1 收尾：A5 / A6 / B12（2026-09-27，待真机验收）
+
+### 自动化（已通过，非 GPU）
+
+| 条目 | 验证方式 | 结果 |
+| --- | --- | --- |
+| A5 路径守卫 | `PathSanitizerTests`（12 拒绝 / 2 通过 / 哨兵不存在 / 删除不越界 / 改名 no-op / Save·Load 拒绝） | 通过 |
+| A5 兼容 | `ProjectServiceTests` / `SessionStoreTests` 全绿 | 通过 |
+| A6 不变式 | `RemoveSubtree` current∈后代→start；子树外→不变；current=start→不变 | 通过 |
+| A6 回归 | `EditSessionTests` 全绿 | 通过 |
+| B12 扩展边界 | `ImageViewModelTests`：`[-v,s]` 端点、允许负 offset / 超 `s−v`、缩态不变 | 通过 |
+| 构建 | `dotnet build src/ZIV.AI.sln -c Release` | 0 错误 0 警告 |
+| 全量 | `dotnet test ... --filter "FullyQualifiedName!~Ipc"` | 658 通过 / 0 失败（基线 634 + 24） |
+
+### 真机验收清单（用户执行）
+
+**A5：**
+1. 正常项目操作（新建 / 删除 / 切换 / 改名）不受影响。
+2. 手工把 `last_project.txt` 改为 `../` → 启动时不误删 / 误操作（拒绝）。
+
+**A6：**
+1. 删除含后代节点的节点 → current 正确切到父节点。
+2. 重跑含后代节点的节点 → current 正确回指（行为不变）。
+
+**B12：**
+1. 放大图片 → 可拖到边缘继续拖，允许露白。
+2. 露白到极限（图片完全移出视口）→ 停止，不能继续拖走。
+3. 缩态（图小于视口）→ 居中、不可拖（不变）。
+
+### 验收后动作
+
+1. 真机清单通过后，在「验收记录」追加“批次 1 收尾 A5/A6/B12 通过，日期：____”（待签）。
+2. 已知测试缺口（非阻断）：B12 渲染层（`ImagePreview.axaml.cs` 的 `_canvas.Offset`）无单测，需真机确认完全露白时裁切 / 遮罩工具无异常。

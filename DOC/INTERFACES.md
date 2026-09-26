@@ -402,3 +402,14 @@
 - **`EditNode`**：由 `EditSession.cs` 内嵌类改为独立文件 `src/ZivAiEditor.Agent/Session/EditNode.cs` 的 `public sealed record EditNode : IEditNode`；新增 `public int? DurationMs { get; init; }`。原有字段/`init` 语义不变；6 个原地重建站点改用 `with`。
 - **持久化**：`SessionFileNode` 追加 `duration_ms`（`[JsonIgnore(WhenWritingNull)]`）；项目格式保持 **v2**（additive，同 `source_image` 先例）。
 - **行为**：`RebuildContext` 气泡按 `DurationMs` 显示「XX.X秒 完成」；无则「完成」。
+
+## 29. 追加说明：批次 1 收尾 A5 / A6 / B12（2026-09-27）
+
+- **无契约签名变更**：本次未新增 / 修改任何 Contracts 接口成员。以下均为实现层语义变更，仅记录以免误用。
+- **`ProjectService.GetDirectory(string) : string`**：签名不变；不安全 id（含分隔符 / `..` / 越界）改为返回 `PathSanitizer.InvalidDirectory`（`Directory.Exists == false`）。
+- **`SessionStore`**：`SaveAsync` / `LoadAsync` 对不安全 id 抛 `ProjectCorruptException`；`DeleteNodeArtifacts` 对不安全 id 静默 return；私有 `GetDirectory` 经 `PathSanitizer.ResolveDirectory`。
+- **`ProjectService.SetLastProjectIdAsync`**：新增拒收不安全 id（不落盘）。`RenameAsync` 不安全 id → no-op。
+- **新增类型（Agent 内部，非 Contracts）**：`ZivAiEditor.Agent.Project.PathSanitizer`（static）：`bool IsSafe(string?, string)`、`string ResolveDirectory(string?, string)`、`string InvalidDirectory`。
+- **`EditSession.RemoveSubtree(string)`**：签名不变；新增不变式「current 在被删后代中 → 重定向到保留的 `nodeId`」。
+- **`ImageViewModel.ClampOffset()`**：签名不变；溢出轴范围改为 `[−ViewportSize, ScaledSize]`（允许完全露白）；缩态行为不变。
+- **不做**：不改 IPC / 命令集 / 其它 Contracts 类型；不改缩放锚点 / 双击 / resize 逻辑。

@@ -5082,3 +5082,10 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **持久化（格式仍 v2，additive）**：`SessionFileNode.duration_ms`（`[JsonIgnore(WhenWritingNull)]`）；`SessionStore.WriteProjectAsync` 写；`SessionLoader` 读；`Restore` 复制 `node.DurationMs`。
 - **UI**：`SessionViewModel.RebuildContext` 气泡 `node.DurationMs is int ms ? $"{ms / 1000.0:F1}秒 完成" : "完成"`；`FlowRunner.Submit.cs` / `FlowRunner.Rerun.cs` 结束处 `SetNodeDurationMs`（重跑覆盖旧值）。旧项目无字段 → null → 「完成」。
 - **不做**：不改 CropSpec/MaskSpec/RerunSpec；不持久化失败/取消；不用 positional record。
+
+## 批次 1 收尾：A5 / A6 / B12 语义变更（2026-09-27，只增）
+
+- **A5（新增，不改既有签名）**：新文件 `src/ZivAiEditor.Agent/Project/PathSanitizer.cs`。`ProjectService.GetDirectory(string)` 签名与返回类型 **不变**，但语义变更为：不安全 id 返回 `PathSanitizer.InvalidDirectory`（`Directory.Exists == false`），不再返回 `root/<id>`。`SessionStore.SaveAsync` / `LoadAsync` 对不安全 id 改为抛 `ProjectCorruptException`（`LoadAsync` 原本对缺失文件已抛同类）。`SetLastProjectIdAsync` 新增拒收不安全 id（原样落盘行为变更）。`RenameAsync` 不安全 id 变为 no-op。
+- **A6（不改契约签名）**：`IEditSessionWriter.RemoveSubtree` / `RemoveNodeAndSubtree` 签名不变；`EditSession.RemoveSubtree(nodeId)` 新增不变式——current 若在被删后代中，重定向到保留的 `nodeId`（此前悬空）。`RemoveNodeAndSubtree` 语义不变（仍重定向到父）。`FlowRunner.Rerun.cs` 既有补偿 **保留**（覆盖 `currentBefore == nodeId` 情形）。
+- **B12（不改契约签名）**：`ImageViewModel.ClampOffset()`（public，签名不变）语义变更——溢出轴钳制范围由「每轴至少 10% 可见」`[−(v−0.1s), 0.9s]` 放宽为「允许完全露白」`[−v, s]`。缩态（`scaled ≤ viewport`）行为不变（居中、offset 0）。`HasHorizontalScroll` / `HasVerticalScroll` / `OriginX` / `OriginY` 判定不变。
+- **不做**：不改 IPC / 命令集 / 其它 Contracts 类型；不改缩放锚点 / 双击 / resize 逻辑。

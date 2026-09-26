@@ -6748,3 +6748,40 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 
 - 未改 IPC / 命令集 / Contracts 其它类型；未跑 GPU / 未启动 Python / 未启动 App。
 - `EditNode` 改为 record 后具备值相等语义，但全仓无 `==`/Equals/HashSet<EditNode>/Dictionary<EditNode,_> 依赖（评审确认）。
+
+## 批次 1 收尾：A5 / A6 / B12（2026-09-27，只追加）
+
+三项互不依赖，各一条独立 commit。
+
+### A5 · 路径穿越纵深防御
+
+- **问题**：`ProjectService.GetDirectory`（`ProjectService.cs:39`）与 `SessionStore` 私有 `GetDirectory`（`SessionStore.cs:75`）均直接 `Path.Combine(root, sessionId)`，无 id 校验；`DeleteAsync` 递归删除 → 若 id 含 `../` 可删根目录外内容。
+- **新增** `src/ZivAiEditor.Agent/Project/PathSanitizer.cs`（新文件，不改契约）：
+  - `IsSafe(id, root)`：拒绝 null/空/空白、含 `/` 或 `\`（`Path.DirectorySeparatorChar` / `AltDirectorySeparatorChar`）、含 `..`；拼接后 `Path.GetFullPath` 做归属校验（必须严格位于 root 之下）。不抛。
+  - `ResolveDirectory(id, root)`：安全 → `Path.Combine(root,id)`；否则返回 `InvalidDirectory`（含 NUL 的结构上不可能存在的路径，保证 `Directory.Exists == false`）。
+- **接入**：`ProjectService.GetDirectory` 改用 `ResolveDirectory`（签名不变）；`DeleteAsync`/`RenameAsync` 入口 `IsSafe` 短路；`SetLastProjectIdAsync` 拒收不安全 id（加固）。`SessionStore.GetDirectory` 改用 `ResolveDirectory`；`SaveAsync`/`LoadAsync` 不安全时抛 `ProjectCorruptException`；`DeleteNodeArtifacts` 不安全时静默 return。
+- **格式清单**：生产 `SessionId` 唯一来源为 `Guid.NewGuid().ToString("N")`（`EditSession.cs:38,114`，32 hex，无分隔符）。`last_project.txt` 经 `SetLastProjectIdAsync` 写入，仅来自 UI 的 `_session.SessionId`。load 路径信任 `session.json` 的 `session_id`，非生产通道。测试夹具 `"abc123"` 无分隔符 → 兼容。**未触发停点**。
+- **测试**：新增 `PathSanitizerTests.cs`（12 拒绝理论 + 2 通过理论 + `ResolveDirectory` 不存在 + `DeleteAsync` 不误删根外目录 + `RenameAsync` no-op + `SaveAsync`/`LoadAsync` 拒绝）。
+
+### A6 · RemoveSubtree 不变式
+
+- **问题**：`EditSession.Subtree.cs:97` 的 current 重定向被 `includeStart &&` 门控 → `RemoveSubtree(includeStart:false)` 时若 current 落在被删后代中，`CurrentNodeId` 悬空、`GetCurrent*` 全 null。唯一调用方 `FlowRunner.Rerun.cs:134` 已补偿，但契约未要求。
+- **修复**：重定向移出 `includeStart` 门控，改为「current 已不在 `Nodes` 时」按语义分派：`includeStart` → 父（缺失则 root/null）；`!includeStart` → 保留的 `nodeId`（start 永不被删，重定向合法）。
+- **FlowRunner 补偿去留**：**保留（双保险）**。理由：补偿还覆盖 `currentBefore == nodeId`（被重跑节点本身未被删，不在 `removed`）情形，EditSession 重定向不覆盖；删除会回归。`removed.Any(...)` 分支变为幂等双保险。
+- **测试**：新增 3 例（current 在被删后代 → 重定向到 start；current 在子树外 → 不变；current 即 start → 不变）。现有 `EditSessionTests.cs:687-795` 全绿。
+
+### B12 · 平移边界（允许完全露白）
+
+- **问题**：`ImageViewModel.ClampOffset`（`:285`）原口径「每轴至少 10% 可见」在 `scaled > 10 × viewport` 时下界为正，图像边缘无法再平移 → 用户「一到边缘就不能动」。
+- **已裁决口径（用户拍板）**：允许平移出边界（露白），**放宽为可完全移出视口（0% 可见）**。
+- **公式**：溢出轴 `Offset ∈ [−ViewportSize, ScaledSize]`（X/Y 独立）。推导：`Origin = −Offset`；图片左边缘移到视口右缘 → `−Offset = v ⇒ Offset = −v`；图片右边缘移到视口左缘 → `s − Offset = 0 ⇒ Offset = s`。缩态（`scaled ≤ viewport`，按 `HasHorizontalScroll`/`HasVerticalScroll`）保持居中、offset 0。
+- **停点检查**：`OffsetX/OffsetY` 仅被 `ImagePreview.axaml.cs:301` 的 `_canvas.Offset` 消费；overlay 经 `OriginX` 间接读 `−Offset`，因 `HasHorizontalScroll`/`OriginX` 分支不变 → 行为不变。**未触发停点**。
+- **测试**：更新原钳制测试数值为扩展边界（view 400/scaled 1000 → `[-400,1000]`）；改名 + 注释「扩展后的边界（允许完全露白）」；新增允许负 offset / 超出 `scaled−viewport` / 精确命中 `−v` 与 `s` 端点；缩态断言不变（`Pan_Does_Nothing_When_The_Image_Fits` / `FitWithMargin` 仍为 0）。
+
+### 验证（非 GPU / 不启动 App / 不启动 Python / 不跑 GPU）
+
+- `dotnet build src/ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 受影响类：`PathSanitizerTests` / `ProjectServiceTests` / `SessionStoreTests` / `EditSessionTests` / `ImageViewModelTests` 全绿。
+- `dotnet test ... --filter "FullyQualifiedName!~Ipc"` → **658 通过 / 0 失败**（634 基线 + 24 新增，无回归）。
+- Z8：改动文件最大 `SessionStore.cs` 574 行，均 < 600。
+- 未改 IPC / 命令集 / Contracts 其它类型；未做缩放锚点 / 双击 / resize 逻辑。
