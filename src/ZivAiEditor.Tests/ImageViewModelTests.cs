@@ -121,31 +121,51 @@ public class ImageViewModelTests
     }
 
     [Fact]
-    public void Pan_Is_Clamped_To_Keep_Ten_Percent_Visible()
+    public void Pan_Clamps_To_Extended_Bounds_Allowing_White_Gap()
     {
+        // B12: the extended bounds (fully off-viewport allowed) — viewport 400, scaled 1000
+        // -> offset range [-400, 1000].
         var vm = new ImageViewModel();
         vm.SetViewport(400, 400);
         vm.SetImage(1000, 1000);
-        vm.ActualSize(); // 100% -> scaled 1000x1000; offset range [-300, 900]
+        vm.ActualSize(); // 100% -> scaled 1000x1000; offset range [-400, 1000]
 
         Assert.Equal(0, vm.OffsetX);
         Assert.Equal(0, vm.OffsetY);
 
-        vm.PanBy(10_000, 10_000); // drag far right/down -> clamp at -(400 - 100)
-        Assert.Equal(-300, vm.OffsetX);
-        Assert.Equal(-300, vm.OffsetY);
+        vm.PanBy(10_000, 10_000); // drag far right/down -> clamp at -Viewport
+        Assert.Equal(-400, vm.OffsetX);
+        Assert.Equal(-400, vm.OffsetY);
 
-        vm.PanBy(-10_000, -10_000); // drag far left/up -> clamp at 1000 * 0.90
-        Assert.Equal(900, vm.OffsetX);
-        Assert.Equal(900, vm.OffsetY);
+        vm.PanBy(-10_000, -10_000); // drag far left/up -> clamp at Scaled
+        Assert.Equal(1000, vm.OffsetX);
+        Assert.Equal(1000, vm.OffsetY);
 
         vm.PanBy(-100, -100); // already at max, stays
-        Assert.Equal(900, vm.OffsetX);
-        Assert.Equal(900, vm.OffsetY);
+        Assert.Equal(1000, vm.OffsetX);
+        Assert.Equal(1000, vm.OffsetY);
 
         vm.PanBy(100, 100);
-        Assert.Equal(800, vm.OffsetX);
-        Assert.Equal(800, vm.OffsetY);
+        Assert.Equal(900, vm.OffsetX);
+        Assert.Equal(900, vm.OffsetY);
+    }
+
+    [Fact]
+    public void Pan_Allows_Negative_Offset_And_Exceeding_Scaled_Minus_Viewport()
+    {
+        // B12: dragging the image fully off the viewport is allowed on both sides.
+        var vm = new ImageViewModel();
+        vm.SetViewport(400, 400);
+        vm.SetImage(1000, 1000);
+        vm.ActualSize();
+
+        vm.PanBy(1000, 1000); // beyond the old lower bound (-300)
+        Assert.Equal(-400, vm.OffsetX, 6);
+        Assert.Equal(-400, vm.OffsetY, 6);
+
+        vm.PanBy(-1000, -1000); // beyond the old upper bound (900)
+        Assert.Equal(600, vm.OffsetX, 6);
+        Assert.Equal(600, vm.OffsetY, 6);
     }
 
     [Fact]
@@ -162,7 +182,7 @@ public class ImageViewModelTests
     }
 
     [Fact]
-    public void Pan_Clamp_Is_Per_Axis_Ten_Percent()
+    public void Pan_Clamp_Is_Per_Axis_On_Extended_Bounds()
     {
         var vm = new ImageViewModel();
         vm.SetViewport(400, 400);
@@ -170,12 +190,12 @@ public class ImageViewModelTests
         vm.ActualSize(); // 100% -> 2000x500, both axes overflow with different bounds
 
         vm.PanBy(10_000, 10_000); // drag right/down -> minimum offsets
-        Assert.Equal(-(400 - 2000 * 0.10), vm.OffsetX, 6); // -200
-        Assert.Equal(-(400 - 500 * 0.10), vm.OffsetY, 6);  // -350
+        Assert.Equal(-400, vm.OffsetX, 6); // -ViewportWidth
+        Assert.Equal(-400, vm.OffsetY, 6); // -ViewportHeight
 
         vm.PanBy(-10_000, -10_000); // drag left/up -> maximum offsets
-        Assert.Equal(2000 * 0.90, vm.OffsetX, 6); // 1800
-        Assert.Equal(500 * 0.90, vm.OffsetY, 6);  // 450
+        Assert.Equal(2000, vm.OffsetX, 6); // ScaledWidth
+        Assert.Equal(500, vm.OffsetY, 6);  // ScaledHeight
     }
 
     [Fact]
@@ -190,11 +210,11 @@ public class ImageViewModelTests
         Assert.False(vm.HasVerticalScroll);
 
         vm.PanBy(10_000, 10_000);
-        Assert.Equal(-(400 - 1000 * 0.10), vm.OffsetX, 6); // -300
-        Assert.Equal(0, vm.OffsetY, 6);                    // fitted axis stays 0
+        Assert.Equal(-400, vm.OffsetX, 6); // -ViewportWidth
+        Assert.Equal(0, vm.OffsetY, 6);    // fitted axis stays 0
 
         vm.PanBy(-10_000, -10_000);
-        Assert.Equal(1000 * 0.90, vm.OffsetX, 6); // 900
+        Assert.Equal(1000, vm.OffsetX, 6); // ScaledWidth
         Assert.Equal(0, vm.OffsetY, 6);
     }
 
@@ -289,6 +309,24 @@ public class ImageViewModelTests
     }
 
     [Fact]
+    public void Pan_Reaches_Exact_Full_Off_Viewport_Endpoints()
+    {
+        // B12: both extended endpoints are reachable exactly (0% visible).
+        var vm = new ImageViewModel();
+        vm.SetViewport(400, 300);
+        vm.SetImage(1000, 1000);
+        vm.ActualSize(); // scaled 1000x1000 -> X,Y range [-Viewport, Scaled]
+
+        vm.PanBy(10_000, 10_000); // image fully off to the right / bottom
+        Assert.Equal(-400, vm.OffsetX, 6);
+        Assert.Equal(-300, vm.OffsetY, 6);
+
+        vm.PanBy(-10_000, -10_000); // image fully off to the left / top
+        Assert.Equal(1000, vm.OffsetX, 6);
+        Assert.Equal(1000, vm.OffsetY, 6);
+    }
+
+    [Fact]
     public void RestoreView_Clamps_Offset_To_Bounds()
     {
         var vm = new ImageViewModel();
@@ -297,8 +335,8 @@ public class ImageViewModelTests
 
         vm.RestoreView(100, 99999, -99999);
 
-        // X: [-(400 - 100), 900] = [-300, 900]; Y: [-(300 - 100), 900] = [-200, 900].
-        Assert.Equal(900, vm.OffsetX, 6);
-        Assert.Equal(-200, vm.OffsetY, 6);
+        // B12 extended bounds: X: [-400, 1000]; Y: [-300, 1000].
+        Assert.Equal(1000, vm.OffsetX, 6);
+        Assert.Equal(-300, vm.OffsetY, 6);
     }
 }
