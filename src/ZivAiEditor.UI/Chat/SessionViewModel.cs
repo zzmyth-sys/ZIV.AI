@@ -390,7 +390,7 @@ public sealed partial class SessionViewModel
             Messages.Add(new ChatMessage
             {
                 Role = ChatRole.Assistant,
-                Text = "完成",
+                Text = node.DurationMs is int ms ? $"{ms / 1000.0:F1}秒 完成" : "完成",
                 ImagePath = ChatFlowRules.PipelinePath(node),
                 ImagePaths = new[] { ChatFlowRules.PipelinePath(node) },
                 MaskPath = node.Mask?.MaskImagePath,

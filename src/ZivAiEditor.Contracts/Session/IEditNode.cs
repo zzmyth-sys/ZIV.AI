@@ -61,4 +61,12 @@ public interface IEditNode
     RerunSpec? Rerun { get; }
 
     DateTimeOffset CreatedAt { get; }
+
+    /// <summary>
+    /// End-to-end execution time of the edit that produced this node, in milliseconds
+    /// (Step 9C.21). Persisted as <c>duration_ms</c>; <c>null</c> for a node loaded from a
+    /// project saved before the field existed (the UI then shows no duration). Append-only;
+    /// the project format stays v2.
+    /// </summary>
+    int? DurationMs { get; }
 }

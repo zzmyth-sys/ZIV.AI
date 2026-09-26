@@ -282,6 +282,7 @@ public sealed partial class SessionStore : ISessionPersistence, IProjectMetadata
                 Mask = mask,
                 Rerun = rerun,
                 CreatedAt = node.CreatedAt,
+                DurationMs = node.DurationMs,
             });
         }
 
@@ -490,6 +491,14 @@ internal sealed class SessionFileNode
 
     [JsonPropertyName("created_at")]
     public DateTimeOffset CreatedAt { get; init; }
+
+    /// <summary>
+    /// End-to-end execution time of the node, in milliseconds (Step 9C.21). Append-only;
+    /// absent in older files → <c>null</c> (the UI shows no duration).
+    /// </summary>
+    [JsonPropertyName("duration_ms")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? DurationMs { get; init; }
 }
 
 internal sealed class SessionFileCrop

@@ -160,6 +160,7 @@ public static class SessionLoader
                 Mask = mask,
                 Rerun = rerun,
                 CreatedAt = dtoNode.CreatedAt,
+                DurationMs = dtoNode.DurationMs,
             });
         }
 
@@ -214,19 +215,8 @@ public static class SessionLoader
         }
     }
 
-    private static EditNode Rebuild(EditNode node, string? parentId) => new()
-    {
-        NodeId = node.NodeId,
-        ParentNodeId = parentId,
-        ImagePath = node.ImagePath,
-        ImagePaths = node.ImagePaths,
-        UsedImagePaths = node.UsedImagePaths,
-        Command = node.Command,
-        Crop = node.Crop,
-        Mask = node.Mask,
-        Rerun = node.Rerun,
-        CreatedAt = node.CreatedAt,
-    };
+    private static EditNode Rebuild(EditNode node, string? parentId)
+        => node with { ParentNodeId = parentId };
 
     /// <summary>
     /// Resolves a list of relative image names against the project directory (Step 9C.10);

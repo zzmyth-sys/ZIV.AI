@@ -121,6 +121,7 @@ internal sealed partial class FlowRunner
                 // Step 9C.10: record the ordered pipeline images this edit consumed (main
                 // first), so the @ / <imageN> mapping survives a reload.
                 _writer.SetNodeUsedImages(appended.NodeId, ChatFlowRules.BuildUsedImages(plan));
+                _writer.SetNodeDurationMs(appended.NodeId, (int)elapsed.TotalMilliseconds);
 
                 _vm.ReplacePending(pending, new ChatMessage
                 {
@@ -136,7 +137,7 @@ internal sealed partial class FlowRunner
 
             if (state.Status == TaskStatus.Canceled)
             {
-                // L1/L2: a recovery cancel is not a user cancel 鈥?surface the restart.
+                // L1/L2: a recovery cancel is not a user cancel — surface the restart.
                 if (_stuckRecoveryPending)
                 {
                     _vm.ReplacePending(pending, new ChatMessage

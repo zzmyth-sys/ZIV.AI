@@ -52,18 +52,9 @@ public sealed partial class EditSession
             return;
         }
 
-        var updated = new EditNode
+        var updated = node with
         {
-            NodeId = node.NodeId,
-            ParentNodeId = node.ParentNodeId,
-            ImagePath = node.ImagePath,
-            ImagePaths = node.ImagePaths,
             UsedImagePaths = NormalizeImages(imagePaths, null),
-            Command = node.Command,
-            CreatedAt = node.CreatedAt,
-            Crop = node.Crop,
-            Mask = node.Mask,
-            Rerun = node.Rerun,
         };
 
         Nodes[nodeId] = updated;

@@ -173,6 +173,7 @@ internal sealed partial class FlowRunner
             });
 
             var elapsed = stopwatch.Elapsed;
+            _writer.SetNodeDurationMs(nodeId, (int)elapsed.TotalMilliseconds);
 
             // Swap the image into the same bubble (same position) and refresh the history
             // list. Do NOT rebuild the chat: that would clear and re-add every bubble.

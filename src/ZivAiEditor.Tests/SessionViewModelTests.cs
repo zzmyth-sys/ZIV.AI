@@ -728,6 +728,36 @@ public class SessionViewModelTests
     }
 
     [Fact]
+    public void RebuildContext_Shows_Persisted_Duration()
+    {
+        var session = new EditSession();
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        var node = session.AppendNode(null, Output, "/inpaint");
+        session.SetNodeDurationMs(node.NodeId, 12345);
+
+        vm.RebuildContext();
+
+        Assert.Contains(vm.Messages, m => m.Role == ChatRole.Assistant && m.Text == "12.3秒 完成");
+    }
+
+    [Fact]
+    public void RebuildContext_Without_Duration_Shows_Plain_Complete()
+    {
+        var session = new EditSession();
+        var vm = FlowRunnerHarness.Create(session, session, ParserWithoutFile(), new FakeExecutor(Output));
+        vm.Start(new LaunchOptions { ImagePath = Root });
+        session.AppendNode(null, Output, "/inpaint");
+
+        vm.RebuildContext();
+
+        Assert.Contains(vm.Messages, m => m.Role == ChatRole.Assistant && m.Text == "完成");
+        Assert.DoesNotContain(
+            vm.Messages,
+            m => m.Role == ChatRole.Assistant && m.Text.EndsWith("秒 完成", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void SetNodeCrop_Stores_Crop_Without_Adding_A_Node()
     {
         var session = new EditSession();

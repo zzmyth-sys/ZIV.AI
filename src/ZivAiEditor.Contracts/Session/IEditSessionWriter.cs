@@ -117,4 +117,12 @@ public interface IEditSessionWriter
     /// Unlike <see cref="RemoveSubtree"/>, the start node is removed too.
     /// </summary>
     IReadOnlyList<IEditNode> RemoveNodeAndSubtree(string nodeId);
+
+    /// <summary>
+    /// Sets the end-to-end execution time (milliseconds) of one node (Step 9C.21). Like the
+    /// crop / mask / re-run snapshot it is a node property — the node is rebuilt in place with
+    /// its identity / parent / image(s) / command / timestamp / crop / mask / rerun / images
+    /// preserved. A no-op when <paramref name="nodeId"/> is unknown. <c>null</c> clears it.
+    /// </summary>
+    void SetNodeDurationMs(string nodeId, int? durationMs);
 }

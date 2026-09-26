@@ -146,6 +146,7 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
                 Mask = node.Mask,
                 Rerun = node.Rerun,
                 CreatedAt = node.CreatedAt,
+                DurationMs = node.DurationMs,
             };
         }
 
@@ -215,18 +216,10 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
         }
 
         var cropChanged = !CropEquals(node.Crop, crop);
-        var updated = new EditNode
+        var updated = node with
         {
-            NodeId = node.NodeId,
-            ParentNodeId = node.ParentNodeId,
-            ImagePath = node.ImagePath,
-            ImagePaths = node.ImagePaths,
-            UsedImagePaths = node.UsedImagePaths,
-            Command = node.Command,
-            CreatedAt = node.CreatedAt,
             Crop = crop,
             Mask = cropChanged ? null : node.Mask,
-            Rerun = node.Rerun,
         };
 
         Nodes[nodeId] = updated;
@@ -249,18 +242,9 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
             return;
         }
 
-        var updated = new EditNode
+        var updated = node with
         {
-            NodeId = node.NodeId,
-            ParentNodeId = node.ParentNodeId,
-            ImagePath = node.ImagePath,
-            ImagePaths = node.ImagePaths,
-            UsedImagePaths = node.UsedImagePaths,
-            Command = node.Command,
-            CreatedAt = node.CreatedAt,
-            Crop = node.Crop,
             Mask = mask,
-            Rerun = node.Rerun,
         };
 
         Nodes[nodeId] = updated;
@@ -283,17 +267,8 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
             return;
         }
 
-        var updated = new EditNode
+        var updated = node with
         {
-            NodeId = node.NodeId,
-            ParentNodeId = node.ParentNodeId,
-            ImagePath = node.ImagePath,
-            ImagePaths = node.ImagePaths,
-            UsedImagePaths = node.UsedImagePaths,
-            Command = node.Command,
-            CreatedAt = node.CreatedAt,
-            Crop = node.Crop,
-            Mask = node.Mask,
             Rerun = rerun,
         };
 
@@ -317,20 +292,32 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
             return;
         }
 
-        var updated = new EditNode
+        var updated = node with
         {
-            NodeId = node.NodeId,
-            ParentNodeId = node.ParentNodeId,
             ImagePath = newImagePath,
             ImagePaths = new[] { newImagePath },
-            UsedImagePaths = node.UsedImagePaths,
-            Command = node.Command,
-            CreatedAt = node.CreatedAt,
-            Crop = node.Crop,
-            Mask = node.Mask,
-            Rerun = node.Rerun,
         };
 
+        Nodes[nodeId] = updated;
+        if (ReferenceEquals(_rootNode, node))
+        {
+            _rootNode = updated;
+        }
+    }
+
+    /// <summary>
+    /// Sets the end-to-end execution time (milliseconds) of one node (Step 9C.21). The node
+    /// is rebuilt in place with every other field preserved. A no-op when
+    /// <paramref name="nodeId"/> is unknown. <c>null</c> clears it.
+    /// </summary>
+    public void SetNodeDurationMs(string nodeId, int? durationMs)
+    {
+        if (string.IsNullOrEmpty(nodeId) || !Nodes.TryGetValue(nodeId, out var node))
+        {
+            return;
+        }
+
+        var updated = node with { DurationMs = durationMs };
         Nodes[nodeId] = updated;
         if (ReferenceEquals(_rootNode, node))
         {
@@ -548,52 +535,4 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
 
         return depth;
     }
-}
-
-/// <summary>One executed edit in the session DAG (INTERACTION.md §3).</summary>
-public sealed class EditNode : IEditNode
-{
-    public string NodeId { get; init; } = Guid.NewGuid().ToString("N");
-
-    public string? ParentNodeId { get; init; }
-
-    /// <summary>The output image produced by this node (always a new file — Z24).</summary>
-    public string ImagePath { get; init; } = "";
-
-    /// <summary>
-    /// The node's image pack (Step 9C.10, non-empty for a valid node): the root node carries
-    /// the imported image(s), an edit node carries its single output (<see cref="ImagePath"/>
-    /// is always <c>ImagePaths[0]</c>). Normalized by <c>EditSession</c> at insertion.
-    /// </summary>
-    public IReadOnlyList<string> ImagePaths { get; init; } = Array.Empty<string>();
-
-    /// <summary>
-    /// The ordered pipeline images this edit consumed — <c>image1</c>, <c>image2</c>, … with
-    /// the main image first (Step 9C.10); empty for the root node. Persisted so a re-run can
-    /// reproduce the <c>&lt;imageN&gt;</c> mapping.
-    /// </summary>
-    public IReadOnlyList<string> UsedImagePaths { get; init; } = Array.Empty<string>();
-
-    /// <summary>The user input that produced this node (shown in the history list).</summary>
-    public string Command { get; init; } = "";
-
-    /// <summary>
-    /// The node's intrinsic crop (Step 9C.6-B); <c>null</c> when uncropped. At most one
-    /// per node — re-adjusting replaces it, never appends a node.
-    /// </summary>
-    public CropSpec? Crop { get; init; }
-
-    /// <summary>
-    /// The node's hand-drawn mask (Step 9C.7); <c>null</c> when unmasked. At most one per
-    /// node — re-drawing replaces it, never appends a node. Cleared when the crop changes.
-    /// </summary>
-    public MaskSpec? Mask { get; init; }
-
-    /// <summary>
-    /// The node's re-run snapshot (Step 9C.8-A); <c>null</c> when the edit carried neither
-    /// a UI resolution nor reference images. At most one per node — replaced in place.
-    /// </summary>
-    public RerunSpec? Rerun { get; init; }
-
-    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.Now;
 }
