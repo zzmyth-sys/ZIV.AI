@@ -2,7 +2,33 @@ import logging
 import os
 import sys
 
-COMFY_ROOT = r"D:\devlop\ZIV.AI\Comfyui\ComfyUI"
+# ---- ComfyUI 源码树（in-process 管线的根）----
+# 优先级：
+#   1) env ZIV_AI_COMFY_ROOT（settings.ini [backend] comfy_root）。
+#   2) 开发默认路径（GitHub 收尾步统一清理）。
+#   3) 从 python_exe（= 正在运行的解释器 sys.executable）反推 <exe 目录>/../ComfyUI。
+# 三者都无效时返回配置值 / 默认值；由 model_loader.prepare_environment 抛可读异常。
+_COMFY_ROOT_DEV_DEFAULT = r"D:\devlop\ZIV.AI\Comfyui\ComfyUI"
+
+
+def _resolve_comfy_root():
+    configured = (os.environ.get("ZIV_AI_COMFY_ROOT") or "").strip()
+    for candidate in (configured, _COMFY_ROOT_DEV_DEFAULT):
+        if candidate and os.path.isdir(candidate):
+            return candidate
+
+    # 反推：标准 ComfyUI 便携版布局 <便携根>/python_embeded/python.exe + <便携根>/ComfyUI
+    if sys.executable:
+        derived = os.path.abspath(
+            os.path.join(os.path.dirname(sys.executable), os.pardir, "ComfyUI")
+        )
+        if os.path.isdir(derived):
+            return derived
+
+    return configured or _COMFY_ROOT_DEV_DEFAULT
+
+
+COMFY_ROOT = _resolve_comfy_root()
 
 MODEL_ROOT = r"C:\AI\ComfyUI_PIC\ComfyUI\models"
 

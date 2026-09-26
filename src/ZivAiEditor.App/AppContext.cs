@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using ZivAiEditor.Agent.Execution;
@@ -157,7 +158,7 @@ internal sealed class AppContext : IDisposable
         var settings = shell.LoadSettings();
 
         // R-4: grouped by domain (backend → tools → agent → llm → persistence → imaging).
-        var (backend, client) = BuildBackend(settings);
+        var (backend, client) = BuildBackend(settings, shell.TemplateDirectory);
         var (tools, executionQueue) = BuildTools(client);
         var (commandParser, commandTemplates, session, executor, modelProfiles) =
             BuildAgent(shell.TemplateDirectory, tools, executionQueue);
@@ -172,7 +173,9 @@ internal sealed class AppContext : IDisposable
     }
 
     /// <summary>Backend domain: the Python process manager and the IPC client over it.</summary>
-    private static (PythonProcessManager Backend, IpcInferenceClient Client) BuildBackend(BackendSettings settings)
+    private static (PythonProcessManager Backend, IpcInferenceClient Client) BuildBackend(
+        BackendSettings settings,
+        string templateDirectory)
     {
         var options = new PythonBackendOptions
         {
@@ -180,6 +183,7 @@ internal sealed class AppContext : IDisposable
             PythonExe = settings.PythonExe,
             Script = settings.Script,
             AutoRestartEnabled = true,
+            Environment = BuildBackendEnvironment(settings, templateDirectory),
             // Step 9C.6-D diagnostic: persist the backend log under the program directory
             // (Z14) so the submit resolution / errors survive the in-memory capture.
             LogFilePath = Path.Combine(System.AppContext.BaseDirectory, "_cache", "backend.log"),
@@ -188,6 +192,77 @@ internal sealed class AppContext : IDisposable
         var backend = new PythonProcessManager(options);
         var client = new IpcInferenceClient(backend, ownsProcess: true);
         return (backend, client);
+    }
+
+    /// <summary>
+    /// Assembles the backend process environment. Only a non-empty model path produces a key
+    /// (B3), so Python's own defaults stay in effect when a path is unset / cleared. The
+    /// registry paths (T1) are injected only when the file exists, which keeps C# and Python
+    /// reading the <b>same</b> <c>models.json</c> / <c>loras.json</c>; a missing file is logged
+    /// (Debug) instead of silently letting Python fall back. Pure and unit-testable.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> BuildBackendEnvironment(
+        BackendSettings settings,
+        string templateDirectory)
+    {
+        var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        AddIfSet(environment, "ZIV_AI_DIT_PATH", settings.DitPath);
+        AddIfSet(environment, "ZIV_AI_TE_PATH", settings.TePath);
+        AddIfSet(environment, "ZIV_AI_VAE_PATH", settings.VaePath);
+        AddRegistryIfPresent(
+            environment,
+            "ZIV_AI_MODELS_REGISTRY",
+            Path.Combine(templateDirectory, "models.json"));
+        AddRegistryIfPresent(
+            environment,
+            "ZIV_AI_LORA_REGISTRY",
+            Path.Combine(templateDirectory, "loras.json"));
+        AddDirectoryIfPresent(environment, "ZIV_AI_COMFY_ROOT", settings.ComfyRoot);
+        return environment;
+    }
+
+    private static void AddIfSet(Dictionary<string, string> environment, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            environment[key] = value;
+        }
+    }
+
+    private static void AddRegistryIfPresent(
+        Dictionary<string, string> environment,
+        string key,
+        string path)
+    {
+        if (File.Exists(path))
+        {
+            environment[key] = path;
+        }
+        else
+        {
+            Debug.WriteLine($"[backend] registry not found, env not injected: {path}");
+        }
+    }
+
+    private static void AddDirectoryIfPresent(
+        Dictionary<string, string> environment,
+        string key,
+        string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            // Unset -> let Python fall back to its default / python_exe-derived ComfyUI root.
+            return;
+        }
+
+        if (Directory.Exists(value))
+        {
+            environment[key] = value;
+        }
+        else
+        {
+            Debug.WriteLine($"[backend] directory not found, env not injected: {key}={value}");
+        }
     }
 
     /// <summary>Tools domain: the registry plus the single serial execution queue (Z18).</summary>

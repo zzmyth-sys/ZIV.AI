@@ -149,6 +149,112 @@ internal sealed class ShellService : IShellContext, IDisposable
         return file?.TryGetLocalPath();
     }
 
+    /// <summary>
+    /// Opens <paramref name="path"/> in Explorer, creating the directory first when missing.
+    /// Best effort: a failure is logged and swallowed (the settings window must not crash).
+    /// </summary>
+    public void OpenFolder(string path)
+    {
+        try
+        {
+            if (!Directory.Exists(path))
+            {
+                Directory.CreateDirectory(path);
+            }
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"\"{path}\"",
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[shell] open folder failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Picks one folder, optionally starting in <paramref name="suggestedDirectory"/> when it
+    /// exists. Returns the chosen local path, or <c>null</c> when cancelled / unavailable.
+    /// </summary>
+    public async Task<string?> PickFolderAsync(
+        Window owner,
+        string title,
+        string? suggestedDirectory = null,
+        CancellationToken ct = default)
+    {
+        var storage = owner.StorageProvider;
+        if (storage is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            IStorageFolder? start = null;
+            if (!string.IsNullOrWhiteSpace(suggestedDirectory) && Directory.Exists(suggestedDirectory))
+            {
+                start = await storage.TryGetFolderFromPathAsync(new Uri(suggestedDirectory));
+            }
+
+            var folders = await storage.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = title,
+                AllowMultiple = false,
+                SuggestedStartLocation = start,
+            });
+
+            return folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[shell] pick folder failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Picks one file, optionally starting in <paramref name="suggestedDirectory"/> when it
+    /// exists. Returns the chosen local path, or <c>null</c> when cancelled / unavailable.
+    /// </summary>
+    public async Task<string?> PickFileAsync(
+        Window owner,
+        string title,
+        string? suggestedDirectory = null,
+        CancellationToken ct = default)
+    {
+        var storage = owner.StorageProvider;
+        if (storage is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            IStorageFolder? start = null;
+            if (!string.IsNullOrWhiteSpace(suggestedDirectory) && Directory.Exists(suggestedDirectory))
+            {
+                start = await storage.TryGetFolderFromPathAsync(new Uri(suggestedDirectory));
+            }
+
+            var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = title,
+                AllowMultiple = false,
+                SuggestedStartLocation = start,
+            });
+
+            return files.Count > 0 ? files[0].TryGetLocalPath() : null;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[shell] pick file failed: {ex.Message}");
+            return null;
+        }
+    }
+
     /// <summary>Shows a yes / no confirmation. Only an explicit "yes" returns <c>true</c>.</summary>
     public async Task<bool> ConfirmAsync(Window owner, string message)
         => await ConfirmDialog.ShowAsync(owner, message) == true;

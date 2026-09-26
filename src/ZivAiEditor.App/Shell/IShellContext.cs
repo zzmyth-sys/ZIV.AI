@@ -1,4 +1,7 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Avalonia.Controls;
 using ZivAiEditor.UI;
 
 namespace ZivAiEditor.App;
@@ -19,4 +22,21 @@ internal interface IShellContext
 
     /// <summary>Raised for each request handed over by a later process (single-instance pipe).</summary>
     event Action<LaunchOptions>? LaunchRequested;
+
+    /// <summary>Opens <paramref name="path"/> in the OS file manager; creates it first if missing.</summary>
+    void OpenFolder(string path);
+
+    /// <summary>Picks one folder, or <c>null</c> when cancelled / unavailable.</summary>
+    Task<string?> PickFolderAsync(
+        Window owner,
+        string title,
+        string? suggestedDirectory = null,
+        CancellationToken ct = default);
+
+    /// <summary>Picks one file, or <c>null</c> when cancelled / unavailable.</summary>
+    Task<string?> PickFileAsync(
+        Window owner,
+        string title,
+        string? suggestedDirectory = null,
+        CancellationToken ct = default);
 }

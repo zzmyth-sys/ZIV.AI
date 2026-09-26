@@ -330,3 +330,52 @@
 - **`Template/commands.json` 的 `quick` 字段**：`quick:true` 的条目（本次为 `/去水印` `/去背景` `/全景`）
   由 ZIV 快捷菜单读取（授权只读通道）；`shortcut_label` 为菜单显示名，缺省回退到 `name`。
   `CommandParser.BuiltIn.cs` 兜底副本已同步。
+
+## 23. 追加说明：设置功能（SettingsWriter / OpenFolder / SettingsWindow，2026-09-26）
+
+> 编号说明：`## 22.` 已被占用，本节取下一个空闲编号 **23**。
+
+- **settings.ini `[models]`**（非 Contracts，App 内部数据文件）：`dit_path` / `te_path` / `vae_path`（绝对路径，空 = 清除）。
+  `SettingsLoader.Load` → `BackendSettings.DitPath` / `TePath` / `VaePath`（缺省 / 空 → null）。
+- **`SettingsWriter`**（`App/Shell/SettingsWriter.cs`，`internal static`）：`WriteModelPaths` / `WritePythonExe`；
+  共享 `WriteSectionValues`；只改目标键，保留注释 / 其他行 / 顺序；非空值 `Path.GetFullPath` 归一化；
+  原子写（temp + `File.Move(overwrite:true)`）；失败抛 `ApplicationException`。
+- **`IShellContext` 追加**（additive，App/Shell）：`OpenFolder(string)`、
+  `PickFolderAsync(Window, string, string?, CancellationToken)`、`PickFileAsync(Window, string, string?, CancellationToken)`；
+  `ShellService` 实现（打开失败不抛；选择器异常 → null）。
+- **`AppContext.BuildBackendEnvironment(BackendSettings)`**：非空模型路径注入
+  `ZIV_AI_DIT_PATH` / `ZIV_AI_TE_PATH` / `ZIV_AI_VAE_PATH`；空值不注入；`PythonBackendOptions` 类型不变。
+- **A9 默认值清理**：`SettingsLoader` 的 `PythonExe` / `Script` 改为 `Load` 内按程序目录运行时解析；
+  `PythonProcessManager.PythonExe` / `Script` 默认 `string.Empty`；`FindTemplate` 候选改 `settings.ini.template`。
+- **App 层新增（非契约）**：`SettingsWindow.axaml(.cs)`、`MessageDialog.axaml(.cs)`；
+  `MainWindow.PART_BtnSettings`（`IconSettings`）。
+- **债务（A10）**：`COMFY_ROOT` / `REPO_ROOT` 不在本期范围（v1）。
+
+## 24. 追加说明：settings.ini 运行时位置 + Template 同源（2026-09-27）
+
+- **settings.ini 运行时唯一文件 = 程序目录**（Z14）；仓库根 `settings.ini` **不再**是构建拷贝源
+  （`ZivAiEditor.App.csproj` 改为拷贝 `settings.ini.template`）。
+- **首启播种**：程序目录无 `settings.ini` 时，`SettingsLoader.EnsurePresent` 从
+  `settings.ini.template` 播种；程序目录模板直接采纳，祖先回退仍要求 `DOC/FROZEN.md` 守卫。
+- **Template 同源**：`AppContext.BuildBackendEnvironment(BackendSettings, string templateDirectory)`
+  新增注入 `ZIV_AI_MODELS_REGISTRY` / `ZIV_AI_LORA_REGISTRY`（C# `TemplateDirectory`，`File.Exists` 才注入），
+  使 C# 与 Python 读同一份 `models.json` / `loras.json`；Python 零改。
+- **签名变更（App 内部）**：`AppContext.BuildBackend(BackendSettings, string)` /
+  `BuildBackendEnvironment(BackendSettings, string)`；`SettingsLoader.FindTemplate(string)`。
+
+## 25. 追加说明：settings script 行 + 脚本前置校验（2026-09-27）
+
+- `SettingsWriter.WriteScript(settingsPath, scriptPath)`：写 `[backend] script`（键值替换 / 非空绝对化 / 空清键）。
+- `SettingsWindow`「Python 环境」组第二行「main.py 脚本」（`PART_Script` / `PART_BrowseScript`）：
+  预填 `BackendSettings.Script`，保存写入 `[backend] script`。
+- `PythonScriptValidator.Validate`（新文件 `src/ZivAiEditor.Backend/PythonScriptValidator.cs`）：
+  `BuildStartInfo` 前置校验（非空 / 目录存在 / 文件存在），失败抛 `ApplicationException`（可读信息），
+  替代 Win32「目录名称无效」。
+
+## 26. 追加说明：COMFY_ROOT 纳入设置（2026-09-27）
+
+- `SettingsWriter.WriteComfyRoot(settingsPath, comfyRoot)`：写 `[backend] comfy_root`（键值替换 / 非空绝对化 / 空清键）。
+- `SettingsWindow`「Python 环境」第三行「ComfyUI 目录」（`PART_ComfyRoot` / `PART_BrowseComfy`）。
+- `AppContext.BuildBackendEnvironment(settings, templateDirectory)` 注入 `ZIV_AI_COMFY_ROOT`（目录存在才注入）。
+- Python：`config._resolve_comfy_root()`（env `ZIV_AI_COMFY_ROOT` > 开发默认 > `sys.executable` 反推）；
+  `model_loader.prepare_environment` 对无效根抛可读 `RuntimeError`。

@@ -43,13 +43,16 @@ def prepare_environment():
     if _environment_ready:
         return
     root = config.COMFY_ROOT
-    if root and os.path.isdir(root):
-        if root not in sys.path:
-            sys.path.insert(0, root)
-        try:
-            os.chdir(root)
-        except OSError:
-            pass
+    if not root or not os.path.isdir(root):
+        raise RuntimeError(
+            "ComfyUI 源码目录无效：%s。请在设置中配置（[backend] comfy_root）。" % (root,)
+        )
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        os.chdir(root)
+    except OSError:
+        pass
     _apply_runtime_defaults()
     _enable_dynamic_vram()
     vram_probe.install()

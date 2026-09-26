@@ -4,6 +4,7 @@ using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Controls;
 using Xunit;
 using ZivAiEditor.App;
 using ZivAiEditor.Contracts.Enums;
@@ -186,6 +187,24 @@ public class HeadlessQuickRunnerTests
         public event Action<LaunchOptions>? LaunchRequested;
 
         public void Raise(LaunchOptions options) => LaunchRequested?.Invoke(options);
+
+        public void OpenFolder(string path)
+        {
+        }
+
+        public Task<string?> PickFolderAsync(
+            Window owner,
+            string title,
+            string? suggestedDirectory = null,
+            CancellationToken ct = default)
+            => Task.FromResult<string?>(null);
+
+        public Task<string?> PickFileAsync(
+            Window owner,
+            string title,
+            string? suggestedDirectory = null,
+            CancellationToken ct = default)
+            => Task.FromResult<string?>(null);
     }
 
     private sealed class FakeHost : IQuickRunHost

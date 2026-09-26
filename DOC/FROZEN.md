@@ -4931,3 +4931,111 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 新增 `App/Shell/IShellContext.cs`：`BackendSettings LoadSettings();`、`string TemplateDirectory { get; }`、
   `event Action<LaunchOptions>? LaunchRequested`（无头运行期订阅转发请求写 `busy`，见 §B.2/§B.3）。
 - `ShellService` 实现 `IShellContext`；`AppContext.Create(IShellContext shell)`。
+
+## 设置功能（Step 9C.15，日期：2026-09-26）
+
+### settings.ini `[models]` 段契约
+
+- 新增段 `[models]`，键：`dit_path` / `te_path` / `vae_path`（值 = 绝对路径；留空 = 清除）。
+- 读取：`SettingsLoader.Load` 解析为 `BackendSettings.DitPath` / `TePath` / `VaePath`；缺省 / 空 → `null`。
+- 写入：`SettingsWriter.WriteModelPaths(settingsPath, dit, te, vae)`；只替换目标键，其余行 / 注释 / 顺序不变；
+  非空值经 `Path.GetFullPath(value).Trim()` 归一化；空值写 `key =`（清除语义）。
+- `SettingsWriter.WritePythonExe(settingsPath, pythonExe)` 写 `[backend] python_exe`，同一套算法。
+- 原子写：同目录 temp + `File.Move(temp, settingsPath, overwrite:true)`；失败抛 `ApplicationException`（含 inner），
+  `finally` 清理 temp。
+
+### IShellContext 追加端口（additive）
+
+- `void OpenFolder(string path)`：缺失先 `Directory.CreateDirectory`，再 `explorer.exe`；失败仅 `Debug.WriteLine`，不抛。
+- `Task<string?> PickFolderAsync(Window owner, string title, string? suggestedDirectory = null, CancellationToken ct = default)`：
+  `OpenFolderPickerAsync`，返回首个 `TryGetLocalPath()` 或 null；异常 → null。
+- `Task<string?> PickFileAsync(...)`：`OpenFilePickerAsync`，语义同上。
+
+### 后端 env 注入（B3）
+
+- `AppContext.BuildBackendEnvironment(BackendSettings)`：非空 `DitPath` / `TePath` / `VaePath` 分别注入
+  `ZIV_AI_DIT_PATH` / `ZIV_AI_TE_PATH` / `ZIV_AI_VAE_PATH`；`null` / 空 / 空白不注入（Python 侧默认生效）。
+- `PythonBackendOptions.Environment` 类型不变。
+
+### 债务（A10，v1 不在范围）
+
+- `COMFY_ROOT` / `REPO_ROOT` 不注入、不管理；如后续需要，另开 Step，勿在本期扩展。
+
+---
+
+## Template 同源 + settings.ini 运行时位置（2026-09-27，只增）
+
+> 修复两个真问题：① C# 与 Python 的 `Template/` 两套解析不同源；② 首次发布携带开发机路径。
+> 不改 Python 代码（`config.py` / `models.py` / `engine.py` 零改）。
+
+### T1：Template 同源（C# 注入 registry env）
+
+- `AppContext.BuildBackend(BackendSettings, string templateDirectory)`：新增 `templateDirectory` 参数
+  （`AppContext.Create` 传 `shell.TemplateDirectory`）。
+- `AppContext.BuildBackendEnvironment(BackendSettings, string templateDirectory)`：在原有
+  `ZIV_AI_DIT_PATH` / `ZIV_AI_TE_PATH` / `ZIV_AI_VAE_PATH` 之外，追加：
+  - `ZIV_AI_MODELS_REGISTRY` = `Path.Combine(templateDirectory, "models.json")`
+  - `ZIV_AI_LORA_REGISTRY`   = `Path.Combine(templateDirectory, "loras.json")`
+  - **仅当 `File.Exists` 时注入**；不存在则 `Debug.WriteLine` 记录、不注入（不静默）。
+- Python `config.py` 已认这两个 env（`config.py:85-96`），故零改；C# 与 Python 现读同一份 registry。
+
+### B2（方案甲）：首次发布不带开发机路径
+
+- `ZivAiEditor.App.csproj`：移除「拷贝仓库根 `settings.ini` 到输出」条目；改为拷贝
+  `settings.ini.template` 到输出（`Link="settings.ini.template"`，`PreserveNewest`）。
+- 首启播种：程序目录无 `settings.ini` 时，`SettingsLoader.EnsurePresent` 从 `settings.ini.template` 播种。
+- `FindTemplate(string programDirectory)`：**程序目录**的 `settings.ini.template` 直接采纳（无需
+  `DOC/FROZEN.md`）；仅祖先目录回退仍要求 `DOC/FROZEN.md` 守卫（避免误认无关目录）。
+  → 发布布局（无 `DOC/FROZEN.md`）首启也能播种。
+- `publish.ps1`：「保留 `settings.ini`」逻辑不变——已存在的用户那份不被覆盖；首次发布目标无该文件 → 首启生成。
+
+### 挂账
+
+- **bin `Template/*.json` 为构建副本**（csproj `PreserveNewest`）：开发期改仓库根 `Template/` 需 rebuild
+  才进 bin；属开发者习惯，不改。
+- **已关闭**：仓库根 → bin 的 `settings.ini` `PreserveNewest` 时间戳陷阱，随 B2 移除拷贝链而消失。
+
+---
+
+## settings script 配置缺口修复（2026-09-27，只增）
+
+> 根因：发布版 `settings.ini [backend] script` 为空 → 运行时默认推导 `<程序目录>\python\server\main.py`
+> → 该目录不存在 → `PythonProcessManager.BuildStartInfo` 以 `Path.GetDirectoryName(Script)` 为工作目录
+> → `Process.Start` 抛 Win32「目录名称无效」；且设置窗口无 UI 途径配置 script。
+
+### A：设置窗口加 script 行（治本）
+
+- `SettingsWindow.axaml`「Python 环境」组新增第二行「main.py 脚本」（`PART_Script` + `PART_BrowseScript`）。
+- `SettingsWindow.axaml.cs`：`Prefill` 读 `settings.Script`；保存调 `SettingsWriter.WriteScript`；浏览复用
+  `IShellContext.PickFileAsync`（本轮未加 `*.py` 过滤，沿用现有无过滤选择器）。
+- `SettingsWriter.WriteScript(settingsPath, scriptPath)`：写 `[backend] script`，键值替换语义与
+  `WritePythonExe` 一致；非空值 `Path.GetFullPath` 绝对化，空值清键。
+
+### B：PythonProcessManager 前置校验（防御）
+
+- `BuildStartInfo` 起始调用 `PythonScriptValidator.Validate(Options.Script)`（新文件
+  `src/ZivAiEditor.Backend/PythonScriptValidator.cs`）：
+  - 空 → `ApplicationException`「Python 脚本路径未配置。请在设置中配置 main.py 路径（[backend] script）。」
+  - 目录不存在 → 「Python 脚本目录不存在：{dir}。…」（先于文件检查，命中本次根因）
+  - 文件不存在 → 「Python 脚本不存在：{script}。…」
+- 正常路径行为不变；仅脚本无效时以可读异常替代 Win32 报错。
+- 异常不被 `IpcInferenceClient` 吞（`EnsureStartedAsync` 调用处无 try/catch），直达调用方。
+
+### 不做
+
+- 不做「从 `python_exe` 推导 script」；不改 script 空时的运行时默认；不改 `python/**`。
+
+---
+
+## COMFY_ROOT 纳入设置（A10 部分收口，2026-09-27，只增）
+
+- **数据**：`settings.ini [backend] comfy_root`（绝对路径）；空 = 未配置。
+- **C#**：`BackendSettings.ComfyRoot`；`SettingsLoader` 解析 `[backend] comfy_root`；`SettingsWriter.WriteComfyRoot`；
+  `SettingsWindow`「Python 环境」第三行「ComfyUI 目录」（选目录）；`AppContext.BuildBackendEnvironment`
+  仅在目录存在时注入 `ZIV_AI_COMFY_ROOT`（不存在 → Debug、不注入）。
+- **Python**：`config._resolve_comfy_root()` 优先级 = env `ZIV_AI_COMFY_ROOT` > 开发默认 > 从
+  `sys.executable`（= python_exe）反推 `<exe目录>/../ComfyUI`；`model_loader.prepare_environment` 对无效
+  COMFY_ROOT 抛可读 `RuntimeError`（替代 `ModuleNotFoundError`）。
+- **反推与下游依赖**：反推在 `config.py` import 时完成，故 `TE_SPEED_NODE_DIR` / `TAGGER_MODEL_DIR`
+  （config.py:109-122，拼 COMFY_ROOT）随之一致，无冲突。
+- **未做**：`MODEL_ROOT`（config.py:7）仍硬编码；`config.py` 开发默认值保留（GitHub 收尾步统一清）。

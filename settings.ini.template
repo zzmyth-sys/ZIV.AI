@@ -4,8 +4,15 @@
 
 [backend]
 pipe_name = zivai.infer.v1
-python_exe = D:\devlop\ZIV.AI\Comfyui\python_embeded\python.exe
-script = D:\devlop\ZIV.AI\python\server\main.py
+; 由设置窗口填入绝对路径；留空表示未配置（A9：不再硬编码开发机路径）。
+python_exe =
+script =
+
+[models]
+; 模型三件套权重路径（A2）；由设置窗口填入绝对路径，留空表示回退 models.json / 内置默认。
+dit_path =
+te_path =
+vae_path =
 
 ; 规划器（Planner）使用的本地 LLM（llama-server，OpenAI 兼容 /v1/chat/completions）。
 ; 由 LocalLlmClient 读取；未配置时使用内置默认值。

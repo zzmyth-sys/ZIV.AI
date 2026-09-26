@@ -30,10 +30,22 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\..\settings.ini" Link="settings.ini" CopyToOutputDirectory="PreserveNewest" />
+    <!-- B2: ship the seed template, not the repo-root settings.ini (which may hold dev-machine
+         paths). The program-directory settings.ini is created on first launch by
+         SettingsLoader.EnsurePresent. -->
+    <None Include="..\..\settings.ini.template" Link="settings.ini.template" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Template\commands.json" Link="Template\commands.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Template\loras.json" Link="Template\loras.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Template\models.json" Link="Template\models.json" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- ZIV.AI's own backend pipeline ships with the app (first-party, ~125 KB). ComfyUI /
+         python_embeded / model weights are third-party and supplied by the user (RELEASE §2);
+         they are NOT bundled. This makes the default [backend] script
+         (<program>\python\server\main.py) point at a real file. Test scripts are excluded. -->
+    <None Include="..\..\python\server\**\*.py"
+          Exclude="..\..\python\server\test_*.py"
+          Link="python\server\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- App logo (window / title-bar icon). The .ico is the Win32 exe icon. -->

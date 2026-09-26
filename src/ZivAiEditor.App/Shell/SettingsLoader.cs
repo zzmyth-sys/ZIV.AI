@@ -9,9 +9,23 @@ internal sealed class BackendSettings
 {
     public string PipeName { get; init; } = "zivai.infer.v1";
 
-    public string PythonExe { get; init; } = @"D:\devlop\ZIV.AI\Comfyui\python_embeded\python.exe";
+    /// <summary>Resolved at load time from the program directory (A9: no dev-machine default).</summary>
+    public string PythonExe { get; init; } = string.Empty;
 
-    public string Script { get; init; } = @"D:\devlop\ZIV.AI\python\server\main.py";
+    /// <summary>Resolved at load time from the program directory (A9: no dev-machine default).</summary>
+    public string Script { get; init; } = string.Empty;
+
+    /// <summary>DiT weights path (<c>[models] dit_path</c>); null when unset / cleared.</summary>
+    public string? DitPath { get; init; }
+
+    /// <summary>Text-encoder weights path (<c>[models] te_path</c>); null when unset / cleared.</summary>
+    public string? TePath { get; init; }
+
+    /// <summary>VAE weights path (<c>[models] vae_path</c>); null when unset / cleared.</summary>
+    public string? VaePath { get; init; }
+
+    /// <summary>ComfyUI source-tree path (<c>[backend] comfy_root</c>); null when unset / cleared.</summary>
+    public string? ComfyRoot { get; init; }
 
     public LlmPlannerSettings LlmPlanner { get; init; } = new();
 
@@ -79,10 +93,17 @@ internal static class SettingsLoader
 
         var sections = ParseSections(File.Exists(path) ? path : null);
         var backend = Section(sections, "backend");
+        var models = Section(sections, "models");
         var planner = Section(sections, "llm.planner");
         var rewriter = Section(sections, "llm.rewriter");
 
-        var defaults = new BackendSettings();
+        // A9: the built-in backend defaults are resolved from the program directory at
+        // runtime; the property initializers stay empty (no dev-machine absolute path).
+        var defaults = new BackendSettings
+        {
+            PythonExe = Path.Combine(directory, "Comfyui", "python_embeded", "python.exe"),
+            Script = Path.Combine(directory, "python", "server", "main.py"),
+        };
         var plannerDefaults = defaults.LlmPlanner;
         var rewriterDefaults = defaults.LlmRewriter;
         return new BackendSettings
@@ -90,6 +111,10 @@ internal static class SettingsLoader
             PipeName = Get(backend, "pipe_name", defaults.PipeName),
             PythonExe = Get(backend, "python_exe", defaults.PythonExe),
             Script = Get(backend, "script", defaults.Script),
+            DitPath = GetOptional(models, "dit_path"),
+            TePath = GetOptional(models, "te_path"),
+            VaePath = GetOptional(models, "vae_path"),
+            ComfyRoot = GetOptional(backend, "comfy_root"),
             LlmPlanner = new LlmPlannerSettings
             {
                 Endpoint = Get(planner, "endpoint", plannerDefaults.Endpoint),
@@ -120,7 +145,7 @@ internal static class SettingsLoader
             return;
         }
 
-        var template = FindTemplate();
+        var template = FindTemplate(directory);
         if (template is null)
         {
             return;
@@ -139,12 +164,24 @@ internal static class SettingsLoader
         }
     }
 
-    private static string? FindTemplate()
+    /// <summary>
+    /// Locates the <c>settings.ini.template</c> seed. The program-directory template ships with
+    /// the app (csproj content item) and is accepted as-is; when it is absent we walk up the
+    /// parent chain but only trust a directory that also has <c>DOC/FROZEN.md</c> (dev / repo
+    /// checkout), so an unrelated ancestor cannot be mistaken for the project root.
+    /// </summary>
+    private static string? FindTemplate(string programDirectory)
     {
-        var directory = new DirectoryInfo(System.AppContext.BaseDirectory);
+        var direct = Path.Combine(programDirectory, FileName + ".template");
+        if (File.Exists(direct))
+        {
+            return direct;
+        }
+
+        var directory = new DirectoryInfo(programDirectory).Parent;
         while (directory is not null)
         {
-            var candidate = Path.Combine(directory.FullName, FileName);
+            var candidate = Path.Combine(directory.FullName, FileName + ".template");
             if (File.Exists(candidate) && File.Exists(Path.Combine(directory.FullName, "DOC", "FROZEN.md")))
             {
                 return candidate;

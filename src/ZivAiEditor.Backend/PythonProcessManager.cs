@@ -19,9 +19,10 @@ public sealed class PythonBackendOptions
 {
     public string PipeName { get; init; } = "zivai.infer.v1";
 
-    public string PythonExe { get; init; } = @"D:\devlop\ZIV.AI\Comfyui\python_embeded\python.exe";
+    // A9: no dev-machine default; AppContext always supplies real values and tests set them.
+    public string PythonExe { get; init; } = string.Empty;
 
-    public string Script { get; init; } = @"D:\devlop\ZIV.AI\python\server\main.py";
+    public string Script { get; init; } = string.Empty;
 
     public string? WorkingDirectory { get; init; }
 
@@ -498,6 +499,10 @@ public sealed class PythonProcessManager : IDisposable, IAsyncDisposable
 
     private ProcessStartInfo BuildStartInfo()
     {
+        // B: validate the script up front so a missing / misconfigured main.py produces a
+        // readable error instead of the Win32 "directory name is invalid" from Process.Start.
+        PythonScriptValidator.Validate(Options.Script);
+
         var startInfo = new ProcessStartInfo
         {
             FileName = Options.PythonExe,

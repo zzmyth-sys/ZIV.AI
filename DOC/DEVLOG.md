@@ -6567,3 +6567,36 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 ### 备注
 
 - `session.json` **version 仍为 2**；未改 `IInferenceClient` / IPC / Python；未 commit。
+
+## [Step 9C.15] - 2026-09-26：设置功能（独立设置窗口 + settings.ini [models] + env 注入）
+
+> 编号说明：`[Step 9C.14]` 已被占用，本节取下一个空闲编号 **9C.15**。
+
+### 目标
+
+- 新增模态「设置」窗口：模型三件套（DiT / TE / VAE）、Python 环境、打开 Template 文件夹。
+- `settings.ini` 新增 `[models]` 段；保存只改目标键（注释 / 其他行原样保留），原子写。
+- 后端 env 注入：`ZIV_AI_DIT_PATH` / `ZIV_AI_TE_PATH` / `ZIV_AI_VAE_PATH`（空值不注入）。
+
+### 变更
+
+- 新增 `App/Shell/SettingsWriter.cs`（`internal static`，键值替换 + temp + `File.Move(overwrite:true)`；失败抛 `ApplicationException`）。
+- `SettingsLoader`：`BackendSettings` 增 `DitPath` / `TePath` / `VaePath`（缺省 null）；解析 `[models]`；
+  `FindTemplate` 候选改为 `settings.ini.template`（保留 `DOC/FROZEN.md` 守卫）。
+- A9 清理：`SettingsLoader` 的 `PythonExe` / `Script` 默认值改为在 `Load` 内按程序目录运行时解析；
+  `PythonProcessManager` 默认值改 `string.Empty`；`settings.ini.template` 去掉开发机绝对路径。
+- `AppContext.BuildBackendEnvironment(BackendSettings)`（纯函数，单测覆盖）装配 env。
+- `IShellContext` 追加 `OpenFolder` / `PickFolderAsync` / `PickFileAsync`；`ShellService` 实现。
+- 新增模态 `SettingsWindow.axaml(.cs)` + `MessageDialog.axaml(.cs)`（`ShowInTaskbar=false`，Owner 模态）。
+- `MainWindow` 右上角新增 `PART_BtnSettings`（`IconSettings` gear，`User` role）打开设置。
+
+### 验证（Z29 / Z30：非 GPU 过滤，无 Python）
+
+- `dotnet build src/ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test src/ZivAiEditor.Tests/ZivAiEditor.Tests.csproj -c Release --filter "FullyQualifiedName!~Ipc"`
+  → **608 通过 / 0 失败**（594 基线 + 14 新增）。
+
+### 备注
+
+- 未改 Contracts / `python/server`；未编辑运行期 `settings.ini`；未 commit。
+- 债务（A10）：`COMFY_ROOT` / `REPO_ROOT` 不在本期范围（v1）。

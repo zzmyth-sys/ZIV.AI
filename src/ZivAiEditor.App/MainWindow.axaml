@@ -40,9 +40,14 @@
       </StackPanel>
     </c:ChromeTitleBar.LeftContent>
     <c:ChromeTitleBar.RightContent>
-      <Button x:Name="PART_BtnToggleSidebar" Classes="tool" ToolTip.Tip="历史节点">
-        <Path Classes="toolIcon" Data="{StaticResource IconSidebar}" />
-      </Button>
+      <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+        <Button x:Name="PART_BtnToggleSidebar" Classes="tool" ToolTip.Tip="历史节点">
+          <Path Classes="toolIcon" Data="{StaticResource IconSidebar}" />
+        </Button>
+        <Button x:Name="PART_BtnSettings" Classes="tool" ToolTip.Tip="设置">
+          <Path Classes="toolIcon" Data="{StaticResource IconSettings}" />
+        </Button>
+      </StackPanel>
     </c:ChromeTitleBar.RightContent>
     <c:ChromeTitleBar.Body>
       <!-- Two columns: the history pane spans the full height (title bar to the

@@ -63,3 +63,53 @@
   内置 `commands.json` / `loras.json` / `models.json` 由 `dotnet publish` 覆盖为最新。
 - **发布前核查**：确认发布流程后 `Template/commands.user.json`（若存在）仍在。
 - 挂账：**Z-021**（T5 UI / T3 接线，见 `DOC/FROZEN.md`）。
+
+## 9. 首次发布不带开发机路径（B2，2026-09-27，只增）
+
+- **现状（B2 后）**：`ZivAiEditor.App.csproj` 不再拷贝仓库根 `settings.ini`；改为拷贝
+  `settings.ini.template`。程序目录 `settings.ini` 由 `SettingsLoader.EnsurePresent` 首启播种。
+- **发布前核查**：发布到全新目录后，确认发布目录内 `settings.ini` **不含** `D:\devlop\...` 开发机路径
+  （方案甲下首次发布应**无** `settings.ini`，启动 App 后才由模板生成）。
+- **发布前核查**：Python 进程环境含 `ZIV_AI_MODELS_REGISTRY` / `ZIV_AI_LORA_REGISTRY`，指向程序目录
+  `Template/` 下的同名文件（Template 同源）。
+- **发布前核查**：`publish.ps1` 仍保留已存在的用户 `settings.ini`（重复发布不覆盖用户配置）。
+
+## 10. publish.ps1 修复记录（P1/P2/P3，2026-09-27，只增）
+
+- **P1 锁检测**：`[System.IO.File]::Open` 改为 `FileAccess.Read` + `FileShare.None`；`catch` 收窄为
+  `catch [System.IO.IOException]`（仅「共享冲突 = 文件被占用」），其它异常（`UnauthorizedAccessException`
+  等）不再被误报为「正在运行」，原样冒泡暴露真实原因。
+- **P2-1 stale settings.ini 警告（不删文件）**：发布前读 `<OutputDir>/settings.ini`，若路径键
+  （`python_exe` / `script` / `dit_path` / `te_path` / `vae_path`）的值以 `D:\devlop\` 开头 →
+  `Write-Warning`；**不删文件**。
+  - **升级发布需手删**：已有发布目录若残留带开发机路径的 `settings.ini`，脚本只警告、不清理；
+    如需干净发布，请**手动删除该 `settings.ini`** 后重新发布（首启会由模板重新播种）。
+- **P2-2 内置 json 强制刷新**：csproj 以 `CopyToOutputDirectory=PreserveNewest` 拷贝，仅在源比目标新时覆盖；
+  发布前显式删除 `<OutputDir>/Template/{commands,loras,models}.json` 以强制刷新
+  （保留 `commands.user.json` 用户覆盖）。
+- **P2-3 白名单**：清理保留条件新增 `settings.ini.template`，不再依赖「csproj 增量拷贝一定执行」。
+- **P3 引号**：`dotnet publish` 改为 `& dotnet publish "$project" ... -o "$OutputDir" ...`（调用运算符 +
+  参数双引号），消除含空格路径的分词风险。
+
+## 11. 发布包含 ZIV 自有后端管线（2026-09-27，只增）
+
+- **背景**：§2「不打包后端」指的是**第三方**部分（ComfyUI / `python_embeded` / 模型权重）；
+  ZIV **自有**的后端管线（`python/server/*.py`，约 125 KB，第一方代码）**必须随发布**，
+  否则用户拿不到后端（不能要用户自己开发）。
+- **改动**：`ZivAiEditor.App.csproj` 新增内容项：
+  `..\..\python\server\**\*.py` → `Link="python\server\%(RecursiveDir)%(Filename)%(Extension)"`，
+  `Exclude="..\..\python\server\test_*.py"`，`CopyToOutputDirectory=PreserveNewest`。
+- **效果**：构建 / 发布输出含 `python\server\main.py`（+ 运行时模块，排除 `test_*.py` / `__pycache__`），
+  使 A9 默认 `[backend] script = <程序目录>\python\server\main.py` 指向真实文件。
+- **仍由用户自取（第三方，写依赖说明即可）**：ComfyUI 便携版、`python_embeded`、模型权重。
+- **发布前核查**：发布目录含 `python\server\main.py` 及运行时 `.py`；不含 `test_*.py`。
+- **遗留（A10）**：`python/server/config.py:5 COMFY_ROOT` 仍硬编码开发机路径；用自取的 ComfyUI 时需可配
+  （另开 Step）。
+
+## 12. COMFY_ROOT 纳入设置（硬编码残留更新，2026-09-27，只增）
+
+- **§1 路径硬编码状态更新**：`python/server/config.py:5 COMFY_ROOT` 已改为**可配**
+  （`[backend] comfy_root` → env `ZIV_AI_COMFY_ROOT`，含 `python_exe` 反推回退）；
+  开发默认值暂留（GitHub 收尾步统一清）。
+- **仍未解**：`config.py:7 MODEL_ROOT`（`C:\AI\ComfyUI_PIC\...`）仍硬编码；`COMFY_ROOT` 开发默认值仍在。
+- **发布前核查**：设置窗口可配「ComfyUI 目录」；无效 COMFY_ROOT 时 Python 报可读异常（非 ModuleNotFoundError）。
