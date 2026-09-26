@@ -1,5 +1,6 @@
 import ctypes
 import logging
+import os
 import subprocess
 import threading
 import uuid
@@ -13,6 +14,9 @@ import pipeline
 import pipeline_hooks
 
 _LOG = logging.getLogger("zivai.server")
+
+# D6 diag (observation only): opt-in via ZIV_AI_DIAG=1 (inherited from the C# parent process).
+_DIAG = os.environ.get("ZIV_AI_DIAG") == "1"
 
 INTERRUPT_EXCEPTION_NAME = "InterruptProcessingException"
 
@@ -153,6 +157,8 @@ def _run_submit(frame_io, task_id, payload, op="inpaint"):
         _configure_pre_sampling_hooks(payload)
         if payload.get("resolution"):
             _LOG.info("submit resolution payload: %s", payload.get("resolution"))
+        if _DIAG:
+            _LOG.info("diag D6 image_path=%s mask_path=%s", payload.get("image_path"), payload.get("mask_path"))
 
         try:
             # Step 8-2: the requested model id (None / unknown -> default) selects the registry entry.

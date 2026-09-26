@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "source": "WD\\360.jpg",
+  "output": "D:\\devlop\\ZIV.AI\\_test_step2\\panorama_180.png",
+  "width": 2048,
+  "height": 1024,
+  "scene": "outdoors, day, tree, building, real world location",
+  "prompt": "Generate a 180-degree equirectangular panorama (front hemisphere only, 2:1 aspect ratio) from the input perspective image. The scene is outdoors, day, tree, building, real world location. Use a true equirectangular projection covering 180 degrees horizontal and 180 degrees vertical. The left and right edges should be at the 90-degree-left and 90-degree-right extremes of the front hemisphere.",
+  "steps": 30,
+  "seed": 42,
+  "denoise": 1.0,
+  "wall_s": 34.79,
+  "pipeline_ms": 34769,
+  "peak_alloc_mb": 2512.5,
+  "smi_used_mb": 8367,
+  "seam_lr": 21.627,
+  "seam_tb": 58.335
+}

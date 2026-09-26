@@ -1,0 +1,70 @@
+{
+  "image": "WD\\360.jpg",
+  "threshold": 0.5,
+  "vocab": {
+    "keep": 1284,
+    "block": 7421,
+    "source": "360_scene_vocab.json (Danbooru tag groups + WD14 categories)"
+  },
+  "raw": [
+    "1girl",
+    "solo",
+    "long hair",
+    "black hair",
+    "standing",
+    "outdoors",
+    "shoes",
+    "day",
+    "tree",
+    "white footwear",
+    "building",
+    "scenery",
+    "wide shot",
+    "real world location"
+  ],
+  "clean": [
+    "1girl",
+    "solo",
+    "long hair",
+    "black hair",
+    "standing",
+    "outdoors",
+    "shoes",
+    "day",
+    "tree",
+    "white footwear",
+    "building",
+    "scenery",
+    "wide shot",
+    "real world location"
+  ],
+  "whitelist": [
+    "outdoors",
+    "day",
+    "tree",
+    "building",
+    "real world location"
+  ],
+  "fallback": [
+    "white footwear"
+  ],
+  "used_fallback": false,
+  "dropped": [
+    "1girl",
+    "solo",
+    "long hair",
+    "black hair",
+    "standing",
+    "shoes",
+    "white footwear",
+    "scenery",
+    "wide shot"
+  ],
+  "scene": [
+    "outdoors",
+    "day",
+    "tree",
+    "building",
+    "real world location"
+  ]
+}

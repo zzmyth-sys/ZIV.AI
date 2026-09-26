@@ -4824,3 +4824,24 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **确认框归属**：view 层（MainWindow），非 FlowRunner —— 后者按类契约不引用 shell / view。
 - **清理范围**：App 临时区 crop/mask + 项目副本（含 refs）；**不动**用户目录输出图（Z24）。
 - **无 IPC / Python 改动**；`FlowRunner` ctor 追加可选 `IImagingService? imaging`（末位，默认 null，既有调用不变）。
+
+---
+
+## 功能登记（预览平移外扩 + 回弹，2026-09-26）
+
+> 契约**尾部追加**，不改既有签名；Z8 单文件 < 600。**无 Contracts 变化。**
+
+| 类型 | 位置 | 说明 |
+|---|---|---|
+| `ImageViewModel.MarginX` / `MarginY`（UI 追加） | `ZivAiEditor.UI/Imaging/ImageViewModel.cs` | 溢出轴 `scaled × 0.5`，否则 0；渲染层复用 |
+| `ImageViewModel.MaxOffsetX` / `MaxOffsetY`（UI 追加） | `ZivAiEditor.UI/Imaging/ImageViewModel.cs` | 舒适区上界 `Max(0, scaled - viewport)` |
+| `ImageViewModel.SetOffset(x,y)`（UI 追加） | `ZivAiEditor.UI/Imaging/ImageViewModel.cs` | 动画写 offset，清 `_pendingFit` 后重钳 |
+| `ImageViewModel.ClampOffset`（改实现） | `ZivAiEditor.UI/Imaging/ImageViewModel.cs` | 范围扩为 `[-margin, Max + margin]` |
+| `ImagePreview.ApplyOffsetToBox`（App 追加） | `ZivAiEditor.App/Controls/ImagePreview.axaml.cs` | 先扩 `AdvancedImageBox` ScrollBar 范围再设 Offset |
+| `ImagePreview.SnapBack.cs`（新，partial） | `ZivAiEditor.App/Controls/` | 150ms ease-out cubic 回弹 + 取消钩子 |
+| `ImageViewModelTests`（改断言 / 新增） | `ZivAiEditor.Tests/ImageViewModelTests.cs` | 扩展边界 + margin 边界 + `SetOffset` |
+
+- **不改**：`OriginX/Y` 居中逻辑、`ViewportToImage` / `ImageToViewport`、`FitWithMargin` / `RestoreView`、
+  `ImagePreview.Pointer.cs` 平移入口、`ImagePreview.Crop.cs`。
+- **渲染层约束**：UVtools 5.0.1（commit `60baad40`）`UpdateViewPort` 为 private 且 ScrollBar 会 coerce offset；
+  故须在 `ApplyModel` 侧扩范围，并在 `Dispatcher.Post` / resize 后重应用。

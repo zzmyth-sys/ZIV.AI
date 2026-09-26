@@ -1,3 +1,4 @@
+using ZivAiEditor.Contracts.Diagnostics;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Session;
 
@@ -467,7 +468,20 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
 
     /// <summary>The image a node feeds the pipeline: its crop result, else its output.</summary>
     private static string PipelinePath(IEditNode node)
-        => node.Crop is { ResultImagePath.Length: > 0 } crop ? crop.ResultImagePath : node.ImagePath;
+    {
+        var crop = node.Crop;
+        var hasResult = crop is { ResultImagePath.Length: > 0 };
+        var result = hasResult ? crop!.ResultImagePath : node.ImagePath;
+        if (DiagLog.IsEnabled)
+        {
+            // D1 diag (observation only): which branch was picked and whether the crop file exists.
+            DiagLog.Log(
+                $"D1 PipelinePath node={node.NodeId} {DiagLog.DescribeCrop(crop)} "
+                + $"picked={(hasResult ? "cropResult" : "imagePath")} result={result}");
+        }
+
+        return result;
+    }
 
     /// <summary>True when <paramref name="path"/> is the node's own image or its crop result.</summary>
     private static bool MatchesPath(IEditNode node, string path)

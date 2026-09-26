@@ -1,0 +1,41 @@
+{
+  "source": "WD\\360.jpg",
+  "width": 1920,
+  "height": 1080,
+  "steps": 30,
+  "seed": 42,
+  "denoise": 1.0,
+  "scene_tags": [
+    "outdoors",
+    "day",
+    "tree",
+    "building",
+    "real world location"
+  ],
+  "runs": [
+    {
+      "ok": true,
+      "output": "D:\\devlop\\ZIV.AI\\_test_step2\\360_ab_A.png",
+      "width": 1920,
+      "height": 1072,
+      "wall_s": 35.18,
+      "pipeline_ms": 35151,
+      "peak_alloc_mb": 2466.5,
+      "smi_used_mb": 9826,
+      "variant": "A",
+      "prompt": "Generate a complete 360-degree equirectangular panorama from the input perspective image. Use a true equirectangular projection covering the entire 360-degree horizontal and 180-degree vertical field of view. Keep the scene continuous and seamless."
+    },
+    {
+      "ok": true,
+      "output": "D:\\devlop\\ZIV.AI\\_test_step2\\360_ab_B.png",
+      "width": 1920,
+      "height": 1072,
+      "wall_s": 33.58,
+      "pipeline_ms": 33556,
+      "peak_alloc_mb": 2466.5,
+      "smi_used_mb": 9825,
+      "variant": "B",
+      "prompt": "Generate a complete 360-degree equirectangular panorama from the input perspective image. Use a true equirectangular projection covering the entire 360-degree horizontal and 180-degree vertical field of view. Keep the scene continuous and seamless. The scene is outdoors, day, tree, building, real world location."
+    }
+  ]
+}

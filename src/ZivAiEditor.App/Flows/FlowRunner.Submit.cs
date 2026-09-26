@@ -140,6 +140,9 @@ internal sealed partial class FlowRunner
                 // puts the prompt / attachments back into the input (Step 9C.8-B follow-up).
                 _vm.SetLastRunCanceled(true);
                 _vm.RebuildContext();
+                // B: non-error pointer so a canceled submit is not confused with a historical
+                // node's 重新生成 (which re-runs that node's own source).
+                _vm.AddInfo("已取消。输入框内容已恢复，再次发送即可重试。");
                 return false;
             }
 
@@ -155,6 +158,7 @@ internal sealed partial class FlowRunner
         {
             _vm.SetLastRunCanceled(true);
             _vm.RebuildContext();
+            _vm.AddInfo("已取消。输入框内容已恢复，再次发送即可重试。");
             return false;
         }
         catch (Exception ex)

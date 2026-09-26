@@ -1,3 +1,4 @@
+using ZivAiEditor.Contracts.Diagnostics;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Inference;
 
@@ -11,7 +12,14 @@ namespace ZivAiEditor.Backend;
 internal static class IpcSubmitMapper
 {
     public static SubmitRequest BuildSubmitRequest(string requestId, string taskId, EditRequest request)
-        => new(
+    {
+        if (DiagLog.IsEnabled)
+        {
+            // D7 diag (observation only): the actual C# submit payload image_path, to compare with D6.
+            DiagLog.Log($"D7 submitPayload task={taskId} op={request.Op} image_path={request.ImagePath} mask={request.MaskPath}");
+        }
+
+        return new SubmitRequest(
             Type: "submit",
             RequestId: requestId,
             TaskId: taskId,
@@ -31,6 +39,7 @@ internal static class IpcSubmitMapper
                 Anchor: request.Anchor,
                 AdditionalImages: request.AdditionalImages,
                 ModelId: request.ModelId));
+    }
 
     /// <summary>Maps the contract <see cref="ResolutionPolicy"/> onto the IPC payload (snake_case).</summary>
     private static ResolutionPayload? MapResolution(ResolutionPolicy? policy)

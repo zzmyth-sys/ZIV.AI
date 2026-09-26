@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using ZivAiEditor.Contracts.Diagnostics;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.UI.Chat;
 
@@ -11,8 +12,8 @@ namespace ZivAiEditor.App.Flows;
 /// <summary>
 /// Re-run flow (module-boundary migration step 6): re-execute a historical node <b>in place</b>
 /// — replace its output image (same <c>NodeId</c>), cascade-delete its descendant subtree, and
-/// remove the stale files. Moved verbatim from <c>SessionViewModel.RerunNodeAsync</c>; the view
-/// model is reached through its public UI-state methods.
+/// remove the stale output files. The node's <b>crop / mask are user edits</b> (9C.6-B / 9C.7),
+/// not re-run by-products, so they are preserved across a re-run.
 /// </summary>
 internal sealed partial class FlowRunner
 {
@@ -20,9 +21,10 @@ internal sealed partial class FlowRunner
     /// Re-runs the edit that produced <paramref name="nodeId"/> <b>in place</b>
     /// (Step 9C.8-A2). The plan rebuild + execution is delegated to
     /// <see cref="IExecutor.RerunAsync"/>; on success the node's output image is replaced
-    /// (same id), its descendant subtree is cascade-deleted, the stale crop / mask are
-    /// cleared, and the app-owned files are removed. On failure nothing is deleted and the
-    /// node stays as it was.
+    /// (same id), its descendant subtree is cascade-deleted, and the stale output files are
+    /// removed. The node's crop / mask are user edits (9C.6-B / 9C.7) and are preserved — a
+    /// re-run changes only the output image. On failure nothing is deleted and the node stays
+    /// as it was.
     /// </summary>
     public async Task<bool> RerunNodeAsync(
         string nodeId,
@@ -57,6 +59,12 @@ internal sealed partial class FlowRunner
         {
             var parentCrop = _session.GetHistory()
                 .FirstOrDefault(n => n.NodeId == node.ParentNodeId)?.Crop;
+            if (DiagLog.IsEnabled)
+            {
+                // D5 diag (observation only): mirror the precheck inputs; the branch below is unchanged.
+                DiagLog.Log($"D5 rerunPrecheck node={node.NodeId} parent={node.ParentNodeId} {DiagLog.DescribeCrop(parentCrop)}");
+            }
+
             if (parentCrop is null || !parentCrop.IsOutpaint())
             {
                 _vm.AddHint("「/扩图」重跑失败：源节点已无外扩裁切");
@@ -121,14 +129,13 @@ internal sealed partial class FlowRunner
 
             var newOutput = state.OutputImagePath!;
             var oldImagePath = node.ImagePath;
-            var oldCrop = node.Crop;
-            var oldMask = node.Mask;
 
             // Cascade-delete the descendants, then replace the node's output in place.
             var removed = _writer.RemoveSubtree(nodeId);
             _writer.ReplaceNodeImage(nodeId, newOutput);
-            _writer.SetNodeCrop(nodeId, null);
-            _writer.SetNodeMask(nodeId, null);
+            // Crop / mask are user edits (9C.6-B / 9C.7): a re-run must not clear them. Their
+            // coordinates may no longer match the new output size; that is validated on the
+            // next send (out of scope here) rather than silently dropped.
 
             // If the current node was inside the subtree, re-point it at the replaced node.
             if (string.Equals(currentBefore, nodeId, StringComparison.Ordinal)
@@ -143,7 +150,8 @@ internal sealed partial class FlowRunner
             await Task.Run(() =>
             {
                 // Project copies: descendants fully (incl. refs), the replaced node's stale
-                // image / crop / mask (its reference copies are kept for continued re-runs).
+                // output image (its crop / mask / reference copies are kept for continued
+                // re-runs — the crop / mask are user edits, not re-run by-products).
                 if (descendantIds.Length > 0)
                 {
                     cleaner?.Invoke(sessionId, descendantIds, true);
@@ -152,9 +160,8 @@ internal sealed partial class FlowRunner
                 cleaner?.Invoke(sessionId, new[] { nodeId }, false);
 
                 // App-owned temp / output files. External user reference images are never
-                // deleted (Z24): only the project copies above are removed.
-                ChatFlowRules.DeleteArtifact(_session, oldCrop?.ResultImagePath);
-                ChatFlowRules.DeleteArtifact(_session, oldMask?.MaskImagePath);
+                // deleted (Z24). The replaced node's crop / mask files are kept (preserved
+                // user edits); only the old output image and the deleted subtree are removed.
                 foreach (var child in removed)
                 {
                     ChatFlowRules.DeleteArtifact(_session, child.ImagePath);

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using ZivAiEditor.Contracts.Diagnostics;
 using ZivAiEditor.Contracts.Enums;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Session;
@@ -127,11 +128,32 @@ public sealed class Executor : IExecutor
         EditPlan plan;
         try
         {
+            if (DiagLog.IsEnabled)
+            {
+                // D4 diag (observation only): current before / after NavigateTo(parent), at parse, after restore.
+                DiagLog.Log($"D4 rerun begin node={node.NodeId} saved={saved} parent={node.ParentNodeId}");
+            }
+
             _writer.NavigateTo(node.ParentNodeId!);
+            if (DiagLog.IsEnabled)
+            {
+                DiagLog.Log($"D4 afterNavigate current={_session.CurrentNodeId} parent={node.ParentNodeId}");
+            }
+
             var imageCount = 1 + (node.Rerun?.AdditionalImages.Count ?? 0);
+            if (DiagLog.IsEnabled)
+            {
+                DiagLog.Log($"D4 parse current={_session.CurrentNodeId} command={node.Command}");
+            }
+
             var parsed = await _parser
                 .ParseAsync(node.Command, _session, imageCount, node.Rerun?.Resolution, ct)
                 .ConfigureAwait(false);
+            if (DiagLog.IsEnabled)
+            {
+                DiagLog.Log($"D4 parsed success={parsed.Success} mainImage={parsed.Plan?.MainImagePath}");
+            }
+
             if (!parsed.Success || parsed.Plan is null)
             {
                 throw new InvalidOperationException(
@@ -147,6 +169,11 @@ public sealed class Executor : IExecutor
             if (!string.IsNullOrEmpty(saved))
             {
                 _writer.NavigateTo(saved);
+            }
+
+            if (DiagLog.IsEnabled)
+            {
+                DiagLog.Log($"D4 restored current={_session.CurrentNodeId} saved={saved}");
             }
         }
 

@@ -1,0 +1,12 @@
+{
+  "image": "WD\\360.jpg",
+  "scene_tags": [
+    "outdoors",
+    "day",
+    "tree",
+    "building",
+    "real world location"
+  ],
+  "A": "Generate a complete 360-degree equirectangular panorama from the input perspective image. Use a true equirectangular projection covering the entire 360-degree horizontal and 180-degree vertical field of view. Keep the scene continuous and seamless.",
+  "B": "Generate a complete 360-degree equirectangular panorama from the input perspective image. Use a true equirectangular projection covering the entire 360-degree horizontal and 180-degree vertical field of view. Keep the scene continuous and seamless. The scene is outdoors, day, tree, building, real world location."
+}

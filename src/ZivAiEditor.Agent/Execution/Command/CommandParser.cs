@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ZivAiEditor.Contracts.Diagnostics;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Inference;
 using ZivAiEditor.Contracts.Execution;
@@ -204,6 +205,12 @@ public sealed partial class CommandParser : ICommandParser
         {
             var currentNode = session.GetHistory().FirstOrDefault(n => n.NodeId == session.CurrentNodeId);
             var crop = currentNode?.Crop;
+            if (DiagLog.IsEnabled)
+            {
+                // D3 diag (observation only): mirror the gate inputs; the branch below is unchanged.
+                DiagLog.Log($"D3 gate current={session.CurrentNodeId} {DiagLog.DescribeCrop(crop)} passes={crop is not null && crop.IsOutpaint()}");
+            }
+
             if (crop is null || !crop.IsOutpaint())
             {
                 return Error("「/扩图」需先做裁切外扩（当前节点没有外扩裁切）。", warnings);
@@ -240,6 +247,13 @@ public sealed partial class CommandParser : ICommandParser
 
         var prompt = ApplyTemplate(template, command.Params, effectiveArgs);
         var mainImage = handler == CommandHandler.T2I ? "" : session.GetCurrentPipelineImagePath();
+        if (isOutpaint && DiagLog.IsEnabled)
+        {
+            // D2 diag (observation only): the resolved /扩图 source image + current-node crop.
+            var sourceNode = session.GetHistory().FirstOrDefault(n => n.NodeId == session.CurrentNodeId);
+            DiagLog.Log($"D2 mainImage current={session.CurrentNodeId} {DiagLog.DescribeCrop(sourceNode?.Crop)} mainImage={mainImage}");
+        }
+
         if (string.IsNullOrWhiteSpace(mainImage) && string.IsNullOrWhiteSpace(prompt))
         {
             return Error("No current image and no prompt; cannot build a plan.", warnings);

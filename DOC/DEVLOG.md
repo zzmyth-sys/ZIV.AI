@@ -6037,3 +6037,120 @@ D2/D7 `image_path=parent_crop.png`）。两者图源不同；且重跑成功 `Se
 ### 不做（登记）
 
 - 不做 root 删除入口 / multi-select 删除 / 还原（回收站）；不改 `RerunSpec` / `PipelinePath` / `ChatFlowRules` 回退 / 命令集 / IPC / Python。
+
+---
+
+## [Step 9C.11] - 2026-09-26（普通预览平移外扩 50% + 平滑回弹）
+
+### 目标
+
+普通预览窗口的平移边界从「图片边缘一到视口边就锁死」改为「允许继续拖动外扩
+`scaled × 0.5`，松手后 ~150ms 缓动弹回舒适区」。一次一件；不碰裁切 / 遮罩 / 对比的
+**行为语义**（对比 / 遮罩跟随扩展）；不动契约 / IPC / Python；不新增 NuGet。
+
+### 只读结论（关键）
+
+- `ImageViewModel.ClampOffset`（`ImageViewModel.cs:279-284`，改后 `:300-304`）：原公式
+  `Clamp(offset, 0, Max(0, scaled - viewport))`。
+- 渲染器 `UVtools.AvaloniaControls.AdvancedImageBox`（包 5.0.1，nuspec commit `60baad40`）
+  会**二次钳制**：`Offset` 代理 `HorizontalScrollBar.Value` / `VerticalScrollBar.Value`
+  （上游源码 `:496-517`），`UpdateViewPort()` 把 `Maximum = Max(0, scaled - scrollbar.ViewportSize)`
+  （`:1699-1732`），Avalonia `RangeBase.Value` 强制 coerce 到 `[Minimum, Maximum]`。
+  `ImagePreview.HideScrollBars()` 只设 `Hidden`，不解除 coerce。
+- 结论：`UpdateViewPort` 在该 build 为 **private**（`:1699`；`OnPropertyChanged` `:1470` 为 protected
+  但 `UpdateViewPort` 本身不可 override）→ 按裁决 A 走 **ImagePreview.ApplyModel 内扩展 ScrollBar 范围**。
+- 渲染管线：`GetImageViewPort()` 用 `width = Min(scaled - |offset|, viewport)` + `GetSourceImageRegion()`
+  的 `sourceLeft = offset / zoom`，是**带符号 offset** 的 src→dst 映射，因此负 offset（左 / 上露白）
+  可正确渲染；仅当 `|offset| > scaled`（右侧完全拖出）时 dest 宽为负，故渲染层把正向上限
+  cap 到 `scaled`（该区已全白，视觉等价）。
+
+### 裁决落地（A–D）
+
+- **A**：`ApplyOffsetToBox()`（`ImagePreview.axaml.cs:327`）先按模型 margin 写
+  `ScrollBar.Minimum/Maximum`，再设 `_box.Offset`；`ApplyModel` 与背景 `Dispatcher.Post` 均重新应用
+  （覆盖 resize / 缩放 / 适配）。
+- **B**：`margin = (scaled > viewport) ? scaled * 0.5 : 0`，范围
+  `[-margin, Max(0, scaled - viewport) + margin]`；缩态（`scaled <= viewport`）margin 0、Offset 恒 0、Origin 居中。
+- **C**：三视图（普通 / 对比 / 遮罩）共用同一 `ClampOffset`，跟随扩展（改进一致）；裁切走
+  `FitWithMargin(0.5)` / `RestoreView` 快照，不受影响。
+- **D**：允许改既有断言数值；改后测试名 + 注释标注「扩展后的边界（margin = scaled × 0.5，仅溢出轴）」；不删测试。
+
+### 做了什么
+
+- **`ImageViewModel.cs`**：新增 `MarginX` / `MarginY`（`:84/:87`，溢出轴 `scaled*0.5`，否则 0）、
+  `MaxOffsetX` / `MaxOffsetY`（`:90/:93`，舒适区上界）；`ClampOffset`（`:300`）改用扩展范围；
+  新增 `SetOffset(x,y)`（`:310`，动画用，清 `_pendingFit` 后重钳）；私有 helper `Margin`（`:319`）。
+- **`ImagePreview.axaml.cs`**：新增 `ApplyOffsetToBox()`（`:327`）——先扩 `ScrollBar` 范围再设 Offset，
+  并把渲染正向 cap 到 `scaled`；`ApplyModel`（`:300`）与 `Dispatcher.Post`（`:314`）调用它；
+  `Init()` 追加 `InitSnapBack()`（`:211`）。
+- **`ImagePreview.SnapBack.cs`（新增，partial）**：`DispatcherTimer`(~16ms) + `Stopwatch` 驱动 ease-out
+  cubic `1-(1-t)^3`，150ms；额外挂 `PointerReleased`（启动）/`PointerPressed`、`PointerWheelChanged`
+  （取消）；裁切激活 / 无图 / 关窗即停。**未改** `Pointer.cs` 平移入口。
+- **测试**：`ImageViewModelTests` 改 `Pan_Is_Clamped_To_The_Extended_Bounds`（原 `..._To_The_Image_Bounds`）、
+  `RestoreView_Clamps_Offset_To_The_Extended_Bounds`（原 `..._To_Bounds`）；新增
+  `Margin_Is_Half_The_Scaled_Size_Only_On_Overflowing_Axes`、`SetOffset_Clamps_To_The_Extended_Bounds`；
+  `Pan_Does_Nothing_When_The_Image_Fits` 保持（缩态边界），补 margin==0 断言。
+
+### 公式与边界
+
+`marginX = (ScaledWidth > ViewportWidth) ? ScaledWidth * 0.5 : 0`（Y 同理）；
+`OffsetX ∈ [-marginX, Max(0, ScaledWidth - ViewportWidth) + marginX]`。
+缩放态 `scaled == viewport` → margin 0 → 范围 `[0, 0]`，恒居中；`scaled < viewport` 同。非溢出轴
+即使另一轴有 margin，也保持 `[0, 0]`（`OriginX/Y` 居中逻辑未改）。
+
+### 回弹动画
+
+触发：平移松手（左键 / 中键）后若 `Offset ∉ [0, Max]`；时长 150ms；ease-out cubic；
+`SetOffset` 每帧写入模型并 `ApplyModel` 同步渲染层；新指针按下 / 滚轮 / 裁切激活 / 关窗取消。
+
+### 渲染层与模型层 offset 一致性
+
+`ApplyOffsetToBox` 先扩 `ScrollBar` 范围再写 `_box.Offset`，故模型 `Offset ∈ 扩展范围` 时不被
+ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，overlay 用模型映射同样全在视口外，
+视觉一致。缩态范围 `[0,0]` 与渲染器默认 `Maximum=0` 一致。
+
+### 测试改动前后
+
+| 测试 | 前 | 后 |
+|---|---|---|
+| `Pan_...Bounds` 右下拖到底 | `0` | `-500`（margin） |
+| 同上 左上拖到底 | `600` | `1100` |
+| 同上 回拖 | `500` | `1000` |
+| `RestoreView_...` X | `600` | `1100` |
+| `RestoreView_...` Y | `0` | `-500` |
+| `Pan_Does_Nothing_When_The_Image_Fits` | `0/0` | `0/0`（不变，缩态） |
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 受影响类（ImageViewModelTests / CropStateTests / CompareStateTests / ImageCropperTests）→ **78 通过 / 0 失败**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **556 通过 / 0 失败**（基线 554 + 2 新增）。
+- 未启动 Python / 未加载模型。
+
+### 不做（登记）
+
+- 不做裁切比例模式（下一步）；不改遮罩 / 对比行为语义；不改 Contracts / IPC / Python / 命令集；
+  未新增 NuGet（动画用 `DispatcherTimer` + `Stopwatch`）。
+
+---
+
+## [Step 9C.11 回滚] - 2026-09-26
+
+任务 1（普通预览平移外扩 50% + 回弹）改动**已全部回滚**，恢复「图片边框为界限」的干净基线。
+
+- 回滚对象（均未提交，无独立 commit，故非 `git revert`）：
+  - `src/ZivAiEditor.UI/Imaging/ImageViewModel.cs`：`git checkout HEAD --`（删 `MarginX/MarginY/MaxOffsetX/MaxOffsetY`、
+    `SetOffset`、`Margin` helper；`ClampOffset` 复原 `[0, Max(0, scaled - viewport)]`）。
+  - `src/ZivAiEditor.App/Controls/ImagePreview.axaml.cs`：`git checkout HEAD --`（删 `ApplyOffsetToBox` / `InitSnapBack()`
+    调用 / `using Avalonia.Layout;`；`ApplyModel` 恢复直接写 `_box.Offset`）。
+  - `src/ZivAiEditor.Tests/ImageViewModelTests.cs`：`git checkout HEAD --`（测试名 + 断言复原，删除新增 2 例）。
+  - `src/ZivAiEditor.App/Controls/ImagePreview.SnapBack.cs`：整文件删除（未跟踪新增）。
+  - 未动 `DOC/DEVLOG.md` / `DOC/FROZEN.md` / `DOC/ACCEPTANCE.MD` 既有行（本段为尾部追加）。
+- 回滚后 3 个基线文件 `git diff HEAD` **为空**；任务 1 符号（`MarginX/MarginY/MaxOffsetX/MaxOffsetY/SetOffset/
+  ApplyOffsetToBox/SnapBack/Avalonia.Layout`）**0 命中**（`FitWithMargin` 为基线既有 API，非任务 1 产物）。
+- 实测（Z29 / Z30：无 GPU）：`dotnet build src\ZIV.AI.sln -c Release` → 0 错误 0 警告；
+  `ImageViewModelTests` / `CropStateTests` / `CompareStateTests` / `ImageCropperTests` 全绿；
+  非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **554 通过 / 0 失败**（回到任务 1 前基线）。
+- **原因**：需换**自绘方案（固定背景 / 画布移动）**，见后续步骤；本回滚不涉及自绘 / UI 统一 / 裁切比例。
+- **其它未提交改动**（`python/server/handlers.py` / `Agent/*` / `FlowRunner.*` / `Contracts/Diagnostics/` /
+  `_test_step2/*` 等）**未触碰**。
