@@ -15,6 +15,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using ZivAiEditor.Agent.Execution;
+using ZivAiEditor.Agent.Project;
 using ZivAiEditor.Agent.Session;
 using ZivAiEditor.App.Controls;
 using ZivAiEditor.App.Flows;
@@ -64,6 +65,16 @@ public partial class MainWindow : Window
     private readonly IReadOnlyList<CommandDefinition> _commands = Array.Empty<CommandDefinition>();
     private readonly IPromptExpander? _promptExpander;
     private readonly ILlmPreflight? _llmPreflight;
+
+    /// <summary>The deterministic parser, reused by the in-editor quick path with a temp session.</summary>
+    private readonly ICommandParser? _parser;
+
+    /// <summary>Builds a temp-session executor sharing the process tools / queue / parser (bridge §7.3).</summary>
+    private readonly Func<IEditSession, IEditSessionWriter, IExecutor>? _createExecutor;
+
+    /// <summary>Held while an editor manual task runs so the viewer's lock probe sees "busy".</summary>
+    private EngineLock? _engineLock;
+
     private ImagePreview? _imagePreview;
     private bool _closing;
 
@@ -100,7 +111,8 @@ public partial class MainWindow : Window
         LaunchOptions? launchOptions = null,
         IReadOnlyList<CommandDefinition>? commands = null,
         IPromptExpander? promptExpander = null,
-        ILlmPreflight? llmPreflight = null)
+        ILlmPreflight? llmPreflight = null,
+        Func<IEditSession, IEditSessionWriter, IExecutor>? createExecutor = null)
     {
         _store = sessionStore ?? throw new ArgumentNullException(nameof(sessionStore));
         _projects = projects ?? throw new ArgumentNullException(nameof(projects));
@@ -112,6 +124,8 @@ public partial class MainWindow : Window
         _commands = commands ?? Array.Empty<CommandDefinition>();
         _promptExpander = promptExpander;
         _llmPreflight = llmPreflight;
+        _parser = commandParser;
+        _createExecutor = createExecutor;
 
         // Step 9C.5: the same session instance is passed as both the read-only view and the
         // writer (it implements IEditSession / IEditSessionWriter); the UI view model never
@@ -153,8 +167,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Handles a request forwarded by a second instance: brings the window forward and
-    /// loads the new request into the session.
+    /// Handles a request forwarded by a second instance: brings the window forward and loads the
+    /// new request. A quick request runs the in-editor quick path and returns immediately (P1-A).
     /// </summary>
     public void ApplyLaunchRequest(LaunchOptions request)
     {
@@ -169,6 +183,51 @@ public partial class MainWindow : Window
         }
 
         Activate();
+
+        // P1-A / R1: a quick request must NEVER reach _vm.ApplyRequest — that would
+        // _writer.SetRoot(image) and destroy the editor's current DAG. It takes the in-editor
+        // quick path (temp session) instead, and this method returns at once.
+        if (request.IsQuick)
+        {
+            _ = RunQuickInEditorAsync(request);
+            return;
+        }
+
+        _ = ApplyEditorRequestAsync(request);
+    }
+
+    /// <summary>
+    /// Applies a non-quick forwarded request (bridge §7.3, P2-C): when it carries an image, first
+    /// look for a saved project whose <c>source_image</c> matches; a hit opens that project, a miss
+    /// keeps the legacy <c>ApplyRequest</c> behavior.
+    /// </summary>
+    private async Task ApplyEditorRequestAsync(LaunchOptions request)
+    {
+        if (request.ImagePath is { Length: > 0 } image)
+        {
+            ProjectSummary? match;
+            try
+            {
+                match = await _projects.FindBySourceImageAsync(PathNormalizer.Normalize(image));
+            }
+            catch (Exception)
+            {
+                match = null;
+            }
+
+            if (match is not null)
+            {
+                await OpenProjectAsync(match.SessionId, askSave: false);
+                if (request.Prompt is { Length: > 0 } startupPrompt && FindInput() is { } startupInput)
+                {
+                    startupInput.Text = startupPrompt;
+                }
+
+                SetStatus("已接收新的编辑请求");
+                return;
+            }
+        }
+
         _vm.ApplyRequest(request);
 
         if (request.Prompt is { Length: > 0 } prompt && FindInput() is { } input)

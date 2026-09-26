@@ -97,6 +97,15 @@ public sealed partial class CommandParser : ICommandParser
         int imageCount,
         ResolutionPolicy? resolution,
         CancellationToken ct = default)
+        => ParseAsync(input, session, imageCount, resolution, outputPath: null, ct);
+
+    public Task<ParseResult> ParseAsync(
+        string input,
+        IEditSession session,
+        int imageCount,
+        ResolutionPolicy? resolution,
+        string? outputPath,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(session);
         ct.ThrowIfCancellationRequested();
@@ -108,8 +117,8 @@ public sealed partial class CommandParser : ICommandParser
         }
 
         var result = text.StartsWith('/')
-            ? ParseSlashCommand(text, session, imageCount)
-            : ParseNaturalLanguage(text, session);
+            ? ParseSlashCommand(text, session, imageCount, outputPath)
+            : ParseNaturalLanguage(text, session, outputPath);
 
         return Task.FromResult(ApplyResolution(result, resolution));
     }
@@ -152,7 +161,8 @@ public sealed partial class CommandParser : ICommandParser
     private ParseResult ParseSlashCommand(
         string text,
         IEditSession session,
-        int imageCount)
+        int imageCount,
+        string? outputPath)
     {
         var parts = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         var name = parts[0];
@@ -252,7 +262,7 @@ public sealed partial class CommandParser : ICommandParser
         {
             Order = 1,
             ToolName = command.Tool,
-            Parameters = BuildParameters(prompt),
+            Parameters = BuildParameters(prompt, outputPath),
             // T3.2: carry the command's LoRAs (multi-slot, de-duplicated) to the executor / tool.
             Loras = BuildLoras(command.EffectiveLoras),
         };
@@ -339,7 +349,7 @@ public sealed partial class CommandParser : ICommandParser
             : null;
     }
 
-    private ParseResult ParseNaturalLanguage(string prompt, IEditSession session)
+    private ParseResult ParseNaturalLanguage(string prompt, IEditSession session, string? outputPath)
     {
         var mainImage = session.GetCurrentPipelineImagePath();
         if (string.IsNullOrWhiteSpace(mainImage) && string.IsNullOrWhiteSpace(prompt))
@@ -351,7 +361,7 @@ public sealed partial class CommandParser : ICommandParser
         {
             Order = 1,
             ToolName = FallbackPlanner.EditToolName,
-            Parameters = BuildParameters(prompt),
+            Parameters = BuildParameters(prompt, outputPath),
         };
 
         var plan = new EditPlan
@@ -365,12 +375,24 @@ public sealed partial class CommandParser : ICommandParser
         return new ParseResult { Success = true, Plan = plan };
     }
 
-    private static Dictionary<string, string> BuildParameters(string prompt) => new(StringComparer.Ordinal)
+    private static Dictionary<string, string> BuildParameters(string prompt, string? outputPath)
     {
-        ["prompt"] = prompt,
-        ["steps"] = FallbackPlanner.DefaultSteps,
-        ["denoise"] = FallbackPlanner.DefaultDenoise,
-    };
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["prompt"] = prompt,
+            ["steps"] = FallbackPlanner.DefaultSteps,
+            ["denoise"] = FallbackPlanner.DefaultDenoise,
+        };
+
+        // Bridge §4.1-4: a quick-edit caller pins the absolute output path, consumed downstream by
+        // ToolOutputPath.Resolve → EditRequest.OutputPath → IPC submit.payload.output_path.
+        if (!string.IsNullOrWhiteSpace(outputPath))
+        {
+            parameters["output_path"] = outputPath!;
+        }
+
+        return parameters;
+    }
 
     /// <summary>
     /// Normalizes a command's LoRA (Step 8-1; Step 8-2 made the strengths nullable). A missing

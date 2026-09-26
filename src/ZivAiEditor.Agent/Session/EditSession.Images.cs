@@ -36,6 +36,7 @@ public sealed partial class EditSession
 
         Nodes[_rootNode.NodeId] = _rootNode;
         CurrentNodeId = _rootNode.NodeId;
+        SourceImage = paths[0];
     }
 
     /// <summary>

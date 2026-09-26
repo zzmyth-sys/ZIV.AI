@@ -150,7 +150,7 @@ public partial class MainWindow
 
         var text = input.Text ?? "";
         var count = _importBar?.Count ?? 0;
-        if (!_vm.CanSend(text, count) || _vm.IsBusy)
+        if (!_vm.CanSend(text, count) || _vm.IsBusy || _busy)
         {
             return;
         }
@@ -177,7 +177,29 @@ public partial class MainWindow
         // /生成 (T2I): rewrite the description through the LLM, confirm, then submit.
         if (IsGenerateCommand(text))
         {
-            await RunGenerateFlowAsync(text, input);
+            // Bridge §7.3 / P1: the /生成 path holds engine.lock for its whole duration
+            // (LLM expansion + confirm + submit), so the viewer's lock probe and any headless
+            // quick process see the engine as busy — at most one AI task in flight.
+            if (!TryAcquireEngineLock())
+            {
+                SetStatus("AI 引擎忙，请稍后再试");
+                ScrollToEnd();
+                return;
+            }
+
+            // Block re-entry (Enter / send button) during the LLM expansion + confirm dialog,
+            // before the flow sets busy itself; the flow's finally clears it.
+            SetBusy(true);
+
+            try
+            {
+                await RunGenerateFlowAsync(text, input);
+            }
+            finally
+            {
+                ReleaseEngineLock();
+            }
+
             return;
         }
 
@@ -223,6 +245,16 @@ public partial class MainWindow
 
         var references = sendPlan.References;
 
+        // Bridge §7.3: an editor manual task holds engine.lock for its whole duration, so the
+        // viewer's lock probe (and any headless quick process) sees the engine as busy. Acquired
+        // before consuming the input so a busy engine does not eat the prompt / attachments.
+        if (!TryAcquireEngineLock())
+        {
+            SetStatus("AI 引擎忙，请稍后再试");
+            ScrollToEnd();
+            return;
+        }
+
         // Step 9C.6-D: the strip is consumed at send time — clear it now, before the
         // (possibly long) generation, so the input row resets immediately. A canceled
         // dialog or a validation block returns earlier and keeps the strip. The result
@@ -262,6 +294,7 @@ public partial class MainWindow
         }
         finally
         {
+            ReleaseEngineLock();
             SetBusy(false);
             ScrollToEnd();
         }

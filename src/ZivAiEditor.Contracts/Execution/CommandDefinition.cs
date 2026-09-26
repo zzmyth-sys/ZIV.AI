@@ -59,6 +59,21 @@ public sealed class CommandDefinition
     public CommandHandler Handler { get; init; } = CommandHandler.Edit;
 
     /// <summary>
+    /// Quick-edit marker (bridge §4.1-3; JSON <c>quick</c>): when <c>true</c> the viewer offers the
+    /// command in its quick-edit menu and can run it headless. Default <c>false</c>.
+    /// </summary>
+    [JsonPropertyName("quick")]
+    public bool Quick { get; init; }
+
+    /// <summary>
+    /// Label shown in the viewer's quick-edit menu (bridge §4.1-3; JSON <c>shortcut_label</c>);
+    /// falls back to <see cref="Name"/> when blank. Serialized by name.
+    /// </summary>
+    [JsonPropertyName("shortcut_label")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ShortcutLabel { get; init; }
+
+    /// <summary>
     /// Legacy single LoRA slot (Step 8-1; read-only compatibility from T2). Kept so older
     /// <c>commands.json</c> files still load; the template store writes <see cref="Loras"/>
     /// instead, and new code never populates this. <see cref="LoraOptions.Path"/> may be a

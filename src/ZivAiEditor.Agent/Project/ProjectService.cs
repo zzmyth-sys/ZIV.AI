@@ -105,6 +105,39 @@ public sealed class ProjectService : IProjectService
         }
     }
 
+    /// <summary>
+    /// Finds the most recently created project whose <c>source_image</c> matches
+    /// <paramref name="normalizedPath"/> (bridge §4.1-2): normalized + ordinal case-insensitive.
+    /// Returns <c>null</c> when no project matches.
+    /// </summary>
+    public async Task<ProjectSummary?> FindBySourceImageAsync(
+        string normalizedPath,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            return null;
+        }
+
+        var projects = await ListAsync(ct).ConfigureAwait(false);
+        ProjectSummary? match = null;
+        foreach (var project in projects)
+        {
+            if (project.SourceImage is not { Length: > 0 } source)
+            {
+                continue;
+            }
+
+            if (PathNormalizer.AreSame(source, normalizedPath)
+                && (match is null || project.CreatedAt > match.CreatedAt))
+            {
+                match = project;
+            }
+        }
+
+        return match;
+    }
+
     /// <summary>Records (or clears, when blank) the last opened project id. Never throws.</summary>
     public async Task SetLastProjectIdAsync(string? sessionId, CancellationToken ct = default)
     {

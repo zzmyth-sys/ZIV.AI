@@ -182,6 +182,11 @@ public sealed class CommandTemplateService : ICommandTemplateService
             T2i = command.T2i,
             Description = command.Description,
             Handler = command.Handler,
+            // Bridge §4.1-3: the quick-edit marker + label must survive the field-level rebuild;
+            // the pre-existing FixedResolution silent drop is fixed alongside them.
+            Quick = command.Quick,
+            ShortcutLabel = command.ShortcutLabel,
+            FixedResolution = command.FixedResolution,
             Loras = command.EffectiveLoras.Count > 0 ? command.EffectiveLoras.ToList() : null,
             Lora = null,
         };

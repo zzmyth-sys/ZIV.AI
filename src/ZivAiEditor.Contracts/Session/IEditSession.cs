@@ -19,6 +19,14 @@ public interface IEditSession
     /// <summary>Source image the session started from; <c>null</c> for a T2I-first session.</summary>
     string? RootImagePath { get; }
 
+    /// <summary>
+    /// The original source image the session was built from (bridge D1), persisted as the
+    /// project's <c>source_image</c> for the source-image → project reverse lookup. <c>null</c>
+    /// for a T2I-first session or a legacy project that predates the field. Read-only: the
+    /// concrete <c>EditSession</c> writes it through its own setter.
+    /// </summary>
+    string? SourceImage { get; }
+
     /// <summary>The working node; <c>null</c> means the root image is current.</summary>
     string? CurrentNodeId { get; }
 

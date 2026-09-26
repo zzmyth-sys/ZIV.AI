@@ -169,6 +169,10 @@ public static class SessionLoader
         var sessionId = string.IsNullOrWhiteSpace(dto.SessionId) ? session.SessionId : dto.SessionId;
         session.Restore(nodes, dto.CurrentNodeId, sessionId, dto.CreatedAt);
 
+        // Bridge D1 (P1-1): Restore's signature is frozen, so the source-image reverse-lookup key
+        // is set on the concrete EditSession after the restore. Missing / blank → null (legacy).
+        session.SourceImage = string.IsNullOrWhiteSpace(dto.SourceImage) ? null : dto.SourceImage;
+
         var name = string.IsNullOrWhiteSpace(dto.Name) ? "未命名" : dto.Name;
         return new SessionLoadResult { Session = session, Name = name, Warnings = warnings };
     }

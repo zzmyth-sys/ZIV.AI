@@ -26,7 +26,7 @@ namespace ZivAiEditor.App;
 /// (no implementation / caller exists — Q3). The specialized choice dialogs
 /// (<c>MultiImagePromptDialog</c> / <c>PromptConfirmDialog</c>) remain direct (Q4).</para>
 /// </summary>
-internal sealed class ShellService : IDisposable
+internal sealed class ShellService : IShellContext, IDisposable
 {
     private readonly SingleInstance _single;
     private bool _disposed;

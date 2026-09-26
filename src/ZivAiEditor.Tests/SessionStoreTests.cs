@@ -236,7 +236,10 @@ public class SessionStoreTests
                 Path.Combine(root, session.SessionId, "session.json"));
             Assert.Contains("\"version\": 2", json);
             Assert.Contains(rootNode.NodeId + ".png", json);
-            Assert.DoesNotContain(source.Replace("\\", "\\\\"), json);
+            // Bridge D1: source_image is intentionally absolute (the reverse-lookup key); the node
+            // image packs remain relative, so the only absolute source path is source_image.
+            Assert.Contains("\"source_image\": \"" + source.Replace("\\", "\\\\"), json);
+            Assert.DoesNotContain("\"image_paths\": [\"" + source.Replace("\\", "\\\\"), json);
         }
         finally
         {

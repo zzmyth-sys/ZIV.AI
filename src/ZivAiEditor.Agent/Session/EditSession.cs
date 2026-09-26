@@ -52,6 +52,15 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
     /// </summary>
     public string? RootImagePath => _rootNode?.ImagePath;
 
+    /// <summary>
+    /// The original source image the session was built from (bridge D1), persisted as the
+    /// project's <c>source_image</c>. Set by <see cref="SetRoot(string)"/> /
+    /// <see cref="ResetToRoot"/> / the image-pack <see cref="SetRoot(IReadOnlyList{string})"/>;
+    /// restored by <c>SessionLoader</c> after <see cref="Restore"/>; cleared by
+    /// <see cref="NewSession"/>.
+    /// </summary>
+    public string? SourceImage { get; set; }
+
     public Dictionary<string, EditNode> Nodes { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -88,6 +97,7 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
 
         Nodes[_rootNode.NodeId] = _rootNode;
         CurrentNodeId = _rootNode.NodeId;
+        SourceImage = imagePath;
     }
 
     /// <summary>
@@ -103,6 +113,7 @@ public sealed partial class EditSession : IEditSession, IEditSessionWriter
         CurrentNodeId = null;
         SessionId = Guid.NewGuid().ToString("N");
         CreatedAt = DateTimeOffset.Now;
+        SourceImage = null;
     }
 
     /// <summary>

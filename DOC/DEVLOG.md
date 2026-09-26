@@ -6527,3 +6527,43 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 ### 备注
 
 - 未改 Contracts / IPC / Python。
+
+---
+
+## ZIV ↔ ZIV.AI 快捷编辑桥接（2026-09-26）
+
+> 依据 `D:\devlop\ZIV\DOC\桥接plan.md`。契约追加见 `FROZEN.md`「桥接契约追加」、`INTERFACES.md` §22。
+> 实现顺序：FROZEN → 纯调用/读文件 → 边缘新增 → ShellService / Program / MainWindow。
+
+### 1) 纯调用 / 读文件（ZivAiEditor.Agent / Contracts）
+
+- `Agent/Project/PathNormalizer.cs`（新增，internal）；`EditSession.SourceImage`（backing 属性 +
+  `ResetToRoot` / 多图 `SetRoot` 赋值、`NewSession` 清空）；`SessionLoader` 在 `Restore` 后赋值；
+  `CommandParser` outputPath 重载 + `BuildParameters` 注入；`CommandTemplateService.NormalizeLora`
+  保留 `Quick` / `ShortcutLabel` + 修 `FixedResolution`；`SessionFileDto.source_image`（写 / 字段级改名拷贝 /
+  元数据读）；`ProjectSummary.SourceImage`（init-only）；`ProjectService.FindBySourceImageAsync`。
+
+### 2) 边缘新增（ZivAiEditor.App / UI）
+
+- `EngineLock`（OpenOrCreate/ReadWrite/None；探测 Open/Read/ReadWrite，不建文件）；
+  `NotifyWriter` / `NotifyMessage`（temp + Move 原子写）；`HeadlessQuickRunner` + `IQuickRunHost` /
+  `QuickRunHost`（可注入 fake；运行期订阅 `LaunchRequested` 写 busy）；`LaunchOptions` 四个 CLI 字段 +
+  `IsQuick` / `IsEmpty`；`CommandDefinition.Quick` / `ShortcutLabel` + `Template/commands.json` 三条 +
+  `CommandParser.BuiltIn.cs` 同步。
+
+### 3) 接线（ShellService / Program / MainWindow）
+
+- `IShellContext`（App/Shell）；`ShellService` 实现；`AppContext.Create(IShellContext)` +
+  `CreateExecutor(IEditSession, IEditSessionWriter)`（P1-3）；`Program.Main` 按 §2.1 顺序：SingleInstance
+  在前，重复实例转发（失败写 error notify），首实例 + `--quick` 走 `HeadlessQuickRunner`；
+  `MainWindow.ApplyLaunchRequest` 先判 `IsQuick`（P1-A）；`MainWindow.AiQuick.cs`（就地快捷 + 锁定）；
+  `MainWindow.Send.cs` 手动任务持锁；`MainWindow.Projects.cs` / `ApplyEditorRequestAsync` 反查打开项目。
+
+### 验证（Z29 / Z30：只跑受影响类，无 GPU）
+
+- `dotnet build src/ZivAiEditor.App/ZivAiEditor.App.csproj -c Release` → **0 错误 0 警告**。
+- 受影响类过滤（新桥接 7 类 + 既有 7 类）→ **167 通过 / 0 失败**（含 `Ipc` 与 `PlannerIntegration` 排除）。
+
+### 备注
+
+- `session.json` **version 仍为 2**；未改 `IInferenceClient` / IPC / Python；未 commit。

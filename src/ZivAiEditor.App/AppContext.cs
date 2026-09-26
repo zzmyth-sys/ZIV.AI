@@ -152,7 +152,7 @@ internal sealed class AppContext : IDisposable
     /// </summary>
     public event Action<byte[]>? PreviewReceived;
 
-    public static AppContext Create(ShellService shell)
+    public static AppContext Create(IShellContext shell)
     {
         var settings = shell.LoadSettings();
 
@@ -304,6 +304,14 @@ internal sealed class AppContext : IDisposable
         LocalLlmClient RewriterLlm,
         IPromptExpander PromptExpander,
         ILlmPreflight LlmPreflight);
+
+    /// <summary>
+    /// Builds an <see cref="Executor"/> over an alternate session (bridge §7.3, P1-3): the
+    /// in-editor quick path shares the process-wide tools / serial queue / parser but works on a
+    /// <b>temporary</b> session, never the editor's own DAG (R1).
+    /// </summary>
+    public IExecutor CreateExecutor(IEditSession session, IEditSessionWriter writer)
+        => new Executor(Tools, _executionQueue, session, writer, _commandParser);
 
     public void Dispose()
     {

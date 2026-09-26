@@ -32,9 +32,17 @@ public partial class MainWindow
         {
             await RefreshProjectListAsync();
 
-            // A CLI image is an explicit request; it wins over the remembered project.
-            if (options?.ImagePath is { Length: > 0 })
+            // A CLI image is an explicit request; it wins over the remembered project. Bridge
+            // §7.3 (P2-C): --image X and not quick → open the matching project, else keep the
+            // current ApplyRequest behavior.
+            if (options?.ImagePath is { Length: > 0 } startupImage)
             {
+                var match = await _projects.FindBySourceImageAsync(PathNormalizer.Normalize(startupImage));
+                if (match is not null)
+                {
+                    await OpenProjectAsync(match.SessionId, askSave: false);
+                }
+
                 return;
             }
 

@@ -300,3 +300,33 @@
   - `ZivAiEditor.App.Controls.Modes.CropModePanel` / `MaskModePanel`（UserControl）。
 - **行为修正（非契约）**：`ImageViewModel.ClampOffset` 每轴至少 10% 可见；裁切默认框 `0.75 → 0.85`；
   进入裁切用标准 `Fit()`；平移（空格+左键 / 中键）在所有模式生效。
+
+## 22. 追加说明（ZIV ↔ ZIV.AI 快捷编辑桥接，2026-09-26）
+
+> 本节为**追加**（只增不改）；契约细节同时冻结进 `FROZEN.md`「桥接契约追加」。**无 IPC / Python 改动**；
+> `session.json` 格式版本仍为 **2**。
+
+- **契约追加（尾部，授权四项）**：
+  - `IEditSession.SourceImage`（`string?`，只读）：源图反查键。`EditSession` 可写；`SetRoot` /
+    `ResetToRoot` / 多图 `SetRoot` 置 `imagePaths[0]`；`NewSession` 置 null；`Restore` 签名不动，
+    由 `SessionLoader.LoadFromJson` 在 `Restore` 后赋值 `dto.SourceImage`。
+  - `IProjectService.FindBySourceImageAsync(string normalizedPath, CancellationToken)`：规范化 +
+    `OrdinalIgnoreCase` 比较 `source_image`，返回最近创建的项目。
+  - `CommandDefinition.Quick`（默认 false）+ `ShortcutLabel`（`string?`）：JSON `quick` / `shortcut_label`；
+    `CommandTemplateService.NormalizeLora` 逐字段重建处补齐（并修 `FixedResolution` 静默丢失）。
+  - `ICommandParser.ParseAsync(input, session, imageCount, resolution, outputPath, ct)` 新重载：
+    非空时向 `EditStep.Parameters["output_path"]` 注入；既有三签名不变，既有重载委托并传 `null`。
+- **附属**：`ProjectSummary.SourceImage`（init-only 附加属性，主构造签名不变）；`Agent.Project.PathNormalizer`
+  （`internal static`，非 Contracts；经 `InternalsVisibleTo` 供 App 使用）。
+- **session.json**：顶层新增 `source_image`（绝对路径）；改名 `WriteMetadataNameAsync` 字段级重建拷贝该键；
+  旧数据缺失 → null；**version 仍为 2**。
+- **CLI / notify / engine.lock**：见 `FROZEN.md`「B.3 / B.4 / B.5」。
+- **IShellContext**：新增 `App/Shell/IShellContext.cs`（`LoadSettings` / `TemplateDirectory` / `LaunchRequested`），
+  `ShellService` 实现，`AppContext.Create(IShellContext)`；删除无头专用 context。
+- **App 层新增（非契约）**：`EngineLock`、`NotifyWriter` / `NotifyMessage` / `NotifyStatus`、
+  `HeadlessQuickRunner` / `IQuickRunHost` / `QuickRunHost`；`MainWindow.ApplyLaunchRequest` 先判 `IsQuick`
+  走就地快捷路径并立即 return（P1-A，绝不 `_vm.ApplyRequest`）；`--image` 且非 quick 反查打开项目（P2-C）；
+  编辑器手动任务在提交路径持 `engine.lock`。
+- **`Template/commands.json` 的 `quick` 字段**：`quick:true` 的条目（本次为 `/去水印` `/去背景` `/全景`）
+  由 ZIV 快捷菜单读取（授权只读通道）；`shortcut_label` 为菜单显示名，缺省回退到 `name`。
+  `CommandParser.BuiltIn.cs` 兜底副本已同步。

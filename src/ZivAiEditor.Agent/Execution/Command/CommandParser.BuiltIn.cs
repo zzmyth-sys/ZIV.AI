@@ -111,6 +111,8 @@ public sealed partial class CommandParser
             Name = "/去水印",
             Params = new List<string>(),
             Tool = "QW21edit",
+            Quick = true,
+            ShortcutLabel = "去水印",
             Template = "Remove all watermarks, logos and subtitles from <image1>. Reconstruct the covered area to match the surrounding content naturally; keep everything else exactly unchanged.",
             Description = "去除水印",
         },
@@ -120,6 +122,8 @@ public sealed partial class CommandParser
             Handler = CommandHandler.Edit,
             Params = new List<string>(),
             Tool = "QW21edit",
+            Quick = true,
+            ShortcutLabel = "去背景",
             Template = "This is an RGBA image with transparency. The image has an alpha channel and the background is transparent.",
             Description = "生成透明通道PNG图",
         },
@@ -156,6 +160,8 @@ public sealed partial class CommandParser
             Handler = CommandHandler.Edit,
             Params = new List<string>(),
             Tool = "QW21edit",
+            Quick = true,
+            ShortcutLabel = "全景",
             FixedResolution = new ResolutionPolicy
             {
                 Mode = ResolutionMode.Explicit,

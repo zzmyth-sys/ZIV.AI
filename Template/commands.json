@@ -85,6 +85,8 @@
       "name": "/去水印",
       "params": [],
       "tool": "QW21edit",
+      "quick": true,
+      "shortcut_label": "去水印",
       "template": "Remove all watermarks, logos and subtitles from <image1>. Reconstruct the covered area to match the surrounding content naturally; keep everything else exactly unchanged.",
       "description": "去除水印"
     },
@@ -93,6 +95,8 @@
       "handler": "Edit",
       "params": [],
       "tool": "QW21edit",
+      "quick": true,
+      "shortcut_label": "去背景",
       "template": "This is an RGBA image with transparency. The image has an alpha channel and the background is transparent.",
       "description": "生成透明通道PNG图"
     },
@@ -125,6 +129,8 @@
       "handler": "Edit",
       "params": [],
       "tool": "QW21edit",
+      "quick": true,
+      "shortcut_label": "全景",
       "fixed_resolution": { "mode": "Explicit", "width": 2048, "height": 1024 },
       "template": "Generate a 180-degree equirectangular panorama (front hemisphere only, 2:1 aspect ratio) from the input perspective image. Use a true equirectangular projection covering 180 degrees horizontal and 180 degrees vertical. The left and right edges should be at the 90-degree-left and 90-degree-right extremes of the front hemisphere. Keep the scene, style, lighting and all content continuous and consistent with the original image.",
       "description": "将当前图转为 180° 半全景"

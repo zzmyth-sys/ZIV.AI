@@ -32,4 +32,11 @@ public interface IProjectService
 
     /// <summary>Records (or clears, when blank) the last opened project id. Never throws.</summary>
     Task SetLastProjectIdAsync(string? sessionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Finds the most recently created project whose <c>source_image</c> matches
+    /// <paramref name="normalizedPath"/> (bridge §4.1-2): normalized + ordinal case-insensitive.
+    /// Returns <c>null</c> when no project matches.
+    /// </summary>
+    Task<ProjectSummary?> FindBySourceImageAsync(string normalizedPath, CancellationToken ct = default);
 }

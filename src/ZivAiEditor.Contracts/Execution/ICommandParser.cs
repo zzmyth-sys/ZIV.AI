@@ -47,4 +47,19 @@ public interface ICommandParser
         int imageCount,
         ResolutionPolicy? resolution,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Same as <see cref="ParseAsync(string, IEditSession, int, ResolutionPolicy?, CancellationToken)"/>
+    /// but also stamps an explicit output path onto the produced plan's step
+    /// (<c>output_path</c>). Used by the quick-edit bridge so the Python backend writes the
+    /// result to the caller-chosen absolute path. A <c>null</c> / blank
+    /// <paramref name="outputPath"/> leaves the plan unchanged.
+    /// </summary>
+    Task<ParseResult> ParseAsync(
+        string input,
+        IEditSession session,
+        int imageCount,
+        ResolutionPolicy? resolution,
+        string? outputPath,
+        CancellationToken ct = default);
 }

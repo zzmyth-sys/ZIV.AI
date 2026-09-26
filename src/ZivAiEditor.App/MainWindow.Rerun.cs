@@ -50,8 +50,16 @@ public partial class MainWindow
 
     private async Task RerunAsync(string nodeId)
     {
-        if (_vm is null || _vm.IsBusy)
+        if (_vm is null || _vm.IsBusy || _busy)
         {
+            return;
+        }
+
+        // Bridge §7.3 / P1: a re-run is an editor manual task, so it holds engine.lock too —
+        // the viewer's probe and any headless quick process see the engine as busy.
+        if (!TryAcquireEngineLock())
+        {
+            SetStatus("AI 引擎忙，请稍后再试");
             return;
         }
 
@@ -69,6 +77,7 @@ public partial class MainWindow
         }
         finally
         {
+            ReleaseEngineLock();
             SetBusy(false);
             ScrollToEnd();
         }

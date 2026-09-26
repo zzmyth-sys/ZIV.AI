@@ -23,22 +23,49 @@ public sealed class LaunchOptions
     /// <summary>Optional mask path (CLI <c>--mask</c>; the mask UI landed in Step 9C.7).</summary>
     public string? MaskPath { get; init; }
 
+    /// <summary>
+    /// Quick-edit template id (CLI <c>--quick</c>, bridge §10): when set the request runs the
+    /// headless / in-editor quick path instead of opening the editor.
+    /// </summary>
+    public string? QuickTemplateId { get; init; }
+
+    /// <summary>Absolute output path for a quick edit (CLI <c>--output</c>, bridge §10).</summary>
+    public string? OutputPath { get; init; }
+
+    /// <summary>Absolute status file path (CLI <c>--notify</c>, bridge §9/§10).</summary>
+    public string? NotifyPath { get; init; }
+
+    /// <summary>Resolution tier text (CLI <c>--resolution</c>: <c>fast</c> / <c>balanced</c> / <c>high_quality</c>).</summary>
+    public string? Resolution { get; init; }
+
+    /// <summary>True when the request carries a quick-edit template id (bridge §10).</summary>
+    public bool IsQuick => !string.IsNullOrEmpty(QuickTemplateId);
+
     /// <summary>True when no field carries a value.</summary>
     public bool IsEmpty
         => string.IsNullOrEmpty(ImagePath)
            && string.IsNullOrEmpty(Prompt)
-           && string.IsNullOrEmpty(MaskPath);
+           && string.IsNullOrEmpty(MaskPath)
+           && string.IsNullOrEmpty(QuickTemplateId)
+           && string.IsNullOrEmpty(OutputPath)
+           && string.IsNullOrEmpty(NotifyPath)
+           && string.IsNullOrEmpty(Resolution);
 
     /// <summary>
     /// Parses <c>--image &lt;path&gt;</c> / <c>--prompt &lt;text&gt;</c> /
-    /// <c>--mask &lt;path&gt;</c>. Hand-written and reflection-free (AOT-friendly);
-    /// never throws.
+    /// <c>--mask &lt;path&gt;</c> / <c>--quick &lt;id&gt;</c> / <c>--output &lt;abs&gt;</c> /
+    /// <c>--notify &lt;abs&gt;</c> / <c>--resolution &lt;tier&gt;</c>. Hand-written and
+    /// reflection-free (AOT-friendly); never throws.
     /// </summary>
     public static LaunchOptions Parse(string[]? args)
     {
         string? image = null;
         string? prompt = null;
         string? mask = null;
+        string? quick = null;
+        string? output = null;
+        string? notify = null;
+        string? resolution = null;
 
         if (args is { Length: > 0 })
         {
@@ -55,11 +82,32 @@ public sealed class LaunchOptions
                     case "--mask":
                         mask = NextValue(args, ref i) ?? mask;
                         break;
+                    case "--quick":
+                        quick = NextValue(args, ref i) ?? quick;
+                        break;
+                    case "--output":
+                        output = NextValue(args, ref i) ?? output;
+                        break;
+                    case "--notify":
+                        notify = NextValue(args, ref i) ?? notify;
+                        break;
+                    case "--resolution":
+                        resolution = NextValue(args, ref i) ?? resolution;
+                        break;
                 }
             }
         }
 
-        return new LaunchOptions { ImagePath = image, Prompt = prompt, MaskPath = mask };
+        return new LaunchOptions
+        {
+            ImagePath = image,
+            Prompt = prompt,
+            MaskPath = mask,
+            QuickTemplateId = quick,
+            OutputPath = output,
+            NotifyPath = notify,
+            Resolution = resolution,
+        };
     }
 
     /// <summary>

@@ -12,4 +12,12 @@
     <ProjectReference Include="..\ZivAiEditor.Contracts\ZivAiEditor.Contracts.csproj" />
   </ItemGroup>
 
+  <!-- Bridge §4.2 / §7.3: the editor App consumes the internal PathNormalizer for the
+       image source-image reverse lookup; the helper stays internal (not a public contract). -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>ZivAiEditor.App</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
 </Project>

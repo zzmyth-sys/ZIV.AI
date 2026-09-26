@@ -6,13 +6,16 @@
 .DESCRIPTION
   正式便携版一律发布到固定目录，使文件关联 / 默认程序注册表里记录的 exe 绝对路径保持稳定，
   避免每次换目录都要重新注册并改系统设置。
-  发布前清理旧构建产物，但保留用户状态（settings.ini / _cache / Template）与关联辅助脚本（*.bat）。
+  默认发布到 ZIV 便携版根目录下的独立子目录 ZIV.AI\，与 ZIV.App.exe 分属不同目录
+  （两者均读写同名 settings.ini / Template\，且 NativeAOT 原生 DLL 必须与各自 exe 同目录）。
+  发布前清理旧构建产物，但保留用户状态（settings.ini / _cache / Template）与关联辅助脚本（*.bat），
+  并隐藏 _cache。
 
 .PARAMETER OutputDir
-  发布目录。默认 D:\Program Files\ZIV.AI；也可用环境变量 ZIV_AI_PUBLISH_DIR 覆盖。
+  发布目录。默认 D:\Program Files\ZIV\ZIV.AI；也可用环境变量 ZIV_AI_PUBLISH_DIR 覆盖。
 #>
 param(
-    [string]$OutputDir = $(if ($env:ZIV_AI_PUBLISH_DIR) { $env:ZIV_AI_PUBLISH_DIR } else { 'D:\Program Files\ZIV.AI' })
+    [string]$OutputDir = $(if ($env:ZIV_AI_PUBLISH_DIR) { $env:ZIV_AI_PUBLISH_DIR } else { 'D:\Program Files\ZIV\ZIV.AI' })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,5 +52,12 @@ dotnet publish $project -c Release -o $OutputDir -p:DebugType=None -p:DebugSymbo
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
 
 Get-ChildItem -LiteralPath $OutputDir -Filter *.pdb -File -ErrorAction SilentlyContinue | Remove-Item -Force
+
+# _cache 隐藏（保持可写；资源管理器默认不显示）。
+$cache = Join-Path $OutputDir '_cache'
+if (Test-Path $cache) {
+    $item = Get-Item -LiteralPath $cache -Force
+    $item.Attributes = $item.Attributes -bor [System.IO.FileAttributes]::Hidden
+}
 
 Write-Host "done: $(Join-Path $OutputDir 'ZivAiEditor.App.exe')" -ForegroundColor Green

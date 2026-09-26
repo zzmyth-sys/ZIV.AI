@@ -138,6 +138,9 @@ public sealed partial class SessionStore : ISessionPersistence, IProjectMetadata
                 SessionId = dto.SessionId,
                 CurrentNodeId = dto.CurrentNodeId,
                 CreatedAt = dto.CreatedAt,
+                // Bridge §7.1 (P1-2): the rename path rebuilds the DTO field by field, so it must
+                // copy the reverse-lookup key or a rename would silently drop source_image.
+                SourceImage = dto.SourceImage,
                 Nodes = dto.Nodes,
             };
             await File.WriteAllTextAsync(path, JsonSerializer.Serialize(updated, Json.SessionFileDto), ct)
@@ -289,6 +292,8 @@ public sealed partial class SessionStore : ISessionPersistence, IProjectMetadata
             SessionId = session.SessionId,
             CurrentNodeId = session.CurrentNodeId,
             CreatedAt = session.CreatedAt,
+            // Bridge D1: the source-image reverse-lookup key. Format version stays 2.
+            SourceImage = session.SourceImage,
             Nodes = nodes,
         };
 
@@ -392,7 +397,16 @@ public sealed partial class SessionStore : ISessionPersistence, IProjectMetadata
                 ? parsed
                 : DateTimeOffset.MinValue;
 
-            return new ProjectSummary(id!, string.IsNullOrWhiteSpace(name) ? UnnamedProject : name!, created);
+            // Bridge D1: absent in older projects → null (the positional ctor is unchanged; the
+            // value is attached through the init-only extra property).
+            var sourceImage = root.TryGetProperty("source_image", out var sourceElement)
+                ? sourceElement.GetString()
+                : null;
+
+            return new ProjectSummary(id!, string.IsNullOrWhiteSpace(name) ? UnnamedProject : name!, created)
+            {
+                SourceImage = string.IsNullOrWhiteSpace(sourceImage) ? null : sourceImage,
+            };
         }
         catch (Exception)
         {
@@ -417,6 +431,14 @@ internal sealed class SessionFileDto
 
     [JsonPropertyName("created_at")]
     public DateTimeOffset CreatedAt { get; init; }
+
+    /// <summary>
+    /// Absolute source-image path (bridge D1) used for the source-image → project reverse lookup.
+    /// Format stays v2; absent in older files → <c>null</c>.
+    /// </summary>
+    [JsonPropertyName("source_image")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SourceImage { get; init; }
 
     [JsonPropertyName("nodes")]
     public List<SessionFileNode> Nodes { get; init; } = new();

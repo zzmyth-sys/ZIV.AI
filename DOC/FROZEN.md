@@ -4869,3 +4869,65 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
   `CropActions` 文字按钮、`EditorToolbar` 橡皮/清空/撤销、裁切视图快照。
 - **保留（判定）**：`ImageViewModel.FitWithMargin` / `RestoreView` 生产无调用但保留（N1 未要求删；删会缩减公开 API 与覆盖）。
 - **无 IPC / Python / Contracts 改动**；`MainWindow.*` 未触碰。
+
+---
+
+## 桥接契约追加（ZIV ↔ ZIV.AI 快捷编辑，2026-09-26）
+
+> 本节为「ZIV ↔ ZIV.AI 桥接」（快捷编辑）的**契约追加**，依据 `D:\devlop\ZIV\DOC\桥接plan.md`
+> §4。**只增不改**；不改动 Step 0–9C 任何既有冻结行。授权四项 + 一项附属一并冻结；
+> `ProjectSummary.SourceImage` 登记为授权项 2 的**必要附属**，不另立第五项语义。
+
+### B.1 授权追加（四项）
+
+| # | 类型 / 成员 | 位置 | 说明 |
+|---|---|---|---|
+| 1 | `IEditSession.SourceImage`（`string?`，只读） | `ZivAiEditor.Contracts/Session/IEditSession.cs` | 不改任何 writer 签名。`EditSession` 加 `public string? SourceImage { get; set; }`；`SetRoot(string)` / `ResetToRoot(string)` / 多图 `SetRoot(IReadOnlyList<string>)` 置为 `imagePaths[0]`；`NewSession` 置 null；`Restore` 不动，由 `SessionLoader.LoadFromJson` 在 `Restore(...)` 之后对具体 `EditSession` 赋值 `dto.SourceImage`（缺失 → null，兼容旧数据）。 |
+| 2 | `IProjectService.FindBySourceImageAsync(string normalizedPath, CancellationToken ct = default)` | `ZivAiEditor.Contracts/Project/IProjectService.cs` | 遍历项目元数据，规范化 + `OrdinalIgnoreCase` 比较 `source_image`，返回**最近创建**的项目。消费者 = 编辑器：`--image X` 且非 quick 时命中即打开项目。 |
+| 3 | `CommandDefinition.Quick`（`bool`，默认 false）+ `CommandDefinition.ShortcutLabel`（`string?`） | `ZivAiEditor.Contracts/Execution/CommandDefinition.cs` | JSON 键 `quick` / `shortcut_label`。`CommandParser.BuiltIn.cs` 兜底副本同步；`CommandTemplateService.NormalizeLora` 逐字段重建处补齐这两字段（并修 `FixedResolution` 静默丢失）。 |
+| 4 | `ICommandParser` / `CommandParser` 新增 outputPath 重载 | `ZivAiEditor.Contracts/Execution/ICommandParser.cs` / `Agent/Execution/Command/CommandParser.cs` | 新增 `ParseAsync(string input, IEditSession session, int imageCount, ResolutionPolicy? resolution, string? outputPath, CancellationToken ct = default)`；**不改既有三签名**。内部 `BuildParameters` 非空时注入 `["output_path"] = outputPath`；既有重载委托并传 `null`。 |
+
+### B.2 附属追加（授权项 2 的必要附属）
+
+| 附属 | 说明 |
+|---|---|
+| `ProjectSummary.SourceImage`（`string?`） | `IProjectMetadataStore.ReadMetadataAsync` 返回 `ProjectSummary`，是授权项 2 的必要读取手段。`ProjectSummary` 为 positional record，**主构造签名不变**，仅加 `public string? SourceImage { get; init; }`（默认 null）。 |
+| `PathNormalizer` | 不进 Contracts；`Agent/Project/PathNormalizer.cs` 的 `internal static`（`Normalize => Path.GetFullPath` + `OrdinalIgnoreCase` 比较）。 |
+
+### B.3 CLI 契约（冻结）
+
+| 参数 | 含义 |
+|---|---|
+| `--image <path>` | 主图路径（会话根） |
+| `--prompt <text>` | 初始提示词 |
+| `--mask <path>` | 遮罩路径 |
+| `--quick <templateId>` | 快捷模板 id（触发无头 / 就地快捷） |
+| `--output <path>` | 快捷产物绝对路径 |
+| `--notify <path>` | 通知文件绝对路径 |
+| `--resolution <tier>` | 分辨率档位（`fast` / `balanced` / `high_quality`） |
+
+- 手写解析（AOT 友好），解析失败 / 未知参数 / 缺值 → 不退出，用默认会话启动。
+- `LaunchOptions.IsQuick => !string.IsNullOrEmpty(QuickTemplateId)`；`IsEmpty` 在任一字段有值时均为 false。
+
+### B.4 notify JSON 契约（冻结）
+
+```json
+{ "status": "success|error|cancelled|busy",
+  "source_image": "...", "template": "...", "output_path": "...",
+  "error": null, "elapsed_ms": 12345, "exited": true }
+```
+
+- 原子写：temp + `File.Move(overwrite:true)`；四种状态都必写；`exited`：无头 `true`，编辑器内就地 `false`。
+
+### B.5 engine.lock 契约（冻结）
+
+- 路径：`<ZIV.AI 程序目录>/engine.lock`（`AppContext.BaseDirectory`）。
+- 持有：`new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None)`；能独占 = 空闲，`IOException` = 忙碌。
+- 探测：`new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)`——不创建、不取独占；`FileNotFoundException` = 空闲，`IOException` = 忙碌。
+- 释放顺序：写 notify → `AppContext.Dispose` → close FileStream → 尝试删除。
+
+### B.6 IShellContext（冻结）
+
+- 新增 `App/Shell/IShellContext.cs`：`BackendSettings LoadSettings();`、`string TemplateDirectory { get; }`、
+  `event Action<LaunchOptions>? LaunchRequested`（无头运行期订阅转发请求写 `busy`，见 §B.2/§B.3）。
+- `ShellService` 实现 `IShellContext`；`AppContext.Create(IShellContext shell)`。
