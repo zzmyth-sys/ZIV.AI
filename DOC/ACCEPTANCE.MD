@@ -3363,3 +3363,127 @@ Step 1 已完成，本步 Step 2–5 + 文档。**无 GPU**（Z29 / Z30）。
 ### 验收后动作
 
 1. 真机复验后追加“P1 收尾修正 2（外扩放宽 + /扩图 蓝底无掩膜）通过，日期：____”（待签）。
+
+---
+
+## 模板系统 T5·S1 验收：合并视图装配 + 可用性 / 前缀筛选纯函数
+
+**目标**：`ICommandTemplateService` 接入 `AppContext` + `CommandParser`（读内置 + 用户合并视图）；
+新增 `CommandAvailability`（上下文可用性）+ `CommandSuggestions`（前缀筛选）纯函数。
+**不含 UI（S4）/ 热重载（Z-030，重启生效）**。**无 GPU**（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| T5S1.1 | 列表构造重载 | 查 `CommandParser` | 新 `(IReadOnlyList<CommandDefinition>)` ctor 存在；不读文件 | ✅ |
+| T5S1.2 | 旧 ctor 委托 | 查 `CommandParser` | `(string)` ctor 保留并 `: this(LoadCommands(path))`；缺失回退内置 | ✅ |
+| T5S1.3 | 解析逻辑未动 | `CommandParserTests` | 断言不变，全过 | ✅ |
+| T5S1.4 | AppContext 装配 | 查 `BuildAgent` | 构 `CommandTemplateService`；parser 用 `List()` 合并视图 | ✅ |
+| T5S1.5 | 暴露属性 | 查 `AppContext` | `ICommandTemplateService CommandTemplates` | ✅ |
+| T5S1.6 | 用户文件缺失等价 | 查 `CommandTemplateService.List` | 无 `commands.user.json` → 仅内置，行为同旧 | ✅ |
+| T5S1.7 | `CommandAvailability` 四轴 | `CommandAvailabilityTests` | T2I 无图可用 / 有图不可用；编辑需图；multi-only 需 ≥2；`/扩图` 需外扩裁切 | ✅ |
+| T5S1.8 | 理由文案非空 | `CommandAvailabilityTests` | 各不可用轴 reason 非空 | ✅ |
+| T5S1.9 | `CommandRequirements` 复用 | `CommandRequirementsTests` | 签名不变；hint 文案不变；全过 | ✅ |
+| T5S1.10 | `CommandSuggestions` 前缀 | `CommandSuggestionsTests` | `/换`→5；`/`、`""`→11；`/不存在`→空；顺序保持 | ✅ |
+| T5S1.11 | 构建 | `dotnet build -c Release` | 0 错误 0 警告 | ✅ |
+| T5S1.12 | 测试 | 受影响类 + 非 GPU 全量 | 受影响 59 通过；非 GPU **535 通过 / 0 失败**（基线 521 + 14） | ✅ |
+| T5S1.13 | Z8 | 查改动文件 | 均 < 600 | ✅ |
+| T5S1.14 | 无 GPU 负载 | 本轮 | 未启动 Python / 未加载模型（Z29 / Z30） | ✅ |
+
+### 通过标准
+
+- 构建 0/0；受影响类 59 通过 / 0 失败；非 GPU 全量 **535 通过 / 0 失败**；T5S1.1–T5S1.14 通过。
+
+### 遗留说明（非阻断）
+
+- **Z-030**：命令模板热重载未做（UI 编辑后重启生效）。
+- **Z-021 收敛**：其「装配 / 接入」部分本轮关闭；「模板 UI（T5）」部分顺延 S4（`/` 候选 Popup）。
+- 未新增契约；未改 `commands.json` / IPC / Python；无新 NuGet。
+
+### 验收后动作
+
+1. 在「验收记录」追加“模板系统 T5·S1 通过，日期：____”（待签）。
+
+---
+
+## 模板系统 T5·S4 验收：`/` 命令候选列表（UI）
+
+**目标**：输入框下方 `/` 候选列表（筛选 + 可用性置灰 + ↑↓ 选择 + Enter/Tab 插入 + Esc 关闭）。
+纯逻辑已就绪（S1），本步仅 UI 接线。**无 GPU**（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| T5S4.1 | 新文件 | 查 `MainWindow.CommandList.cs` | partial，< 600 行（356） | ✅ |
+| T5S4.2 | XAML 落点 | 查 `MainWindow.axaml` | `Popup PART_CommandPopup` 于 `PART_InputBox` 内，`Placement=Bottom` | ✅ |
+| T5S4.3 | 构造接线 | 查 `MainWindow.axaml.cs` | 构造调 `InitCommandList()` | ✅ |
+| T5S4.4 | 键序 | 查 Tunnel `KeyDown` | 首句 `if (HandleCommandListKey(e)) return;`（先于 Enter 发送） | ✅ |
+| T5S4.5 | 触发规则 | 查 `CommandPrefix` | 单 token 且以 `/` 开头显示；有空白隐藏 | ✅ |
+| T5S4.6 | 筛选复用 | 查 `ShowSuggestions` | 调 `CommandSuggestions.Filter` | ✅ |
+| T5S4.7 | 置灰复用 | 查 `ShowSuggestions` | 调 `CommandAvailability.Evaluate`；不可用置灰 + ToolTip(reason) | ✅ |
+| T5S4.8 | ↑↓ 跳过不可用 | 查 `MoveSelection` | 仅在可用项间循环 | ✅ |
+| T5S4.9 | Enter/Tab 插入 | 查 `CommitSelection` | 插入命令名（params 非空补空格）；不发送 | ✅ |
+| T5S4.10 | 无歧义直发 | 查 `HandleCommandListKey` | 首 token = 可用命令全名 → 返回 false 交回发送 | ✅ |
+| T5S4.11 | Esc | 查 `HandleCommandListKey` | 关闭列表，不清空输入 | ✅ |
+| T5S4.12 | 构建 | `dotnet build -c Release` | 0 错误 0 警告 | ✅ |
+| T5S4.13 | 测试 | 受影响类 + 非 GPU 全量 | 受影响 82 通过；非 GPU **535 通过 / 0 失败** | ✅ |
+| T5S4.14 | Z8 | 查改动文件 | 均 < 600 | ✅ |
+| T5S4.15 | 无 GPU 负载 | 本轮 | 未启动 Python / 未加载模型（Z29 / Z30） | ✅ |
+| T5S4.16 | 真机：弹出 / 筛选 / 置灰 / 键盘 / 焦点 / placement | 用户 | 见 DEVLOG「真机验收清单」10 条 | ⏳ 待用户确认 |
+
+### 通过标准
+
+- 构建 0/0；受影响 82 通过；非 GPU 全量 **535 通过 / 0 失败**；T5S4.1–T5S4.15 通过；
+  T5S4.16 由用户真机确认。
+
+### 遗留说明（非阻断）
+
+- **无头探针未做**：无 `Avalonia.Headless` 基础设施（新增需引包 + 测试宿主），纯逻辑已单测，
+  UI 交互由真机验收。
+- **Z-030** 热重载仍挂账（重启生效）。
+
+### 验收后动作
+
+1. 真机 T5S4.16 通过后，在「验收记录」追加“模板系统 T5·S4 通过，日期：____”（待签）。
+
+---
+
+## 模板系统 T5·S4-fix 验收：候选列表收尾（不可用剔除 + `/扩图` 置顶 + 次数排序）
+
+**目标**：① 不可用命令不渲染；② `/扩图` 可用时置顶；③ 按使用次数排序。纯 UI / App 层。**无 GPU**（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| T5S4fix.1 | CommandOrdering | 查 `CommandOrdering.cs` | `Order` 纯逻辑；`/扩图` 置顶 + 次数降序 + 稳定 | ✅ |
+| T5S4fix.2 | 次数降序 | `CommandOrderingTests` | 高次数在前 | ✅ |
+| T5S4fix.3 | 并列保原序 | `CommandOrderingTests` | 同次数不重排 | ✅ |
+| T5S4fix.4 | `/扩图` 置顶 | `CommandOrderingTests` | 次数低仍首位 | ✅ |
+| T5S4fix.5 | 空 counts | `CommandOrderingTests` | 原序 | ✅ |
+| T5S4fix.6 | CommandUsageStore | 查 `CommandUsageStore.cs` | `Load` / `Record` / `Counts`；程序目录 | ✅ |
+| T5S4fix.7 | +1 / 往返 | `CommandUsageStoreTests` | Record 累加；新实例 Load 读回 | ✅ |
+| T5S4fix.8 | 容错 | `CommandUsageStoreTests` | 缺文件 / 损坏 → 空，不抛 | ✅ |
+| T5S4fix.9 | 不可用剔除 | 查 `ShowSuggestions` | `Evaluate` 过滤后渲染；无置灰分支 | ✅ |
+| T5S4fix.10 | 计数接线 | 查 `CommitSelection` | 插入后 `Record(name)` | ✅ |
+| T5S4fix.11 | 构建 | `dotnet build -c Release` | 0 错误 0 警告 | ✅ |
+| T5S4fix.12 | 测试 | 受影响类 + 非 GPU 全量 | 受影响 92 通过；非 GPU **545 通过 / 0 失败**（535 + 10） | ✅ |
+| T5S4fix.13 | Z8 | 查改动文件 | 均 < 600 | ✅ |
+| T5S4fix.14 | 无 GPU 负载 | 本轮 | 未启动 Python / 未加载模型（Z29 / Z30） | ✅ |
+| T5S4fix.15 | 真机：置顶 / 上浮 / 落盘 / 容错 | 用户 | 见 DEVLOG「真机验收清单」5 条 | ⏳ 待用户确认 |
+
+### 通过标准
+
+- 构建 0/0；受影响 92 通过；非 GPU 全量 **545 通过 / 0 失败**；T5S4fix.1–T5S4fix.14 通过；
+  T5S4fix.15 由用户真机确认。
+
+### 遗留说明（非阻断）
+
+- **Z-030 永久关闭**：不做热重载，重启生效。
+- 不做次数清除 UI / 跨项目次数 / `/扩图` 之外的上下文置顶。
+
+### 验收后动作
+
+1. 真机 T5S4fix.15 通过后，在「验收记录」追加“模板系统 T5·S4-fix 通过，日期：____”（待签）。

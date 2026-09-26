@@ -132,6 +132,7 @@ public partial class MainWindow : Window
         InitChat();
         InitImport();
         InitSend();
+        InitCommandList();
 
         _vm.Messages.CollectionChanged += (_, _) => RenderChat();
         _vm.History.CollectionChanged += (_, _) => RenderHistory();
@@ -194,6 +195,12 @@ public partial class MainWindow : Window
                 InputElement.KeyDownEvent,
                 (_, e) =>
                 {
+                    // T5/S4: while the / suggestion list is open it owns ↑↓ / Tab / Esc / Enter.
+                    if (HandleCommandListKey(e))
+                    {
+                        return;
+                    }
+
                     if (e.Key == Key.Enter && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
                     {
                         e.Handled = true;

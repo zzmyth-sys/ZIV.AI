@@ -4605,3 +4605,138 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 非 GPU 全量 **521 通过 / 0 失败**（`CommandOutpaintTests` 四条：`plan.Mask == null`、分辨率跟随注入、
   crop gate、参数报错）。
 - 未启动 Python 推理 / 未加载模型（Z29 / Z30）；`/扩图` 分辨率跟随 UI，不再固定原生尺寸。
+
+---
+
+## P1 收尾修正 3：命令模板优化（日期：2026-09-26）
+
+> **追加（只增不改）**。对照 Lazy Qwen2.1 工作流优化命令模板。**无 GPU**（Z29 / Z30）。
+
+- `Template/commands.json` + `CommandParser.BuiltIn.cs`（同步）：
+  - `/换背景` / `/换装` / `/合照` 强化"其余完全不变 / 边缘无缝"措辞；新增 `/换发色` / `/换表情` / `/换光线`；
+    `/去水印` / `/去物体` 改用 `<image1>`。
+- 机制记录：工作流"不改处不动"来自局部编辑的 `_composite_by_mask`（遮罩外像素级合成）+ `enc_res=0`
+  同尺寸 latent（防 size shift）；本 App 的掩膜路径用后端噪声掩膜近似，非像素级。
+- 验收：build 0/0；非 GPU **521 通过 / 0 失败**。
+
+---
+
+## 模板系统 T5·S1：合并视图装配 + 可用性 / 前缀筛选纯函数（日期：2026-09-26）
+
+> **追加（只增不改）**。把 T2 的 `ICommandTemplateService` 接入装配（读内置 + 用户合并视图），
+> 新增 `CommandAvailability` / `CommandSuggestions` 纯函数。**不含 UI（S4）/ 热重载（Z-030）**；
+> **不改契约 / IPC / Python / commands.json**。**无 GPU**（Z29 / Z30）。
+
+### T5S1.1 构造重载（非契约）
+
+- `CommandParser` 新增 `public CommandParser(IReadOnlyList<CommandDefinition> commands)`：直接接收命令集，
+  不读文件。
+- 旧 `public CommandParser(string commandsJsonPath = DefaultCommandsPath)` **保留并委托**到新 ctor：
+  `: this(LoadCommands(commandsJsonPath))`。`LoadCommands` 文件缺失 / 损坏 → `BuiltInCommands()`（Z28），
+  **旧行为不变**。解析逻辑未动。
+
+### T5S1.2 AppContext 装配（非契约）
+
+- `BuildAgent` 构造 `CommandTemplateService(templateDirectory)`；parser 以
+  `service.List().Select(dto => dto.Definition).ToList()` 构造（合并视图，含 `commands.user.json` 覆盖）。
+- 新增属性 `ICommandTemplateService CommandTemplates { get; }`（构造注入；供 S4 UI 使用）。
+- `commands.user.json` 缺失 → `List()` 仅内置，行为与旧单文件 parser 一致。
+
+### T5S1.3 新增纯函数（非契约）
+
+- `ZivAiEditor.App.CommandAvailability`：
+  - `readonly record struct Context(bool HasImage, int ImageCount, bool HasOutpaintCrop)`；
+  - `static (bool available, string? reason) Evaluate(CommandDefinition def, Context ctx)`；
+  - 四轴按序：① `EffectiveHandler==T2I` 需 `!HasImage`（否则「文生图命令不接受输入图」）；
+    ② 非 T2I 需 `HasImage`（否则「需要图片」）；③ `Variants` 非空且不含 `single` 需 `ImageCount>=2`
+    （否则「需要至少 2 张图」）；④ `name=="/扩图"` 需 `HasOutpaintCrop`（否则「需先做裁切外扩」）。
+- `ZivAiEditor.UI.Editing.CommandSuggestions.Filter(IReadOnlyList<CommandDefinition>, string prefix)`：
+  `StringComparison.Ordinal` 前缀；空串或 `/` → 全部；保持原顺序。
+- **`CommandRequirements` 复用**：`RequiresMoreImages` / `RequiresOutpaintCrop` **签名不变**，改为文本反查 +
+  `CommandAvailability.Evaluate`（隔离各自相关轴，其余轴通配）；**hint 文案口径不变**。
+
+### T5S1.4 验收（无 GPU，Z29 / Z30）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **535 通过 / 0 失败**（前基线 521 + 14：
+  `CommandAvailabilityTests` 10 / `CommandSuggestionsTests` 4）。
+
+### T5S1.5 Z-021 收敛说明（不改 T2.5 原行）
+
+- T2.5 登记的 **Z-021**（「`ICommandTemplateService` 未装配 `AppContext` / 未接入 `CommandParser`」）中
+  **「装配 / 接入」部分由本段关闭**；**「模板 UI（T5）」部分顺延 S4**（`/` 候选 Popup + CRUD）。
+
+### T5S1.6 妥协/挂账清单 · 追加（T5·S1）
+
+| 编号 | 内容 | 为什么妥协 | 回归触发条件 | 触发时机 |
+|---|---|---|---|---|
+| Z-030 | 命令模板无热重载（`CommandParser` 启动快照；UI 编辑 `commands.user.json` 后**重启生效**） | 重建 parser 需重分发到 `Executor` / `MainWindow`，超出 S1 范围 | 用户需编辑后即时生效 | S4 / 后续 |
+
+---
+
+## 模板系统 T5·S4：`/` 命令候选列表（UI）（日期：2026-09-26）
+
+> **追加（只增不改）**。在输入框下方实现 `/` 候选列表（筛选 + 可用性置灰 + 键盘选择 + 插入）。
+> 纯逻辑（S1 的 `CommandSuggestions` / `CommandAvailability`）已就绪，本步仅 UI 接线。
+> **不改契约 / IPC / Python / 命令集 / 解析逻辑**；**无 GPU**（Z29 / Z30）。
+
+### T5S4.1 UI（非契约）
+
+- 新增 `ZivAiEditor.App/MainWindow.CommandList.cs`（partial）：`InitCommandList`（挂
+  `PART_Input.TextChanged` / `LostFocus`、`Popup.Closed`）/ `RefreshSuggestions` / `ShowSuggestions` /
+  `HideSuggestions` / `MoveSelection` / `CommitSelection` / `HandleCommandListKey`。
+- `MainWindow.axaml`：`PART_InputBox` 输入 Grid 内新增 `Popup PART_CommandPopup`（`Placement=Bottom`）
+  + `PART_CommandPopupHost`（宽随输入框）+ `PART_CommandList`（自绘行）。
+- `MainWindow.axaml.cs`：构造 `InitCommandList()`；既有 Tunnel `KeyDown` 首句 `if (HandleCommandListKey(e)) return;`。
+
+### T5S4.2 行为（冻结 · 非契约）
+
+- **显示**：输入为单 token 且以 `/` 开头（无空白）→ 候选（0 命中则隐藏）。
+- **隐藏**：出现空白 / 清空 / 非 `/` / `LostFocus` / Esc / 提交后。
+- **筛选**：`CommandSuggestions.Filter(_commands, prefix)`；`prefix` = 首 token（含 `/`）。
+- **可用性**：`CommandAvailability.Evaluate(def, ctx)`；`ctx = { HasImage, ImageCount = 当前图包 + 附件,
+  HasOutpaintCrop }`；不可用 → 置灰 + ToolTip(reason) + ↑↓ 跳过 + 不插入。
+- **键盘**（Tunnel，先于 Enter 发送）：↑↓ 移动（仅可用项）/ Enter·Tab 插入（params 非空补空格）/
+  Esc 关闭（不清空）/ 首个 token 为可用命令全名时 Enter 交回发送。
+- **焦点**：输入框自持焦点（候选行为非 `ListBox`、`Focusable=false`）；所有键在输入框 Tunnel 处理。
+
+### T5S4.3 验收（无 GPU，Z29 / Z30）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 受影响类 82 通过 / 0 失败；非 GPU 全量 **535 通过 / 0 失败**（与 S1 一致，未增测试）。
+- **真机验收**（Popup placement / 焦点）由用户执行；**无头探针未做**（无 `Avalonia.Headless` 基础设施）。
+
+---
+
+## 模板系统 T5·S4-fix：候选列表收尾（日期：2026-09-26）
+
+> **追加（只增不改）**。S4 候选列表三项收尾：不可用命令**不渲染**、`/扩图` 可用时**置顶**、
+> 按**使用次数**排序。纯 UI / App 层；**不改契约 / 命令集 / IPC / Python**；**无 GPU**（Z29 / Z30）。
+
+### T5S4fix.1 新增（非契约）
+
+- `ZivAiEditor.UI/Editing/CommandOrdering.cs`（纯逻辑）：
+  `Order(IReadOnlyList<CommandDefinition> filtered, IReadOnlyDictionary<string,int> counts)`：
+  ① `/扩图` 置顶；② 其余按次数降序（缺键 = 0）；③ 并列保持输入原序（稳定排序）。
+- `ZivAiEditor.App/CommandUsageStore.cs`（App 状态）：
+  `Load() -> IReadOnlyDictionary<string,int>` / `Record(string)` + `Counts`；
+  文件 `{AppContext.BaseDirectory}/commands.usage.json`（Z14，源生成 JSON）；
+  缺文件 / 损坏 → 空；写失败静默。
+
+### T5S4fix.2 行为（冻结 · 非契约）
+
+- **不可用剔除**：`ShowSuggestions` 对每条 `CommandAvailability.Evaluate`，`available=false` 直接剔除，
+  **不渲染**（取代 S4 的置灰 + ToolTip + ↑↓ 跳过）；`CommandAvailability` 本身未改。
+- **排序**：`CommandOrdering.Order`（`/扩图` 置顶 + 次数降序 + 稳定并列）。
+- **计数**：`CommitSelection` 插入成功后 `Record(name)`（缓存 + 原子写盘）。
+
+### T5S4fix.3 验收（无 GPU，Z29 / Z30）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 新增 `CommandOrderingTests`（6）/ `CommandUsageStoreTests`（4）；受影响类 92 通过；
+  非 GPU 全量 **545 通过 / 0 失败**（535 + 10）。
+
+### T5S4fix.4 Z-030 关闭说明（不改 T5·S1 原行）
+
+- **Z-030（命令模板无热重载）本轮裁决永久关闭**：不做热重载，UI 编辑 `commands.user.json` 后**重启生效**。
+  T5·S1 段落的 Z-030 原行**不改**，以本段为准。

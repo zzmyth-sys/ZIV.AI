@@ -23,37 +23,20 @@ internal static class CommandRequirements
         out string? hint)
     {
         hint = null;
-        var name = FirstToken(text);
-        if (name is null || name.Length == 0 || name[0] != '/')
+        var command = Find(commands, text);
+        if (command is null)
         {
             return false;
         }
 
-        CommandDefinition? command = null;
-        foreach (var candidate in commands)
-        {
-            if (string.Equals(candidate.Name, name, StringComparison.Ordinal))
-            {
-                command = candidate;
-                break;
-            }
-        }
-
-        if (command is null || command.T2i || command.Variants is not { Count: > 0 })
-        {
-            return false;
-        }
-
-        if (command.Variants.ContainsKey("single"))
-        {
-            // Both / single-only variants: the image count never blocks the send.
-            return false;
-        }
-
-        // Mirrors the parser's effective count: the current node's image pack (its size, so a
-        // multi-image root counts as N) plus the attachments.
-        var effective = currentImageCount + attachmentCount;
-        if (effective >= 2)
+        // S1: delegate the decision to the shared CommandAvailability, isolating the variant
+        // axis — the image / outpaint axes are passed as wildcards (T2I: no image; otherwise an
+        // image is present) so only the "multi-only, fewer than 2 images" case can block here.
+        var context = new CommandAvailability.Context(
+            HasImage: command.EffectiveHandler != CommandHandler.T2I,
+            ImageCount: currentImageCount + attachmentCount,
+            HasOutpaintCrop: true);
+        if (CommandAvailability.Evaluate(command, context).available)
         {
             return false;
         }
@@ -74,29 +57,44 @@ internal static class CommandRequirements
         out string? hint)
     {
         hint = null;
-        var name = FirstToken(text);
-        if (name is null || name.Length == 0 || name[0] != '/')
+        var command = Find(commands, text);
+        if (command is null || !string.Equals(command.Name, "/扩图", StringComparison.Ordinal))
         {
             return false;
         }
 
-        CommandDefinition? command = null;
-        foreach (var candidate in commands)
-        {
-            if (string.Equals(candidate.Name, name, StringComparison.Ordinal))
-            {
-                command = candidate;
-                break;
-            }
-        }
-
-        if (!string.Equals(command?.Name, "/扩图", StringComparison.Ordinal) || hasOutpaintCrop)
+        // S1: only the outpaint axis can block here; the other axes are wildcards.
+        var context = new CommandAvailability.Context(
+            HasImage: true,
+            ImageCount: 1,
+            HasOutpaintCrop: hasOutpaintCrop);
+        if (CommandAvailability.Evaluate(command, context).available)
         {
             return false;
         }
 
         hint = "「/扩图」需先做裁切外扩";
         return true;
+    }
+
+    /// <summary>The command named by the first token of <paramref name="text"/>, or <c>null</c>.</summary>
+    private static CommandDefinition? Find(IReadOnlyList<CommandDefinition> commands, string? text)
+    {
+        var name = FirstToken(text);
+        if (name is null || name.Length == 0 || name[0] != '/')
+        {
+            return null;
+        }
+
+        foreach (var candidate in commands)
+        {
+            if (string.Equals(candidate.Name, name, StringComparison.Ordinal))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private static string? FirstToken(string? text)

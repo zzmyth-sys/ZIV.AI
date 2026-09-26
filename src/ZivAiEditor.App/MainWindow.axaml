@@ -142,6 +142,23 @@
                       <Path Classes="sendIcon" Data="{StaticResource IconArrowUp}" />
                     </Button>
                   </Grid>
+                  <!-- / command suggestion list (T5/S4): anchored to PART_Input, opened and
+                       driven by MainWindow.CommandList.cs. The rows are non-focusable so the
+                       input keeps focus; keys are handled in PART_Input's tunnel handler. -->
+                  <Popup x:Name="PART_CommandPopup" Grid.Row="1" Placement="Bottom">
+                    <Border x:Name="PART_CommandPopupHost"
+                            Background="#252525"
+                            BorderBrush="#3A3A3A"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="4">
+                      <ScrollViewer MaxHeight="200"
+                                    VerticalScrollBarVisibility="Auto"
+                                    HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel x:Name="PART_CommandList" />
+                      </ScrollViewer>
+                    </Border>
+                  </Popup>
                 </Grid>
               </Border>
             </Grid>

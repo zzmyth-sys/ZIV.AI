@@ -43,6 +43,7 @@ internal sealed class AppContext : IDisposable
         ExecutionQueue executionQueue,
         IModelProfileRegistry modelProfiles,
         CommandParser commandParser,
+        ICommandTemplateService commandTemplates,
         IEditSession session,
         IEditSessionWriter sessionWriter,
         ISessionPersistence sessionStore,
@@ -66,6 +67,7 @@ internal sealed class AppContext : IDisposable
         _executionQueue = executionQueue;
         ModelProfiles = modelProfiles;
         _commandParser = commandParser;
+        CommandTemplates = commandTemplates;
         Session = session;
         SessionWriter = sessionWriter;
         SessionStore = sessionStore;
@@ -100,6 +102,13 @@ internal sealed class AppContext : IDisposable
 
     /// <summary>Deterministic slash-command / prompt parser (Step 8).</summary>
     public ICommandParser CommandParser => _commandParser;
+
+    /// <summary>
+    /// The built-in + user merged command template store (T5/S1). The parser is built from
+    /// <see cref="ICommandTemplateService.List"/> at startup; edits through this service take
+    /// effect on the next restart (hot reload is Z-030).
+    /// </summary>
+    public ICommandTemplateService CommandTemplates { get; }
 
     /// <summary>The loaded command set (single / multi template variants), for the /生成 flow.</summary>
     public IReadOnlyList<CommandDefinition> Commands => _commandParser.Commands;
@@ -150,7 +159,7 @@ internal sealed class AppContext : IDisposable
         // R-4: grouped by domain (backend → tools → agent → llm → persistence → imaging).
         var (backend, client) = BuildBackend(settings);
         var (tools, executionQueue) = BuildTools(client);
-        var (commandParser, session, executor, modelProfiles) =
+        var (commandParser, commandTemplates, session, executor, modelProfiles) =
             BuildAgent(shell.TemplateDirectory, tools, executionQueue);
         var llm = BuildLlm(settings, client, tools);
         var (sessionStore, projects) = BuildPersistence();
@@ -158,7 +167,7 @@ internal sealed class AppContext : IDisposable
 
         return new AppContext(
             backend, client, llm.Http, llm.PlannerLlm, llm.Planner, tools, executor, executionQueue,
-            modelProfiles, commandParser, session, session, sessionStore, projects, imaging,
+            modelProfiles, commandParser, commandTemplates, session, session, sessionStore, projects, imaging,
             llm.RewriterLlm, llm.PromptExpander, llm.LlmPreflight);
     }
 
@@ -194,22 +203,28 @@ internal sealed class AppContext : IDisposable
     }
 
     /// <summary>Agent domain: the parser, the in-memory session, the executor and the model profiles.</summary>
-    private static (CommandParser Parser, EditSession Session, IExecutor Executor, IModelProfileRegistry Profiles)
+    private static (CommandParser Parser, ICommandTemplateService Templates, EditSession Session, IExecutor Executor, IModelProfileRegistry Profiles)
         BuildAgent(
             string templateDirectory,
             IToolRegistry tools,
             ExecutionQueue executionQueue)
     {
+        // T5/S1: the built-in + user merged command view feeds the parser. The user override
+        // file (commands.user.json) is read here, never written; absent = built-in only, so
+        // behavior matches the pre-S1 single-file parser.
+        var commandTemplates = new CommandTemplateService(templateDirectory);
+        var commandParser = new CommandParser(
+            commandTemplates.List().Select(dto => dto.Definition).ToList());
+
         // Step 9C.8-A: the executor rebuilds a re-run plan from the DAG, so it needs the
         // session (read + navigate) and the deterministic command parser.
-        var commandParser = new CommandParser(Path.Combine(templateDirectory, "commands.json"));
         var session = new EditSession();
         var executor = new Executor(tools, executionQueue, session, session, commandParser);
 
         // Step 8-2: profiles come from the data file next to commands.json; a missing file
         // falls back to the built-in Qwen-Image-2.1 profile inside the registry.
         var modelProfiles = new ModelProfileRegistry(Path.Combine(templateDirectory, "models.json"));
-        return (commandParser, session, executor, modelProfiles);
+        return (commandParser, commandTemplates, session, executor, modelProfiles);
     }
 
     /// <summary>LLM domain: the planner chain, the prompt rewriter and the /生成 preflight.</summary>

@@ -21,8 +21,8 @@ public sealed partial class CommandParser
             DefaultVariant = "single",
             Variants = new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["single"] = "Keep the character and pose in <image1> unchanged. Replace the background with {description}. Preserve the original facial identity, hair, body shape and pose.",
-                ["multi"] = "Keep the character and pose in <image1> unchanged. Use the scene from <image2> as the new background. {description}. Preserve the original facial identity, hair, body shape and pose.",
+                ["single"] = "Replace the background of <image1> with: {description}. Keep the person's facial identity, hair, body shape, pose and clothing exactly unchanged, and keep the original lighting on the subject. Blend the subject's edges naturally into the new background so there is no visible seam.",
+                ["multi"] = "Replace the background of <image1> with the scene from <image2>: {description}. Use <image2> only as the new scene; keep <image1>'s person (facial identity, hair, body shape, pose, clothing) exactly unchanged and blend the edges naturally.",
             },
             Description = "替换背景（1 图直接换 / 2 图参考场景）",
         },
@@ -35,10 +35,49 @@ public sealed partial class CommandParser
             DefaultVariant = "single",
             Variants = new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["single"] = "Change the clothing of the person in <image1> to: {description}. Keep the facial identity, hair, body shape and pose unchanged, and keep the original background and lighting.",
-                ["multi"] = "Use the garment from <image2> to dress the person in <image1>. {description}. Preserve the facial identity, body shape and pose, and keep the original background.",
+                ["single"] = "Change the clothing of the person in <image1> to: {description}. Keep the facial identity, hair, body shape, pose and the original background exactly unchanged; make the garment fit the body naturally with consistent folds, material and lighting.",
+                ["multi"] = "Dress the person in <image1> with the garment from <image2>: {description}. Use <image2> only for the garment; keep <image1>'s facial identity, hair, body shape, pose and background exactly unchanged.",
             },
             Description = "更换服装（1 图文字描述 / 2 图参考服装）",
+        },
+        new CommandDefinition
+        {
+            Name = "/换发色",
+            Params = new List<string> { "description" },
+            Variadic = true,
+            Tool = "QW21edit",
+            DefaultVariant = "single",
+            Variants = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["single"] = "Change the hair color of the person in <image1> to: {description}. Keep the hairstyle, facial identity, pose and background exactly unchanged.",
+            },
+            Description = "更换发色",
+        },
+        new CommandDefinition
+        {
+            Name = "/换表情",
+            Params = new List<string> { "description" },
+            Variadic = true,
+            Tool = "QW21edit",
+            DefaultVariant = "single",
+            Variants = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["single"] = "Change the person's facial expression in <image1> to: {description}. Keep the facial identity, hairstyle, pose and background exactly unchanged.",
+            },
+            Description = "更换表情",
+        },
+        new CommandDefinition
+        {
+            Name = "/换光线",
+            Params = new List<string> { "description" },
+            Variadic = true,
+            Tool = "QW21edit",
+            DefaultVariant = "single",
+            Variants = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["single"] = "Relight the image to: {description}. Keep the subject, pose, composition and all content exactly unchanged; only change the lighting.",
+            },
+            Description = "改变打光/光线",
         },
         new CommandDefinition
         {
@@ -49,7 +88,7 @@ public sealed partial class CommandParser
             DefaultVariant = "multi",
             Variants = new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["multi"] = "Create a new scene using the reference identities. The person from <image1> and the person from <image2> stand together. {description}. Preserve each person's identity independently; do not merge facial features or clothing between them.",
+                ["multi"] = "Create a new scene with the identities from the references: the person from <image1> and the person from <image2> stand together. {description}. Preserve each person's identity independently; do not merge facial features or clothing between them.",
             },
             Description = "多主体合照（需至少 2 张图）",
         },
@@ -72,7 +111,7 @@ public sealed partial class CommandParser
             Name = "/去水印",
             Params = new List<string>(),
             Tool = "QW21edit",
-            Template = "Remove all watermarks, logos, and subtitles from the image. Keep all other content unchanged.",
+            Template = "Remove all watermarks, logos and subtitles from <image1>. Reconstruct the covered area to match the surrounding content naturally; keep everything else exactly unchanged.",
             Description = "去除水印",
         },
         new CommandDefinition
@@ -80,7 +119,7 @@ public sealed partial class CommandParser
             Name = "/去物体",
             Params = new List<string> { "object" },
             Tool = "QW21edit",
-            Template = "Remove the {object} from <image1>. Fill the removed area naturally to match the surrounding context. Keep all other content unchanged.",
+            Template = "Remove the {object} from <image1>. Fill the removed area naturally to match the surrounding context; keep everything else exactly unchanged.",
             Description = "移除指定物体",
         },
         new CommandDefinition

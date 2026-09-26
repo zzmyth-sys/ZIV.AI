@@ -5661,3 +5661,217 @@ Python 链式叠加。**无 GPU**（Z29 / Z30）。
 
 - 未改 Python / IPC；未改 `ipc-protocol.md`；无新 NuGet；改动文件 < 600（Z8）。
 - `FROZEN.md` 追加「P1 收尾修正 2」；`INTERFACES.md` §14（更正 §13）；`ACCEPTANCE.MD` 追加验收段。
+
+---
+
+## [P1 收尾修正 3] - 2026-09-26：命令模板优化（对照 Lazy 工作流）
+
+### 背景
+
+对照 Lazy Qwen2.1 工作流（`ComfyUI_Lazybuxuexi`）：它**没有**专用换装/换背景节点，靠通用 Qwen 编辑提示词
+（单图/多图 × 可选遮罩）完成；"不改的地方几乎完全不动"来自**局部编辑**（`_mask_bbox` 取遮罩外接框生成 +
+`_apply_local_paste` → `_composite_by_mask` 羽化合成，**遮罩外 = 原图像素级**）+ `enc_res=0` 同尺寸 latent
+避免官方 "size shift" 偏移。
+
+### 做了什么
+
+- `Template/commands.json` + `CommandParser.BuiltIn.cs`（保持同步）：
+  - `/换背景`、`/换装`、`/合照`：强化"其余完全不变 / 边缘无缝"措辞（保留 `Replace the background` /
+    `Change the clothing` / `garment from <image2>` 断言短语）。
+  - 新增 `/换发色`、`/换表情`、`/换光线`（对齐工作流示例用法）。
+  - `/去水印`、`/去物体`：改用 `<image1>` + "其余完全不变"。
+
+### 实测（无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**；非 GPU **521 通过 / 0 失败**。
+- 数据文件与内置回退同步（`CommandRealDataTests.BuiltIn_Matches_DataFile`）。
+
+### 备注
+
+- 未改 Python / IPC；无新 NuGet。
+- 局部编辑"像素级不动"在本 App 由**后端噪声掩膜**近似实现；工作流是像素级合成，
+  若需像素级一致需后续在后端加合成步骤。
+
+---
+
+## [模板系统 T5·S1] - 2026-09-26：合并视图装配 + 可用性 / 前缀筛选纯函数
+
+### 目标
+
+把已就绪的 `ICommandTemplateService`（T2）接入 `AppContext` 与 `CommandParser`（读**内置 + 用户合并视图**），
+并新增两个纯函数：`CommandAvailability`（上下文可用性）+ `CommandSuggestions`（前缀筛选）。
+**不含 UI**（`/` 候选 Popup 为下一步 S4）；**不含热重载**（首版重启生效，挂 **Z-030**）。**无 GPU**（Z29 / Z30）。
+
+### 做了什么
+
+- **Agent**：`CommandParser` 新增列表构造重载 `CommandParser(IReadOnlyList<CommandDefinition>)`（直接接收命令集，
+  不读文件）；旧 `CommandParser(string commandsJsonPath = ...)` 保留并**委托**到新 ctor（内部仍
+  `LoadCommands(path)`，文件缺失回退 `BuiltInCommands()`，旧行为不变）。类 XML 注释同步。
+- **App 装配**：`AppContext.BuildAgent` 构造 `CommandTemplateService(templateDirectory)`，以
+  `service.List().Select(dto => dto.Definition).ToList()` 喂 parser；新增属性
+  `ICommandTemplateService CommandTemplates`（构造注入）。`commands.user.json` 不存在时 `List()` 仅返回内置，
+  行为与旧单文件 parser 一致。
+- **App 纯函数**：新增 `CommandAvailability`（`Context(HasImage, ImageCount, HasOutpaintCrop)` +
+  `Evaluate(def, ctx)`，四轴：T2I 需无图 / 编辑需有图 / multi-only 需 ≥2 图 / `/扩图` 需外扩裁切）。
+- **App 复用**：`CommandRequirements.RequiresMoreImages` / `RequiresOutpaintCrop` **签名不变**，改为薄封装——
+  按文本反查命令后用 `CommandAvailability.Evaluate` 判定（隔离各自相关轴，其余轴传通配值），
+  **hint 文案口径不变**。
+- **UI 纯函数**：新增 `ZivAiEditor.UI/Editing/CommandSuggestions.Filter(commands, prefix)`（Ordinal 前缀；
+  空串或 `/` 返回全部；保持原顺序）。
+- **测试**：新增 `CommandAvailabilityTests`（10）/ `CommandSuggestionsTests`（4）。
+
+### 关键决策
+
+1. **旧 ctor 委托而非并存**：单一命令集字段 `_commands`；列表 ctor 为唯一装配路径，string ctor 仅测试 / 独立用。
+2. **`CommandAvailability` 为唯一判定源**：`CommandRequirements` 不再各写一套轴逻辑（避免漂移），只做文本反查 + 文案。
+3. **重启生效**：`_commands` 是启动快照；热重载需重建 parser 并重分发到 `Executor` / `MainWindow`，超出本步 → **Z-030**。
+4. **不新增契约**：`CommandAvailability` / `CommandSuggestions` 均为 App / UI 层纯函数。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 受影响类（`CommandAvailabilityTests` / `CommandSuggestionsTests` / `CommandRequirementsTests` /
+  `CommandTemplateServiceTests` / `CommandParserTests`）→ **59 通过 / 0 失败**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **535 通过 / 0 失败**（前基线 **521** + 14 新例）。
+- 未启动 Python / 未加载模型。
+
+### 遗留
+
+- **Z-030**：命令模板热重载未做（UI 编辑后重启生效）。
+- **Z-021 收敛**：其「`ICommandTemplateService` 未装配 `AppContext`」部分**本轮关闭**；「模板 UI（T5）」部分顺延 S4。
+- UI `/` 候选 Popup（S4）未做。
+
+### 备注
+
+- 未改 `commands.json` / `BuiltIn.cs` 命令集；未改解析逻辑（仅新增 ctor）；未改 IPC / Python；
+  未新增契约；无新 NuGet；改动文件均 < 600（Z8）。
+- `FROZEN.md` 追加「模板系统 T5·S1」+ Z-030 + Z-021 收敛说明；`INTERFACES.md` §15；`ACCEPTANCE.MD` 追加验收段。
+
+---
+
+## [模板系统 T5·S4] - 2026-09-26：`/` 命令候选列表（UI 接线）
+
+### 目标
+
+在 `PART_Input` 下方实现 `/` 命令候选列表：输入以 `/` 开头（尚未输入空格）时弹出、按前缀筛选、
+置灰不可用项（reason 作 ToolTip）、↑↓ 选择、Enter/Tab 插入（不发送）、Esc 关闭。
+纯逻辑（`CommandSuggestions` / `CommandAvailability`）已于 S1 就绪，本步**只做 UI 接线**。
+**不做 CRUD / 热重载 / 拼音 / 别名 / 遮罩维度**。**无 GPU**（Z29 / Z30）。
+
+### 做了什么
+
+- **新文件 `App/MainWindow.CommandList.cs`**（partial，356 行）：`Popup`/`StackPanel` 引用 +
+  候选列表 `_suggestions` / 行 `_suggestionRows` / 高亮索引；`InitCommandList` / `RefreshSuggestions` /
+  `ShowSuggestions` / `HideSuggestions` / `MoveSelection` / `CommitSelection` / `UpdateHighlight` /
+  `CommandPrefix` / `CurrentAvailabilityContext` / `BuildSuggestionRow`。
+- **`MainWindow.axaml`**：`PART_InputBox` 的输入 Grid 内新增 `Popup x:Name="PART_CommandPopup"`
+  （`Placement="Bottom"`）+ `PART_CommandPopupHost`（宽随输入框）+ `ScrollViewer`（MaxHeight 200）
+  + `PART_CommandList`（自绘行，非 `ListBox`，避免夺焦）。
+- **`MainWindow.axaml.cs`**：构造处 `InitCommandList()`；既有 Tunnel `KeyDown` 处理器**首句**
+  `if (HandleCommandListKey(e)) return;`（列表打开时先消费键）。
+- **复用**：`CommandSuggestions.Filter`（筛选）/ `CommandAvailability.Evaluate`（置灰 + reason）/
+  `CurrentNodeHasOutpaintCrop()`（`MainWindow.Send.cs`）/ `_vm.CurrentImageCount` / `_importBar.Count`。
+
+### 触发 / 隐藏状态机
+
+- **显示**：`PART_Input.TextChanged` → 文本为单 token 且以 `/` 开头（无空白）→ 显示（0 命中则隐藏）。
+- **隐藏**：输入出现空白（进入参数段）/ 清空 / 非 `/` 开头 / 输入框 `LostFocus` / Esc / 提交后。
+- **与发送优先级**：列表打开时 Enter **不发送**；仅当首个 token 恰为**可用命令全名**（无歧义）时
+  `HandleCommandListKey` 返回 `false`，交回既有 Enter 发送处理器。
+
+### 键盘处理顺序
+
+- 既有 Tunnel 处理器（`MainWindow.axaml.cs:193` 附近）：**第一句** `HandleCommandListKey(e)`；
+  返回 `true`（列表打开且已消费）→ 直接 `return`；返回 `false` → 落回既有 Enter 发送。
+- 列表打开时：↑↓ 移动高亮（`MoveSelection`，只在**可用**项间循环）；Enter/Tab 提交（插入命令名，
+  有 params 补空格，光标置末）；Esc 关闭（不清空输入）。
+
+### 不可用项处理
+
+- `CommandAvailability.Evaluate(def, ctx)`；`ctx = { HasImage = (CurrentImageCount + 附件数) > 0,
+  ImageCount = CurrentImageCount + 附件数, HasOutpaintCrop = 当前节点外扩裁切 }`。
+- 不可用 → 文字 `#666666` 置灰 + `ToolTip` 显示 reason；**不参与** ↑↓ 循环（跳过）；
+  Enter 不插入（`CommitSelection` 对不可用项 no-op）。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 受影响类（`CommandSuggestionsTests` / `CommandAvailabilityTests` / `CommandRequirementsTests` /
+  `SessionViewModelTests`）→ **82 通过 / 0 失败**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **535 通过 / 0 失败**（与 S1 基线一致；本步为 UI 接线，未增测试）。
+- 未启动 Python / 未加载模型。
+
+### 未决 / 待真机
+
+- **无头探针未做**：测试工程无 `Avalonia.Headless` 基础设施，新增需引包 + 测试宿主，超出「不新增 NuGet」；
+  纯逻辑已单测，UI 交互由真机验收。
+- **真机验收清单**（用户执行）：① 输入 `/` 弹出全部 11 条；② `/换` → 5 条；③ 无图时编辑类置灰、
+  ToolTip 出 reason；④ `/扩图` 无外扩裁切置灰；⑤ ↑↓ 跳过置灰项；⑥ Enter/Tab 插入不发送；
+  ⑦ Esc 关闭不清空；⑧ 输入空格后隐藏；⑨ 点击候选项插入；⑩ 自绘 chrome 下 Popup placement 正确、输入框保持焦点。
+
+### 备注
+
+- 未改命令集 / `CommandParser` / 契约 / IPC / Python；未新增 NuGet；无第三方 Popup 库；
+  改动文件均 < 600（Z8：`MainWindow.CommandList.cs` 356 / `MainWindow.axaml.cs` 553）。
+- `FROZEN.md` 追加「模板系统 T5·S4」；`INTERFACES.md` §16；`ACCEPTANCE.MD` 追加验收段。
+
+---
+
+## [模板系统 T5·S4-fix] - 2026-09-26：候选列表收尾（不可用剔除 + `/扩图` 置顶 + 次数排序）
+
+### 目标
+
+S4 候选列表三项收尾：① 不可用命令**不渲染**（而非置灰）；② `/扩图` 当前可用时**置顶**；
+③ 候选按**使用次数**（常用程度）排序。纯 UI / App 层，**不碰契约 / 命令集 / IPC / Python**；
+**热重载 Z-030 永久关闭**。**无 GPU**（Z29 / Z30）。
+
+### 做了什么
+
+- **UI 纯逻辑**：新增 `ZivAiEditor.UI/Editing/CommandOrdering.cs`——`Order(filtered, counts)`。
+- **App 状态**：新增 `ZivAiEditor.App/CommandUsageStore.cs`——`Load()` / `Record(name)` + `Counts`；
+  文件 `{AppContext.BaseDirectory}/commands.usage.json`（Z14）；源生成 JSON（AOT 友好）。
+- **`MainWindow.CommandList.cs`**：
+  - `ShowSuggestions`：`Filter` → `CommandAvailability.Evaluate` **剔除不可用** → `CommandOrdering.Order`
+    → 渲染；`_suggestions` 改为 `List<CommandDefinition>`；移除 `Suggestion` 记录。
+  - `BuildSuggestionRow`：删除置灰 / ToolTip / 不可用无点击分支（无不可用行）。
+  - `MoveSelection` / `_suggestionIndex`：简化为普通索引环绕（无可跳过项）。
+  - `CommitSelection`：插入成功后 `_usageStore.Record(name)`（缓存 + 写盘）。
+  - `InitCommandList`：`new CommandUsageStore(System.AppContext.BaseDirectory)` + `Load()` 一次。
+- **`MainWindow.axaml`**：无改动（置灰样式原在代码，非 XAML）。
+
+### CommandOrdering 排序规则
+
+1. 存在 `name=="/扩图"` → 移到首位（无论次数）；
+2. 其余按 `counts[name]` **降序**（无记录 / 缺键视为 0）；
+3. 次数并列 → 保持输入 `filtered` 的原始序（`OrderByDescending` 为**稳定排序**）。
+- 边界：空 counts / 全 0 → 原序（若有 `/扩图` 仍置顶）；`/扩图` 不在候选 → 纯次数排序。
+
+### CommandUsageStore 读写 / 容错
+
+- 结构 `{ "version": 1, "counts": { "/换背景": 12 } }`；无上限（命令集封闭，天然有界）。
+- **读**：启动一次；缺文件 / 损坏 / 解析失败 → 空字典（`try-catch` + `Debug.WriteLine`，不崩）。
+- **写**：`Record` = count+1 → 原子写（temp + `File.Move` 覆盖）；失败静默（不抛）。
+
+### 不可用项移除
+
+- `ShowSuggestions` 中 `available=false` 直接 `Where` 剔除，**不进渲染列表**；`BuildSuggestionRow`
+  无置灰 / ToolTip / 不可用分支；`CommandAvailability` 本身未改（仍用于过滤）。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 新增单测：`CommandOrderingTests`（6）/ `CommandUsageStoreTests`（4）。
+- 受影响类（Ordering / UsageStore / Suggestions / Availability / Requirements / SessionViewModel）→ **92 通过 / 0 失败**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **545 通过 / 0 失败**（基线 535 + 10）。
+- 未启动 Python / 未加载模型。
+
+### 未决 / 待真机
+
+- 真机验收清单（用户）：① 无图时 `/换` 仅出「编辑类不可用」之外的可选项（T2I 类可出）；
+  ② 有外扩裁切时 `/` 列表首项为 `/扩图`；③ 多次使用某命令后该命令上浮；④ 插入计数落盘
+  `commands.usage.json`；⑤ 损坏该文件后重启不崩。
+
+### 备注
+
+- 未改命令集 / `CommandParser` / 契约 / IPC / Python；未新增 NuGet；改动文件均 < 600（Z8）。
+- `FROZEN.md` 追加「模板系统 T5·S4-fix」+ **Z-030 关闭**；`INTERFACES.md` §17；`ACCEPTANCE.MD` 追加验收段。

@@ -203,3 +203,47 @@
   「…Replace all solid blue padded regions…outside the blue areas.」。
 - `OutpaintMask`（`ZivAiEditor.Agent.Session`）保留供实验，产品不再使用。
 - **Z-029**：A / B 均不采用。
+
+## 15. 追加说明（模板系统 T5·S1 · 合并视图装配 + 纯函数）
+
+> 本节为**追加**（只增不改）。
+
+- **构造重载（非契约）**：`CommandParser` 新增 `CommandParser(IReadOnlyList<CommandDefinition> commands)`；
+  旧 `CommandParser(string commandsJsonPath = DefaultCommandsPath)` **保留并委托**（`: this(LoadCommands(path))`，
+  文件缺失回退 `BuiltInCommands()`，行为不变）。解析逻辑未动。
+- **装配（非契约）**：`AppContext.BuildAgent` 构造 `CommandTemplateService(templateDirectory)`，parser 以
+  `ICommandTemplateService.List()` 的 `Definition` 列表构造（内置 + 用户合并视图）；`AppContext` 新增属性
+  `ICommandTemplateService CommandTemplates`（供后续 UI 使用）。
+- **新增纯函数（非契约）**：
+  - `ZivAiEditor.App.CommandAvailability`：`readonly record struct Context(bool HasImage, int ImageCount,
+    bool HasOutpaintCrop)` + `Evaluate(CommandDefinition, Context) -> (bool available, string? reason)`；
+    四轴 = T2I 需无图 / 编辑需有图 / multi-only 需 ≥2 图 / `/扩图` 需外扩裁切。
+  - `ZivAiEditor.UI.Editing.CommandSuggestions.Filter(IReadOnlyList<CommandDefinition>, string prefix)`：
+    Ordinal 前缀；空串或 `/` → 全部；保持原顺序。
+  - `CommandRequirements.RequiresMoreImages` / `RequiresOutpaintCrop` 签名不变，改为复用
+    `CommandAvailability.Evaluate`（hint 文案不变）。
+- **未接入**：`/` 候选 Popup（S4）；热重载（Z-030，重启生效）。
+- **无契约追加 / 无 IPC 改动**。
+
+## 16. 追加说明（模板系统 T5·S4 · `/` 候选列表 UI）
+
+> 本节为**追加**（只增不改）。
+
+- **UI（非契约）**：`ZivAiEditor.App/MainWindow.CommandList.cs`（partial）——`PART_Input` 下方
+  `Popup PART_CommandPopup` 展示候选；`MainWindow.axaml.cs` 的 Tunnel `KeyDown` 首句调用
+  `HandleCommandListKey`。筛选 / 可用性复用 `CommandSuggestions` / `CommandAvailability`。
+- **行为**：输入单 token 且以 `/` 开头（无空白）显示；不可用项置灰 + ToolTip(reason) + ↑↓ 跳过；
+  ↑↓ 选择 / Enter·Tab 插入（不发送）/ Esc 关闭；输入框自持焦点。
+- **无契约追加 / 无 IPC 改动**。
+
+## 17. 追加说明（模板系统 T5·S4-fix · 候选排序 / 使用次数）
+
+> 本节为**追加**（只增不改）；**更正 §16** 的「不可用项置灰 + ToolTip + ↑↓ 跳过」描述。
+
+- **新增纯逻辑（非契约）**：`ZivAiEditor.UI.Editing.CommandOrdering.Order(filtered, counts)` ——
+  `/扩图` 置顶 → 其余按次数降序（缺键 = 0）→ 并列保持原序（稳定）。
+- **新增 App 状态（非契约）**：`ZivAiEditor.App.CommandUsageStore` —— `Load()` / `Record(name)` / `Counts`；
+  文件 `{AppContext.BaseDirectory}/commands.usage.json`（Z14，源生成 JSON；缺 / 坏 → 空；写失败静默）。
+- **行为更正**：`ShowSuggestions` 先 `CommandAvailability.Evaluate` **剔除不可用**（不渲染，取代置灰）；
+  再 `CommandOrdering.Order`；`CommitSelection` 成功后 `Record(name)`。
+- **无契约追加 / 无 IPC 改动**。

@@ -23,9 +23,12 @@ internal partial class CommandJsonContext : JsonSerializerContext
 }
 
 /// <summary>
-/// Regex-free, deterministic <see cref="ICommandParser"/>. Commands are loaded
-/// once from <c>Template/commands.json</c>; if the file is missing or malformed a
-/// built-in default set is used, so the app works with no external files (Z28).
+/// Regex-free, deterministic <see cref="ICommandParser"/>. Commands are held as an
+/// immutable set: the App composes the built-in + user merged view
+/// (<c>ICommandTemplateService.List()</c>) and passes it in (T5/S1); the
+/// <c>Template/commands.json</c> ctor remains for tests / standalone use, falling back
+/// to a built-in default set when the file is missing or malformed, so the app works
+/// with no external files (Z28).
 ///
 /// Command matching is ordinal (case-sensitive). Parameter substitution is a
 /// plain <c>{name}</c> string replace — no type conversion. Two structural extras
@@ -54,9 +57,24 @@ public sealed partial class CommandParser : ICommandParser
 
     private readonly IReadOnlyList<CommandDefinition> _commands;
 
-    public CommandParser(string commandsJsonPath = DefaultCommandsPath)
+    /// <summary>
+    /// Builds a parser over an already-resolved command set (T5/S1: the built-in + user merged
+    /// view from <c>ICommandTemplateService.List()</c>). The set is held as-is; this ctor never
+    /// touches the filesystem.
+    /// </summary>
+    public CommandParser(IReadOnlyList<CommandDefinition> commands)
     {
-        _commands = LoadCommands(commandsJsonPath);
+        _commands = commands ?? throw new ArgumentNullException(nameof(commands));
+    }
+
+    /// <summary>
+    /// File-backed parser (Step 8): loads a single <c>commands.json</c> and delegates to the
+    /// list ctor; a missing / malformed file falls back to <see cref="BuiltInCommands"/> so the
+    /// app works with no external files (Z28). Behavior is unchanged from the pre-S1 ctor.
+    /// </summary>
+    public CommandParser(string commandsJsonPath = DefaultCommandsPath)
+        : this(LoadCommands(commandsJsonPath))
+    {
     }
 
     /// <summary>The loaded command set (file or built-in default).</summary>
