@@ -54,6 +54,20 @@ public class CropStateTests
     }
 
     [Fact]
+    public void SetFullRect_Covers_Whole_Image()
+    {
+        var state = NewState();
+
+        state.SetFullRect();
+
+        Assert.True(state.HasRect);
+        Assert.Equal(0, state.X);
+        Assert.Equal(0, state.Y);
+        Assert.Equal(W, state.Width);
+        Assert.Equal(H, state.Height);
+    }
+
+    [Fact]
     public void SetRect_Allows_Negative_X()
     {
         var state = NewState();

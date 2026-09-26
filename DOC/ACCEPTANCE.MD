@@ -4001,3 +4001,34 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 ### 验收后动作
 
 1. 真机 T5S4f6.9 通过后，在「验收记录」追加“模板系统 T5·S4-fix6 通过，日期：____”（待签）。
+
+---
+
+## Step 9C.14 验收：`/` 候选向上弹出 + 裁切重置满图
+
+**目标**：① 候选 Popup 统一向上；② 裁切「重置」/ 首帧回到图片原图尺寸。**无 GPU**（Z29 / Z30）。
+
+### 清单
+
+| # | 检查项 | 怎么查 | 通过标准 | 结果 |
+|---|---|---|---|---|
+| 9C.14.1 | Placement | 查 `MainWindow.axaml` | `PART_CommandPopup` `Placement="Top"` | ✅ |
+| 9C.14.2 | 锚点/间隙 | 查 `InitCommandList` | `PlacementTarget=PART_InputBox`，`VerticalOffset=-6` | ✅ |
+| 9C.14.3 | 宽度 | 查 `ShowSuggestions` | `host.Width = PART_InputBox.Bounds.Width` | ✅ |
+| 9C.14.4 | 满图 API | 查 `CropState.SetFullRect` | `SetRect(0,0,imageW,imageH)` | ✅ |
+| 9C.14.5 | 重置 | 查 `ResetCropRect` | 满图 + 比例锁 `Free`（面板同步） | ✅ |
+| 9C.14.6 | 首帧 | 查 `RestoreOrDefaultCrop` | 无历史裁切 → 满图 | ✅ |
+| 9C.14.7 | 单测 | `CropStateTests` | 新增 `SetFullRect_Covers_Whole_Image` | ✅ |
+| 9C.14.8 | 构建 | `dotnet build -c Release` | 0 错误 0 警告 | ✅ |
+| 9C.14.9 | 测试 | 非 GPU 全量 | **564 通过 / 0 失败** | ✅ |
+| 9C.14.10 | 无 GPU 负载 | 本轮 | 未启动 Python / 未加载模型（Z29 / Z30） | ✅ |
+| 9C.14.11 | 真机 | 用户 | `/` 候选始终在输入框上方；裁切重置 / 首帧为满图 | ⏳ 待用户确认 |
+
+### 通过标准
+
+- 构建 0 错误 0 警告；非 GPU 全量 **564 通过 / 0 失败**；9C.14.1–9C.14.10 通过；
+  9C.14.11 由用户真机确认。
+
+### 验收后动作
+
+1. 真机 9C.14.11 通过后，在「验收记录」追加“Step 9C.14 通过，日期：____”（待签）。

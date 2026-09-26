@@ -105,7 +105,7 @@ public partial class ImagePreview
         UpdateCropMode();
     }
 
-    /// <summary>Resets the selection to the default box, re-applying the active aspect lock.</summary>
+    /// <summary>Resets the selection to the whole image and clears the aspect lock to Free.</summary>
     private void ResetCropRect()
     {
         if (_crop is null || !_crop.IsActive)
@@ -113,8 +113,9 @@ public partial class ImagePreview
             return;
         }
 
-        _crop.SetDefaultRect();
-        _crop.SetAspect(_crop.Aspect);
+        _crop.SetFullRect();
+        _crop.SetAspect(CropAspectMode.Free);
+        _cropPanel?.SetAspect(CropAspectMode.Free);
         _cropOverlay?.InvalidateVisual();
     }
 
@@ -264,7 +265,7 @@ public partial class ImagePreview
         }
     }
 
-    /// <summary>Restores the node's previous crop rectangle, or seeds an 85% box.</summary>
+    /// <summary>Restores the node's previous crop rectangle, or seeds the whole image.</summary>
     private void RestoreOrDefaultCrop()
     {
         if (_crop is null)
@@ -279,7 +280,7 @@ public partial class ImagePreview
 
         if (!_crop.HasRect)
         {
-            _crop.SetDefaultRect();
+            _crop.SetFullRect();
         }
     }
 

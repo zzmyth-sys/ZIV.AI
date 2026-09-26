@@ -33,6 +33,7 @@ public partial class MainWindow
     private Border? _commandPopupHost;
     private StackPanel? _commandList;
     private TextBox? _commandInput;
+    private Border? _commandInputBox;
     private CommandUsageStore? _usageStore;
     private IReadOnlyDictionary<string, int> _usageCounts = new Dictionary<string, int>();
     private int _suggestionIndex = -1;
@@ -46,6 +47,7 @@ public partial class MainWindow
         _commandPopupHost = this.FindControl<Border>("PART_CommandPopupHost");
         _commandList = this.FindControl<StackPanel>("PART_CommandList");
         _commandInput = FindInput();
+        _commandInputBox = this.FindControl<Border>("PART_InputBox");
 
         // Usage counts live in the program directory (Z14); read once, mutated in place on Record.
         _usageStore = new CommandUsageStore(System.AppContext.BaseDirectory);
@@ -65,10 +67,16 @@ public partial class MainWindow
 
         if (_commandPopup is { } popup)
         {
-            if (_commandInput is { } target)
+            // Anchor above the input container (Placement="Top" in XAML): the list opens
+            // upward over the chat, so it never covers the input box and never falls off the
+            // window bottom. The container (not the TextBox) keeps a clean 6px gap.
+            if (((Control?)_commandInputBox ?? _commandInput) is { } target)
             {
                 popup.PlacementTarget = target;
             }
+
+            // Top placement: a negative offset moves the popup up, away from the target.
+            popup.VerticalOffset = -6;
 
             popup.IsLightDismissEnabled = false;
             popup.Closed += (_, _) => ResetSuggestionState();
@@ -170,10 +178,11 @@ public partial class MainWindow
         _suggestionIndex = 0;
         UpdateHighlight();
 
-        // Match the input's width so the panel reads as an extension of the box.
-        if (_commandPopupHost is { } host && _commandInput is { Bounds.Width: > 0 } input)
+        // Match the input container's width so the panel reads as an extension of the box.
+        var widthTarget = (Control?)_commandInputBox ?? _commandInput;
+        if (_commandPopupHost is { } host && widthTarget is { Bounds.Width: > 0 })
         {
-            host.Width = input.Bounds.Width;
+            host.Width = widthTarget.Bounds.Width;
         }
 
         _commandPopup.IsOpen = true;

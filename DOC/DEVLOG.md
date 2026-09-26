@@ -6489,3 +6489,41 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 ### 备注
 
 - 未改 Contracts / IPC / Python；解析逻辑未变，仅错误分支文案与提示。
+
+---
+
+## [Step 9C.14] - 2026-09-26：`/` 候选统一向上弹出 + 裁切框重置为满图
+
+### 1) `/` 候选 Popup 统一向上弹出
+
+- **现象**：候选有时向下、有时向上（底部空间不足时 Avalonia 默认约束含 FlipY 会上翻），方向不统一。
+- **改动**：
+  - `MainWindow.axaml`：`PART_CommandPopup` 的 `Placement` 由 `Bottom` 改为 **`Top`**。
+  - `MainWindow.CommandList.cs`：重新锚定 `PART_InputBox`（容器），`VerticalOffset = -6`（顶边上方 6px 间隙），
+    宽度锚 `PART_InputBox.Bounds.Width`。
+- **效果**：始终在输入框上方展开，不遮挡输入框，也不会掉出窗口底部。
+
+### 2) 裁切框重置为图片原图尺寸
+
+- **现象**：裁切「重置」回到 85% 居中默认框（`CropState.SetDefaultRect`），而非图片原始尺寸。
+- **改动**：
+  - `CropState`：新增 `SetFullRect()` = `SetRect(0, 0, imageWidth, imageHeight)`（整幅图；内裁不受外扩像素上限影响）。
+  - `ImagePreview.Crop.cs`：
+    - `ResetCropRect`：改用 `SetFullRect()` 并把比例锁清为 `Free`（同步 `CropModePanel` 标签）；
+    - `RestoreOrDefaultCrop`（首次进入、无历史裁切）：回退也用 `SetFullRect()`。
+  - `CropStateTests`：新增 `SetFullRect_Covers_Whole_Image`。
+- 未改：裁切拖拽 / 手柄 / 外扩 / 比例吸附几何；`SetDefaultRect` 保留（测试仍覆盖）。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **564 通过 / 0 失败**（基线 563 + 1 新例）。
+
+### 未决 / 待真机
+
+- Popup 向上后的实际观感（遮挡聊天区范围）由真机确认。
+- 裁切首帧满图后手柄落在图像边缘（外扩方向仍在），由真机确认可拖拽。
+
+### 备注
+
+- 未改 Contracts / IPC / Python。

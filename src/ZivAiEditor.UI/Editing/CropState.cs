@@ -177,6 +177,13 @@ public sealed partial class CropState
     }
 
     /// <summary>
+    /// Selects the whole image (<c>0,0,imageWidth,imageHeight</c>) — the reset / first-entry box
+    /// (so the crop starts from the full original rather than an inset default). An inner crop,
+    /// so the outpaint pixel cap never applies.
+    /// </summary>
+    public void SetFullRect() => SetRect(0, 0, _imageWidth, _imageHeight);
+
+    /// <summary>
     /// Returns which handle (or <see cref="CropHandle.Move"/> inside the rectangle) lies
     /// under the given image-space point, within <paramref name="tolerance"/> image pixels.
     /// </summary>
