@@ -405,7 +405,7 @@ public class CommandParserTests
         var result = await parser.ParseAsync("/换背景", SessionWithImage(), 1, resolution: null);
 
         Assert.False(result.Success);
-        Assert.NotNull(result.ErrorMessage);
+        Assert.Contains("你要换成什么背景", result.ErrorMessage);
     }
 
     [Fact]
@@ -416,7 +416,7 @@ public class CommandParserTests
         var result = await parser.ParseAsync("/合照", SessionWithImage(), 2, resolution: null);
 
         Assert.False(result.Success);
-        Assert.Contains("Try: /合照 两人在森林握手", result.ErrorMessage);
+        Assert.Contains("例如：/合照 两人在森林握手", result.ErrorMessage);
     }
 
     [Fact]
@@ -427,14 +427,14 @@ public class CommandParserTests
         var result = await parser.ParseAsync("/换背景", SessionWithImage(), 1, resolution: null);
 
         Assert.False(result.Success);
-        Assert.Contains("Try: /换背景 森林", result.ErrorMessage);
+        Assert.Contains("例如：/换背景 森林", result.ErrorMessage);
     }
 
     [Fact]
     public async Task Variadic_Command_Without_Params_Reports_Config_Error()
     {
-        // A malformed command (variadic but declares no parameter) must keep the config-error
-        // wording instead of the "Try: ..." hint.
+        // A malformed command (variadic but declares no parameter) must report a config error
+        // instead of the friendly "missing argument" question.
         var directory = Path.Combine(Path.GetTempPath(), "zivai_cmd_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "commands.json");
@@ -454,7 +454,7 @@ public class CommandParserTests
             var result = await parser.ParseAsync("/坏", SessionWithImage(), 1, resolution: null);
 
             Assert.False(result.Success);
-            Assert.Contains("declares no parameter", result.ErrorMessage);
+            Assert.Contains("未声明任何参数", result.ErrorMessage);
         }
         finally
         {

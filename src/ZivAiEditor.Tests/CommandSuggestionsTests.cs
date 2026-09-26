@@ -56,8 +56,8 @@ public class CommandSuggestionsTests
     {
         var commands = BuiltIn();
 
-        Assert.Equal(11, CommandSuggestions.Filter(commands, "/").Count);
-        Assert.Equal(11, CommandSuggestions.Filter(commands, "").Count);
+        Assert.Equal(13, CommandSuggestions.Filter(commands, "/").Count);
+        Assert.Equal(13, CommandSuggestions.Filter(commands, "").Count);
         Assert.Equal(5, CommandSuggestions.Filter(commands, "/换").Count);
         Assert.Empty(CommandSuggestions.Filter(commands, "/不存在"));
     }

@@ -167,25 +167,14 @@ public sealed partial class CommandParser : ICommandParser
 
         if (TryBuildArgs(command, rawArgs) is not { } effectiveArgs)
         {
-            // A genuine config error (a variadic command with no parameter to hold the text)
-            // keeps its own wording; otherwise the arguments are missing / wrong, so give the
-            // user a concrete example of the command's expected shape.
+            // A malformed command (variadic with no parameter to hold the text) is a config
+            // error; otherwise the user simply omitted the argument, so answer in plain words.
             if (command.Variadic && command.Params.Count < 1)
             {
-                return Error($"Command '{command.Name}' is variadic but declares no parameter.");
+                return Error($"命令「{command.Name}」配置有误：variadic 需要至少 1 个参数，但未声明任何参数（请检查 commands.json）。");
             }
 
-            var paramList = string.Join(", ", command.Params);
-            var example = command.Name switch
-            {
-                "/合照" => "/合照 两人在森林握手",
-                "/换背景" => "/换背景 森林",
-                "/换装" => "/换装 红色连衣裙",
-                "/生成" => "/生成 森林里的精灵",
-                _ => paramList.Length > 0 ? $"{command.Name} <{paramList}>" : command.Name,
-            };
-            return Error(
-                $"Command '{command.Name}' expects {command.Params.Count} argument(s) ({paramList}). Try: {example}");
+            return Error(MissingArgsMessage(command));
         }
 
         // T3.1: route by the effective handler and validate the fields it owns (warn + ignore, never silent).

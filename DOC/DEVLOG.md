@@ -6314,3 +6314,178 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **边界**：E1 复用（公共尾部设 true，幂等）；E2 切项目/删节点（走 `Closed` 恢复）；E3 主窗关闭（Owner 联动，
   遮罩随主窗关闭）；E4 遮罩 `IsHitTestVisible=false` 不拦点击，Alt+F4+dirty 行为不变。
 - **实测**：build 0 错误 0 警告；非 GPU 全量 **563 通过 / 0 失败**（不变）。
+
+---
+
+## [模板系统 T5·S4-fix2] - 2026-09-26：候选 Popup 锚定输入框容器底边（不遮挡底部边框）
+
+### 只读结论（R1–R3）
+
+- `MainWindow.axaml:145` `Popup PART_CommandPopup` `Placement="Bottom"`；XAML 未设 PlacementTarget /
+  VerticalOffset / HorizontalOffset / Width / MaxHeight，也无 `CustomPopupPlacementCallback`。
+- PlacementTarget 由代码设：`MainWindow.CommandList.cs:76` → `_commandInput`（`PART_Input` TextBox，
+  `:35/:49`）——**不是**容器 `PART_InputBox`。
+- 打开时机：`InitCommandList`（`:44`，构造 `MainWindow.axaml.cs:135` 调）→ `TextChanged` →
+  `RefreshSuggestions`（`:136`）→ `ShowSuggestions`（`:148`）设宽后 `IsOpen=true`（`:188`）；全程不设 Offset。
+- 容器几何：`PART_InputBox`（`MainWindow.axaml:91-97`）`CornerRadius=12` / `BorderThickness=1` /
+  `Padding=12,10`；Row1 按钮行 `Margin=0,6,0,0`（`:109`）+ 按钮 `Height=24`（`ChromeStyles.axaml:88/102`）→
+  `PART_InputBox.Bottom − PART_Input.Bottom = 6 + 24 + 10 + 1 = 41px`。
+
+### 根因
+
+`PlacementTarget` 指向 `PART_Input`（TextBox），`Placement=Bottom` 把弹层顶边贴 TextBox 底边；TextBox
+底边比容器底边高 41px，首行（约 30–35px）下缘落进容器底边框带 → 盖住底边框。
+
+### 改动（`MainWindow.CommandList.cs`，方式 A）
+
+- 新增字段 `_commandInputBox`（`:36`）；`InitCommandList` 取 `PART_InputBox`（`:50`）。
+- `popup.PlacementTarget = _commandInputBox`（`:74-76`）；`popup.VerticalOffset = 6`（`:79`）→ 4–8px 间隙。
+- `ShowSuggestions` 宽度锚 `PART_InputBox.Bounds.Width`（`:182-185`），与输入框等宽。
+- `MainWindow.axaml` 未改；`ScrollViewer MaxHeight=200`（`axaml:152`）保持（I3）；不改筛选 / 排序 / 键盘 /
+  置灰；不改输入框结构 / 圆角 / 尺寸。方向约束保持 Avalonia 默认（含 FlipY：下方空间不足时上翻，用户已确认）。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **563 通过 / 0 失败**（基线 563，无回归）。
+- 未启动 Python / 未加载模型。
+
+### 未决 / 待真机
+
+- GUI 坐标无法无头验证 → 真机验收（见 `ACCEPTANCE.MD`「模板系统 T5·S4-fix2」6 条）。
+- 容器底边距窗口底约 10px；下方屏幕空间不足时弹层按默认约束上翻（仍不遮挡输入框）。
+
+### 备注
+
+- 未改命令集 / 契约 / IPC / Python；未新增 NuGet；改动文件 < 600（Z8：`MainWindow.CommandList.cs` 340）。
+- `ACCEPTANCE.MD` 追加「模板系统 T5·S4-fix2」验收段。
+
+---
+
+## [模板系统 T5·S4-fix3] - 2026-09-26：无参数命令提交后候选弹层残留（统一补尾随空格）
+
+### 现象 / 只读结论
+
+- 从候选列表选中 `/扩图` 后弹层不消失（`/去水印` / `/全景` 同理）；选中 `/换背景` 等则消失。
+- 机制：`CommitSelection` 插入规则 `Params.Count > 0 ? Name + " " : Name`；无参数命令只写 `/扩图`。
+- Avalonia `TextBox.TextChanged` **异步**派发（`TextBox.RaiseTextChangeEvents` → `Dispatcher.UIThread.Post`，
+  Avalonia 12.1.1 `TextBox.cs:2521-2534`），故 `CommitSelection` 内的 `_suppressSuggestionRefresh` 守卫
+  在回调时已复位；排队回调触发 `RefreshSuggestions` → `CommandPrefix("/扩图")` 非 null → `ShowSuggestions`
+  重开弹层。
+- `/换背景 ` 含空格 → `CommandPrefix` 返回 null → 保持关闭。
+
+### 改动（`MainWindow.CommandList.cs`）
+
+- `CommitSelection`：`insert = definition.Name + " "`（对无参数命令也不再省略空格，`:260-268`）。
+- 解析器容忍尾随空格：`CommandParser.cs:104` `Trim()` + `:157` 按空白分割（`RemoveEmptyEntries`），语义不变。
+- 未改筛选 / 排序 / 键盘 / 置灰；未改输入框结构。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **563 通过 / 0 失败**（基线 563，无回归）。
+
+### 待真机
+
+- 选 `/扩图`（及 `/去水印`）回车 → 弹层立即关闭、输入为 `/扩图 `，与有参命令一致；Enter 正常发送。
+
+---
+
+## [模板系统 T5·S4-revert2] - 2026-09-26：回退候选 Popup 锚点改动（T5·S4-fix2）
+
+### 回退原因
+
+- 用户裁决：回退 fix2 对 Popup 锚点 / 偏移 / 宽度的改动；**保留** fix3（提交统一补尾随空格）。
+- 回退后恢复原行为：`PlacementTarget = PART_Input`（TextBox 底边）、无 `VerticalOffset`、宽度锚输入框宽；
+  T5·S4-fix2 描述的「弹层顶边贴容器底边 / 4–8px 间隙」不再生效。
+
+### 回退内容（`MainWindow.CommandList.cs`）
+
+- 删除字段 `_commandInputBox` 与其 `FindControl` 赋值。
+- `InitCommandList`：`popup.PlacementTarget = _commandInput`（恢复）；删除 `popup.VerticalOffset = 6`。
+- `ShowSuggestions`：宽度恢复 `_commandInput.Bounds.Width`。
+- 保留：`CommitSelection` 的 `insert = definition.Name + " "`（fix3）。
+- `MainWindow.axaml` 自始未改。
+
+### 文档
+
+- 不删改已追加的 `T5·S4-fix2` 段（只增不改）；本段为回退记录。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **563 通过 / 0 失败**（基线 563）。
+
+---
+
+## [模板系统 T5·S4-fix4] - 2026-09-26：新增 `/去背景` 命令（无参数固定模板）
+
+### 做了什么
+
+- `Template/commands.json`：新增 `/去背景`（`handler=Edit`、`params=[]`、`tool=QW21edit`），`template` 为固定英文
+  提示词（描述 RGBA 透明通道），`description` = “生成透明通道PNG图”。
+- `CommandParser.BuiltIn.cs`：同步新增同名内置兜底项（Z28 无文件回退；与数据文件保持一致）。
+- `CommandSuggestionsTests.BuiltIn_Set_Counts`：内置命令数 11 → 12。
+- 模板不含 `{description}` 占位符（无参数命令；`ApplyTemplate` 仅替换 `params` 声明的占位符）。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `Template/commands.json` JSON 合法（12 条）。
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **563 通过 / 0 失败**。
+
+### 备注
+
+- 未改 Contracts / IPC / Python；`commands.json` 与内置集合一致（`CommandRealDataTests.BuiltIn_Matches_DataFile`）。
+
+---
+
+## [模板系统 T5·S4-fix5] - 2026-09-26：新增 `/提取` 命令（带 object 参数）
+
+### 做了什么
+
+- `Template/commands.json`：新增 `/提取`（`handler=Edit`、`params=["object"]`、`variadic=true`、`tool=QW21edit`）；
+  模板占位符由草稿的 `{str}` 统一为 `{object}`（与 `/去物体` 一致，`ApplyTemplate` 才会替换），
+  `description` = “提取指定主体到纯白底”。
+- `CommandParser.BuiltIn.cs`：同步内置兜底同名项。
+- `CommandSuggestionsTests.BuiltIn_Set_Counts`：内置命令数 12 → 13。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `Template/commands.json` JSON 合法（13 条）；`/提取` params=object / variadic=true / 含 `{object}` 无 `{str}`。
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **563 通过 / 0 失败**。
+
+### 备注
+
+- 未改 Contracts / IPC / Python；`commands.json` 与内置集合一致（`CommandRealDataTests.BuiltIn_Matches_DataFile`）。
+
+---
+
+## [模板系统 T5·S4-fix6] - 2026-09-26：命令参数报错人性化（漏填参数 / 配置错误）
+
+### 背景
+
+用户反馈 `variadic but declares no parameter` 之类英文报错不友好，希望「未输入目标 / 你要提取什么？」这类问句。
+
+### 改动
+
+- 新增 `src/ZivAiEditor.Agent/Execution/Command/CommandParser.Messages.cs`（partial，44 行）：
+  `MissingArgsMessage(command)` —— 内置参数命令给专属问句 + 示例，其余回退通用文案。
+  - `/提取` → “你要提取什么？例如：/提取 猫”；`/去物体` → “你要移除什么物体？…”；
+    `/换背景` / `/换装` / `/换发色` / `/换表情` / `/换光线` / `/合照` / `/生成` 各自问句。
+  - 通用回退：“「{命令}」缺少参数（{参数}）。例如：{示例}”。
+- `CommandParser.cs`：漏填参数分支改调 `MissingArgsMessage`；variadic 无参数配置错误改中文说明
+  （“命令「…」配置有误：variadic 需要至少 1 个参数，但未声明任何参数（请检查 commands.json）。”）。
+- `CommandParserTests`：断言同步（`/换背景` 空参 → “你要换成什么背景”；`例如：…` 替代 `Try: …`；
+  配置错误 → “未声明任何参数”）。
+
+### 实测（Z29 / Z30：无 GPU）
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **563 通过 / 0 失败**。
+- Z8：`CommandParser.cs` 560、`CommandParser.Messages.cs` 44（均 < 600）。
+
+### 备注
+
+- 未改 Contracts / IPC / Python；解析逻辑未变，仅错误分支文案与提示。

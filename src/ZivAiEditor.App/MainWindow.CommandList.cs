@@ -249,7 +249,13 @@ public partial class MainWindow
         }
 
         var definition = _suggestions[_suggestionIndex];
-        var insert = definition.Params.Count > 0 ? definition.Name + " " : definition.Name;
+        // Always leave the prefix segment with a trailing space, parameterless commands
+        // included. Avalonia's TextBox.TextChanged is async (Dispatcher.Post), so the
+        // suppressed assignment below fires RefreshSuggestions *after* this method returns;
+        // a bare "/扩图" would still be a valid prefix and re-open the list, while "/扩图 "
+        // makes CommandPrefix return null and keeps it closed. The parser trims, so the
+        // sent text is unchanged.
+        var insert = definition.Name + " ";
 
         _suppressSuggestionRefresh = true;
         try

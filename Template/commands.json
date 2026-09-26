@@ -89,11 +89,28 @@
       "description": "去除水印"
     },
     {
+      "name": "/去背景",
+      "handler": "Edit",
+      "params": [],
+      "tool": "QW21edit",
+      "template": "This is an RGBA image with transparency. The image has an alpha channel and the background is transparent.",
+      "description": "生成透明通道PNG图"
+    },
+    {
       "name": "/去物体",
       "params": ["object"],
       "tool": "QW21edit",
       "template": "Remove the {object} from <image1>. Fill the removed area naturally to match the surrounding context; keep everything else exactly unchanged.",
       "description": "移除指定物体"
+    },
+    {
+      "name": "/提取",
+      "handler": "Edit",
+      "params": ["object"],
+      "variadic": true,
+      "tool": "QW21edit",
+      "template": "Extract the {object} from the image and place it on a clean, solid white background. Preserve the original details, textures, colors, and materials. Remove the body, pose, and other unrelated elements.",
+      "description": "提取指定主体到纯白底"
     },
     {
       "name": "/扩图",

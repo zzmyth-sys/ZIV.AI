@@ -116,11 +116,30 @@ public sealed partial class CommandParser
         },
         new CommandDefinition
         {
+            Name = "/去背景",
+            Handler = CommandHandler.Edit,
+            Params = new List<string>(),
+            Tool = "QW21edit",
+            Template = "This is an RGBA image with transparency. The image has an alpha channel and the background is transparent.",
+            Description = "生成透明通道PNG图",
+        },
+        new CommandDefinition
+        {
             Name = "/去物体",
             Params = new List<string> { "object" },
             Tool = "QW21edit",
             Template = "Remove the {object} from <image1>. Fill the removed area naturally to match the surrounding context; keep everything else exactly unchanged.",
             Description = "移除指定物体",
+        },
+        new CommandDefinition
+        {
+            Name = "/提取",
+            Handler = CommandHandler.Edit,
+            Params = new List<string> { "object" },
+            Variadic = true,
+            Tool = "QW21edit",
+            Template = "Extract the {object} from the image and place it on a clean, solid white background. Preserve the original details, textures, colors, and materials. Remove the body, pose, and other unrelated elements.",
+            Description = "提取指定主体到纯白底",
         },
         new CommandDefinition
         {
