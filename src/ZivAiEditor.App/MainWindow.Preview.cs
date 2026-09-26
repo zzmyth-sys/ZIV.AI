@@ -37,9 +37,19 @@ public partial class MainWindow
         if (_imagePreview is null)
         {
             var preview = new ImagePreview(_imaging);
+
+            // F5.2: the preview is a child window of the main window — no separate taskbar
+            // entry. F5.3 (Owner / follow-on-close) is already provided by Show(this) below;
+            // Window.Owner has a protected setter and cannot be assigned directly here.
+            preview.ShowInTaskbar = false;
+
             _shell.ApplyChrome(preview);
             preview.Closed += async (_, _) =>
             {
+                // F5.1: restore the main window on every close path (user X, project switch,
+                // node delete, owner close). Unconditional: some paths null the field first.
+                IsEnabled = true;
+
                 MaskDiagnostics.Log(
                     $"[close] preview closed edited={_maskEditedInPreview} busy={_vm.IsBusy} closing={_closing}");
 
@@ -98,6 +108,10 @@ public partial class MainWindow
         // for the root image, which disables the compare button.
         _imagePreview.SetCompareSource(_vm.GetParentPipelineImagePath(path));
         _imagePreview.Activate();
+
+        // F5.1: while the preview is open it is the only interactive window (main window,
+        // including its self-drawn title bar, is disabled). Idempotent across the reuse path.
+        IsEnabled = false;
     }
 
     /// <summary>
@@ -144,7 +158,9 @@ public partial class MainWindow
         var rootPath = _session.RootImagePath;
         var startDirectory = string.IsNullOrWhiteSpace(rootPath) ? null : Path.GetDirectoryName(rootPath);
 
-        var target = await _shell.PickSaveFileAsync(this, BuildSaveName(rootPath, node?.Command), startDirectory);
+        // F5/E4: the picker is owned by the active preview (the main window is disabled
+        // while the preview is open), so it is not anchored to a disabled owner.
+        var target = await _shell.PickSaveFileAsync(preview, BuildSaveName(rootPath, node?.Command), startDirectory);
         if (string.IsNullOrWhiteSpace(target))
         {
             return;

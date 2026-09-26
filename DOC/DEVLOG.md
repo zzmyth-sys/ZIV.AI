@@ -6263,3 +6263,33 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - 修复（`ImagePreview.Crop.cs:204`）：删除该 `ShowCropToast("拖到图像边界外可外扩")` 调用；
   保留 `PART_CropToast` 及其它失败 / 提示用途（「请先框选裁切区域」/ 裁切失败）。
 - 复测：build 0/0。
+
+---
+
+## [Step 9C.13] - 2026-09-26（预览窗子窗口化：模态化 / 不显任务栏 / Owner 跟随）
+
+### 只读结论（R1–R3）
+- 预览窗由 `MainWindow.OpenImagePreview`（`MainWindow.Preview.cs:27`）**单实例**创建/复用（字段 `_imagePreview`
+  `MainWindow.axaml.cs:67`）；首建 `Preview.cs:37-87`，复用 `Preview.cs:88-101`。
+- 唯一 `Closed` 订阅在 `Preview.cs:41-69`；关闭路径四条：用户 X、`ResetTransientUiAsync`
+  （`Projects.cs:191-206`）、`DeleteNodeAsync`（`Delete.cs:36-41`）、主窗 `OnClosing`（`axaml.cs:495`）。
+- `Show(this)` 已赋 Owner（F5.3 基本已具备，**但 `Window.Owner` setter 为 protected，不可显式赋值**）；
+  `ShowInTaskbar` 未设；主窗此前无禁用逻辑（既有只禁预览窗：`Projects.cs:155-158 / :199`）。
+
+### 改动（`MainWindow.Preview.cs`）
+- 首建：`preview.ShowInTaskbar = false;`（F5.2）+ 注释说明 F5.3 由 `Show(this)` 提供（`:40-44`）。
+- `Closed` 处理器首行：`IsEnabled = true;`（F5.1 恢复主窗，四路径统一；无条件执行，兼容先置空字段的路径）。
+- `OpenImagePreview` 尾部（首建与复用共用）：`IsEnabled = false;`（F5.1，幂等）。
+- E4 缓解：预览窗「另存为」picker owner 由 `this`（主窗，禁用态）改为 `preview`（`Preview.cs:161`）。
+
+### E1–E4
+- E1 复用：Owner/ShowInTaskbar 仅首建设一次；`IsEnabled=false` 在公共尾部 → 幂等。
+- E2 切项目/删节点：均 `preview.Close()` → 同一 `Closed` → 恢复主窗。
+- E3 主窗关闭：Owner 带走预览窗 → `Closed` 里 `IsEnabled=true`（主窗关闭中，赋值无害，无循环）。
+- E4 未决：主窗禁用期间以主窗为 owner 的对话框（`OnClosing` 的 `ConfirmAsync(this)`）；理论副作用是 Avalonia
+  在 ShowDialog 结束时把 owner 复位为 enabled。`AskSaveIfDirtyAsync` 在主窗禁用期不可达。
+- 与验收 #4 的张力：**整体禁用后主窗 X 不可点**（裁决 3 含标题栏），#4 走 Alt+F4 / 系统关闭（Owner 仍一起关）。
+
+### 实测（Z29/Z30：无 GPU）
+- `dotnet build src\ZIV.AI.sln -c Release` → 0 错误 0 警告。
+- 非 GPU 全量（排除 `Ipc*` / `PlannerIntegration`）→ **563 通过 / 0 失败**（无测试受影响，纯 App 层）。
