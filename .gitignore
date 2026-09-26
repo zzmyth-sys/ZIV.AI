@@ -45,3 +45,13 @@ logs/
 
 # 发布目录
 publish/
+
+# diag_vram 实测产物（JSONL/CSV/PNG/assets/日志；保留脚本与 DiagMatrix/）
+_test_step2/diag_vram/*.jsonl
+_test_step2/diag_vram/*.csv
+_test_step2/diag_vram/*.png
+_test_step2/diag_vram/out_*.png
+_test_step2/diag_vram/assets/
+_test_step2/diag_vram/kill_snapshot.txt
+_test_step2/diag_vram/summary.md
+_test_step2/diag_vram/run_matrix.log
