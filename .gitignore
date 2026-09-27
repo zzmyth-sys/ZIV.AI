@@ -55,3 +55,11 @@ _test_step2/diag_vram/assets/
 _test_step2/diag_vram/kill_snapshot.txt
 _test_step2/diag_vram/summary.md
 _test_step2/diag_vram/run_matrix.log
+
+# 运行/输出目录（不入库；B2 清洁批次 2026-09-27）
+output/
+_cache/
+sessions/
+
+# _test_step2 下所有层级的实验 PNG（含子目录；仅顶层规则见上）
+_test_step2/**/*.png

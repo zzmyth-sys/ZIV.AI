@@ -6913,3 +6913,20 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
   - `_test_step2/REPORT.md:448` → `csharp_pipe_out.txt` / `csharp_shm_out.txt`。
   - `_test_step2/test_prompt_optimize.py:18`、`_test_step2/test_prompt_optimize_i2v.py:18` → `temp/system_prompt.txt` / `temp/system_prompt_i2v.txt`。
   - `_test_step2/_findings.md`（本批删除）曾引用 `csharp_*`；其内容已迁存于 DEVLOG/FROZEN/REPORT。
+
+### 批 3 · untracked 产物清理（工作区，无 commit）
+
+- **删除（untracked，工作区磁盘）**：
+  - `_test_step2/**/bin/` + `obj/`（16 目录，构建产物）。
+  - `_test_step2/**/*.png`（117 文件 / 168.9 MB；**排除** `input_test_512.png`、`user_input_1024.png`——被 `src/ZivAiEditor.Tests` 引用）。
+  - `_test_step2/**/__pycache__/` + `python/server/__pycache__/`（3 目录）。
+  - `_test_step2/session.json` + `_test_step2/**/*.log`（运行残留）。
+- **停点登记（代码引用夹具）**：`IpcAutoRestartTests` / `IpcCancelTests` / `IpcIdleUnloadTests` / `IpcInferenceTests`(×3) / `IpcModelLoadTests` 引用 `_test_step2/input_test_512.png`；`PlannerIntegrationTests`(×2) 引用 `_test_step2/user_input_1024.png`。两枚 untracked 夹具**保留于磁盘**（它们本就 gitignore，不入库）。
+- **磁盘回收**：`_test_step2` on-disk 1,622.4 MB → **1.0 MB**（回收 **1,621.4 MB**）；scope（`_test_step2`+`temp`+`DOC`+`contracts`+`python`）1,689.6 MB → **3.4 MB**。
+- **无独有结论**：`bin/obj` 仅为构建产物、无实验日志；实验 PNG 可由保留脚本重跑。
+
+### 批 4 · .gitignore 补漏
+
+- **追加**（去重后）：`output/`、`_cache/`、`sessions/`、`_test_step2/**/*.png`。
+- **未加**（已被现有规则覆盖，避免冗余）：`_test_step2/**/bin/`、`_test_step2/**/obj/`、`_test_step2/**/__pycache__/`（现有 `**/bin/` / `**/obj/` / `**/__pycache__/` 已覆盖任意层级）。
+- **效果**：`_test_step2` 子目录实验图不再误入库；程序运行目录 `output/` / `_cache/` / `sessions/` 不入库。gitignore 不删除磁盘文件，故两枚代码引用夹具仍可用于本地测试。
