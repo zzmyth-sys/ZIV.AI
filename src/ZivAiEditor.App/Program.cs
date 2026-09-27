@@ -10,6 +10,10 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // Last-resort crash logging (8K fix): record an unhandled render / thread exception to
+        // _cache/crash.log before the process dies, so a crash is diagnosable.
+        CrashLog.Install();
+
         // CLI entry point (SPEC §3.6). Parsing is lenient: bad / missing flags never
         // abort the launch — the app starts with a default session.
         var options = LaunchOptions.Parse(args);

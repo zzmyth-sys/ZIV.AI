@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Media.Imaging;
+using ZivAiEditor.App.Imaging;
 using ZivAiEditor.UI.Editing;
 using Path = Avalonia.Controls.Shapes.Path;
 
@@ -23,8 +24,12 @@ namespace ZivAiEditor.App.Controls;
 /// </summary>
 public partial class ImageImportBar : UserControl
 {
+    /// <summary>Attachment thumbnail decode size: small, fixed, 8K-safe (44px strip).</summary>
+    private const int ThumbDecodeSize = 256;
+
     private readonly ImageImportList _list = new();
     private readonly Dictionary<string, Bitmap> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly IDisplayImageLoader _displayLoader = new DisplayImageLoader();
 
     private ScrollViewer? _scroll;
     private StackPanel? _items;
@@ -139,7 +144,9 @@ public partial class ImageImportBar : UserControl
         {
             try
             {
-                bitmap = new Bitmap(path);
+                // Same 8K-safe display path as the preview / chat: a bounded decode, never a
+                // full-size texture for a thumbnail.
+                bitmap = _displayLoader.LoadDisplay(path, ThumbDecodeSize).Bitmap;
             }
             catch (Exception ex)
             {

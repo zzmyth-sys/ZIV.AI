@@ -7072,3 +7072,43 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - 非 GPU 全量（`--filter "FullyQualifiedName!~Ipc&FullyQualifiedName!~PlannerIntegration"`）：**670 → 671**（+1 冒烟），0 失败。
   - 注：本步实测基线为 **670**；DEVLOG P1-6 记「671」、本步任务书写「672」，相差 1（未查因，以本步实测为准）。
 - **不改产品代码**；未跑 GPU / 未启动 Python / 未打开真实窗口。
+
+## 8K 预览崩溃修复 + 分辨率处理统一（显示代理）（2026-09-27，只追加）
+
+> 四问题同批：① 8K 崩溃（渲染层全尺寸 GPU 纹理）；② 竖图左对齐（Fit 被 `MinZoomPercent=10` 截断）；③ 5 个独立全量解码点不统一；④ DPI 单位不一致（模型 `Size` DIP vs 渲染器 `PixelSize`）。方案 = **代理落盘**（≤2560 长边）。
+
+### A · 根因确认（证据链）
+- **崩因**：`PanZoomCanvas.Render` 直接 `DrawImage(全尺寸位图)`（8K ≈132–268MB 纹理）；`Program.cs` 无全局 `UnhandledException` 处理器。遮罩层 `MaskOverlayBitmap` 同样全尺寸。
+- **左对齐**：`FitZoomPercent = Clamp(fit, MinZoomPercent=10, Max)`；竖 8K fit ≈7.8% → 抬到 10% → `ScaledHeight > viewport` → 解锁 → `OriginX=0`。
+- **不统一**：预览 `new Bitmap` / 聊天 / 附件 / 裁切 `LoadThumbnail(int.MaxValue)` / 遮罩 `SKBitmap.Decode` 各自全量解码。
+- **DPI**：模型用 `bitmap.Size`（DIP），渲染器用 `bitmap.PixelSize`（设备像素）→ 非 96 DPI 图偏位。
+- **关键前提**：显示层（`_displayPath`）与送管线层（`node.Crop.ResultImagePath ?? node.ImagePath`）独立 → 代理不影响送管线。✅
+
+### B · 统一设计（层归属）
+- `ZivAiEditor.Imaging/ProxyImageCache.cs`（新增，315 行）：Skia 降采样；内容寻址键 `sha256(fullPath|mtimeTicks|maxSide)`；`_cache/proxies/{hash}.png`；500MB 上界按最旧写时间淘汰（Z12）；`CleanupAll()` 全清且不抛。`Downscale` 先走 `SkiaCodec.LoadThumbnail`，PNG 等不支持原生缩放时回退 `SKBitmap.Decode` + `Resize`，**保证长边 ≤ maxSide**。
+- `ZivAiEditor.App/Imaging/IDisplayImageLoader.cs` + `DisplayImageLoader.cs`（新增）：App 层端口（`UI` 保持无 Avalonia/Skia）。`LoadDisplay(path,maxSide=2560)` → `DisplayImage{ Bitmap, SourcePixelSize, ProxyPath? }`；`SourcePixelSize` 取自**原图**头信息（不整解码）；优先项目同级代理 `{baseName}_proxy.png`。
+- `ImageViewModel`：新增 `MinFitZoomPercent=1`；`FitZoomPercent` / `FitWithMargin` 用 fit 底（1），手动 `SetZoomAt`/`ZoomBy`/`RestoreView` 仍用 `MinZoomPercent=10`。模型全程用**原始设备像素**（原图 W×H）。
+- `PanZoomCanvas`：新增 `SourceSize`（原图设备像素），`Render` 按 `SourceSize × Zoom` 绘制（代理位图被拉伸覆盖原图坐标）；新增纯函数 `ComputeDrawRect`（可单测）。
+- 遮罩叠加：`MaskOverlayBitmap.BuildScaled(...,maxSide)` 最近邻降采样；`MaskOverlay` 超 2560 的遮罩在描边中改为整幅重建（`PatchRegion` 回退 `MarkDirty`）。坐标仍走 `ImageToViewport`（原图矩形），对齐不变。
+- `ImagePreview` / `Compare` 改经 `IDisplayImageLoader`，模型/画布用 `SourcePixelSize`，尺寸徽标显示原图尺寸。
+- 聊天气泡 / 附件缩略统一走 loader；聊天遮罩匹配改用 `SourcePixelSize`（非代理尺寸）。
+- `CrashLog`（新增）：`AppDomain.UnhandledException` + `TaskScheduler.UnobservedTaskException` → `_cache/crash.log`；`Program.Main` + `App` 初始化安装。
+
+### C · 三态持久化（代理）
+- **运行中**：`_cache/proxies/{hash}.png`（内容寻址，源变 mtime 自动失效；≤500MB 有界）。
+- **保存项目**：`DisplayProxyPersistence.WriteNodeProxies`（App 内部，新增）在 `SaveAsync` 后为超限节点写 `sessions/{sid}/{nodeId}_proxy.png`（及 `{nodeId}_{n}_proxy.png` / `{nodeId}_crop_proxy.png`），与项目相对命名一致。**离线生成**（`Task.Run`，不卡 UI）。
+- **重开项目**：`DisplayImageLoader.ResolveSiblingProxy` 命中则直读（不重解 8K）；缺失则运行时缓存重生成。
+- **关闭程序**：`App` 退出改调 `ImagingService.CleanupAll()`（含 `ProxyImageCache.CleanupAll()`）；`sessions/` 保留。
+- 裁切：结果落 `_cache/crops/{sid}/{nodeId}.png`；超限则生成代理，内容寻址使旧代理自然淘汰。
+
+### D · 层归属决策（与任务书字面差异，已记录）
+- `IDisplayImageLoader` 落在 **App**（而非 `ZivAiEditor.UI`）：UI 层仅引用 Contracts（无 Avalonia/Skia），端口返回 Avalonia `Bitmap` 无法落在 UI。
+- 会话代理持久化由 **App 编排**（同级 `{nodeId}_proxy.png`），**未改** `SessionStore` / `SessionLoader` / Contracts 签名，也未引入 Agent→Imaging 边；`SessionStore.DeleteNodeArtifacts` 的 `{nodeId}_*.png` glob 自动覆盖 `_proxy`。
+
+### E · 验收
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量（`--filter "FullyQualifiedName!~Ipc&FullyQualifiedName!~PlannerIntegration"`）：**671 → 695**（+24 新增），0 失败。
+- 新增测试：`ProxyImageCacheTests`(8) · `DisplayImageLoaderTests`(3) · `DisplayProxyPersistenceTests`(3) · `PanZoomCanvasGeometryTests`(4) · `MaskOverlayBitmapTests`(2) · `ImagePreviewHeadlessTests`(2) · `ImageViewModelTests`(+2)。代理相关测试串行化（`DisplayProxyCollection`，共享 `_cache/proxies`）。
+- **不做**：未改 IPC / 命令集 / Python；未推 GPU / Python / 真实窗口；未 git commit。
+- **已知行为（保留）**：① 手轮在「<10% 的 Fit」视图向下缩放会上抬到 10%（手动下限设计，已登记）；② >2.5K 遮罩描边每帧整幅重建（正确但可能顿）；③ 极端长宽比（>~140:1）仍会超 1% 底而左/上对齐（整数百分比缩放固有）。
+- **未决**：真机确认 8K 竖图居中 / 非 96 DPI 对齐 / 保存-重开不重解原图（用户执行）。

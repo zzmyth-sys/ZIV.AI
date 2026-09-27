@@ -17,6 +17,9 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        // Idempotent; Program.Main already installs it on the normal path.
+        CrashLog.Install();
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var options = LaunchOptions.Parse(desktop.Args);
@@ -56,13 +59,12 @@ public partial class App : Application
 
             desktop.Exit += (_, _) =>
             {
-                // Step 9C.6-B2: drop this session's crop temp files (the export, if any,
-                // already copied them). Never throws.
+                // Step 9C.6-B2 / 9C.7 + 8K proxy cache: on exit every temp artifact under
+                // _cache is orphaned, so clear them all — crop / mask per-session dirs and the
+                // runtime display proxies. Saved projects under sessions/ are untouched. Never throws.
                 if (_context is { } ctx)
                 {
-                    // Step 9C.6-B2 / 9C.7: drop the session's crop + mask temp files
-                    // (the export, if any, already copied them). Never throws.
-                    ctx.Imaging.CleanupSession(ctx.Session.SessionId);
+                    ctx.Imaging.CleanupAll();
                 }
 
                 _context?.Dispose();

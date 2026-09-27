@@ -6,6 +6,7 @@ using Avalonia.Controls.Chrome;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Media.Imaging;
+using ZivAiEditor.App.Imaging;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Imaging;
 using ZivAiEditor.UI.Editing;
@@ -44,6 +45,7 @@ public partial class ImagePreview : Window
     private Button? _resetView;
 
     private readonly IImagingService _imaging;
+    private readonly IDisplayImageLoader _displayLoader;
     private Bitmap? _bitmap;
     private string? _path;
     private int _generation;
@@ -57,13 +59,19 @@ public partial class ImagePreview : Window
     /// the injected instance path.
     /// </summary>
     public ImagePreview()
-        : this(new ImagingService())
+        : this(new ImagingService(), new DisplayImageLoader())
     {
     }
 
     public ImagePreview(IImagingService imaging)
+        : this(imaging, new DisplayImageLoader())
+    {
+    }
+
+    public ImagePreview(IImagingService imaging, IDisplayImageLoader displayLoader)
     {
         _imaging = imaging ?? throw new ArgumentNullException(nameof(imaging));
+        _displayLoader = displayLoader ?? throw new ArgumentNullException(nameof(displayLoader));
         InitializeComponent();
         Init();
     }
@@ -117,43 +125,34 @@ public partial class ImagePreview : Window
 
     private async Task LoadAsync(string path, int generation)
     {
-        Bitmap? bitmap = null;
-        var failed = false;
-
-        // Decode off the UI thread (Z11); the continuation resumes on the UI thread.
-        await Task.Run(() =>
-        {
-            try
-            {
-                bitmap = new Bitmap(path);
-            }
-            catch (Exception ex)
-            {
-                failed = true;
-                System.Diagnostics.Debug.WriteLine($"[preview] {ex.Message}");
-            }
-        });
+        // Decode / downsample off the UI thread (Z11); the continuation resumes on the UI thread.
+        // The loader returns a proxy bitmap (≤2.5K) plus the ORIGINAL pixel size, so the model and
+        // every overlay keep working in original coordinates without uploading an 8K texture.
+        var display = await _displayLoader.LoadDisplayAsync(path);
 
         if (generation != _generation)
         {
-            bitmap?.Dispose();
+            display?.Bitmap.Dispose();
             return;
         }
 
-        if (failed || bitmap is null)
+        if (display is null)
         {
             ShowEmpty("图像加载失败");
             return;
         }
 
+        var bitmap = display.Bitmap;
+        var source = display.SourcePixelSize;
         _bitmap = bitmap;
         if (_canvas is not null)
         {
+            _canvas.SourceSize = new Size(source.Width, source.Height);
             _canvas.Image = bitmap;
         }
 
         _model.SetViewport(ViewportWidth(), ViewportHeight());
-        _model.SetImage(bitmap.Size.Width, bitmap.Size.Height);
+        _model.SetImage(source.Width, source.Height);
         ApplyModel();
         RefreshCropBounds();
         RefreshMaskCanvas();
@@ -170,7 +169,7 @@ public partial class ImagePreview : Window
 
         if (_sizeText is not null)
         {
-            _sizeText.Text = $"{bitmap.Size.Width} × {bitmap.Size.Height}";
+            _sizeText.Text = $"{source.Width} × {source.Height}";
         }
 
         if (_sizeBadge is not null)

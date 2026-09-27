@@ -4395,3 +4395,36 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 
 - **包回退记录**：`Avalonia.Headless.XUnit` 12.1.1 依赖 xUnit v3，与本仓 xUnit v2 不兼容 → 回退 `Avalonia.Headless` 12.1.1 + 自写 fixture。
 - **未做**：未拆 MainWindow / 未抽 `IShellService` / 未写完整 UI 覆盖。
+
+---
+
+## 8K 预览崩溃修复 + 分辨率统一验收（显示代理，2026-09-27，只追加）
+
+### 自动化（已通过，非 GPU）
+
+| 项 | 验证方式 | 判据 | 状态 |
+|---|---|---|---|
+| 构建 | `dotnet build src\ZIV.AI.sln -c Release` | 0 错误 0 警告 | ✅ |
+| 代理缓存 | `ProxyImageCacheTests`（8 例：直通/降采样/命中/mtime 失效/尺寸/清理/项目拷贝/跳小图） | 通过 | ✅ |
+| 显示加载 | `DisplayImageLoaderTests`（3 例：小图直通/大图代理+原图尺寸/项目同级优先，headless） | 通过 | ✅ |
+| 保存代理 | `DisplayProxyPersistenceTests`（3 例：写同级代理/缺目录 no-op/`DeleteNodeArtifacts` 清代理） | 通过 | ✅ |
+| 渲染几何 | `PanZoomCanvasGeometryTests`（4 例：居中/解锁/单轴解锁/代理不驱动矩形） | 通过 | ✅ |
+| 遮罩叠加 | `MaskOverlayBitmapTests`（2 例：超限降采样/正常全尺寸，headless） | 通过 | ✅ |
+| 预览端到端 | `ImagePreviewHeadlessTests`（2 例：大图有界+原图 SourceSize/空路径，headless） | 通过 | ✅ |
+| 竖图 Fit | `ImageViewModelTests`（+2：8K 竖图 5% 居中 / 手动仍钳 10%） | 通过 | ✅ |
+| 非 GPU 全量 | `--filter "FullyQualifiedName!~Ipc&FullyQualifiedName!~PlannerIntegration"` | **671 → 695**，0 失败 | ✅ |
+| 铁律 | git diff / 行数 | 无新 NuGet / 无契约签名变更 / 均 <600 行 / UI 无 Avalonia | ✅ |
+
+### 真机验收清单（用户执行）
+
+1. **8K 不崩**：导入/打开一张 8K（长边 >2560）图进入预览 → 不崩，缩放/平移可见清晰代理，状态栏尺寸徽标显示**原图**尺寸（非 2560）。
+2. **竖图居中**：竖长 8K 图 Fit → 水平居中（不左对齐）。
+3. **DPI 对齐**：非 96 DPI（如 300 DPI）图 → 叠加层/坐标不偏位。
+4. **持久化**：保存项目 → `sessions/{sid}/` 出现 `{nodeId}_proxy.png`；重开项目 → 不重解 8K（观察流畅度）；关闭程序 → `_cache/proxies/` 清空、`sessions/` 保留。
+5. **裁切/遮罩/对比**：代理显示下裁切矩形、遮罩笔刷/叠加、对比分割线坐标仍正确；裁切结果 >2560 时预览仍不崩。
+
+### 未决（停点 / 待裁决）
+
+- 手轮在 Fit<10% 视图向下缩放会上抬到 10%（手动下限设计的副作用）——是否需要「Fit 视图起轮可继续缩小到 Fit」？
+- `MaxDisplaySide=2560` 阈值 / 500MB 上限 / 淘汰策略是否需微调。
+- 设计层归属与任务书字面差异：端口落 App（非 UI）、会话代理由 App 编排（未改 SessionStore）——已记录，待用户确认。

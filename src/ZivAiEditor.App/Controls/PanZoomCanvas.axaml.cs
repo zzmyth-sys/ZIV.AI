@@ -58,6 +58,15 @@ public partial class PanZoomCanvas : UserControl
     /// <summary>Pan offset in device pixels; meaningful only on an overflowing axis.</summary>
     public Vector Offset { get; set; }
 
+    /// <summary>
+    /// The <b>source</b> image size in device pixels (the original, not the proxy's own size). The
+    /// bitmap is drawn into a rect of <c>SourceSize × Zoom</c>, so a downscaled proxy stretches to
+    /// the original coordinates and the DPI unit matches the view-model (which also works in
+    /// original device pixels). Defaults to <c>(0,0)</c>, in which case the bitmap's own pixel
+    /// size is used.
+    /// </summary>
+    public Size SourceSize { get; set; }
+
     /// <summary>The drawable surface size; the same value the view-model uses as its viewport.</summary>
     public Size Viewport => Bounds.Size;
 
@@ -73,14 +82,29 @@ public partial class PanZoomCanvas : UserControl
             return;
         }
 
-        var zw = Zoom / 100.0;
-        var sw = image.PixelSize.Width * zw;
-        var sh = image.PixelSize.Height * zw;
-        // B12-follow: lock per view, not per axis — if either axis overflows both draw at
-        // -Offset; only a both-fit (locked) view is centered.
-        var unlocked = sw > Bounds.Width || sh > Bounds.Height;
-        var x = unlocked ? -Offset.X : (Bounds.Width - sw) / 2.0;
-        var y = unlocked ? -Offset.Y : (Bounds.Height - sh) / 2.0;
-        context.DrawImage(image, new Rect(x, y, sw, sh));
+        var source = SourceSize.Width > 0 && SourceSize.Height > 0
+            ? SourceSize
+            : new Size(image.PixelSize.Width, image.PixelSize.Height);
+
+        var dest = ComputeDrawRect(source, Zoom, Bounds.Size, Offset);
+        context.DrawImage(image, dest);
+    }
+
+    /// <summary>
+    /// Pure geometry for one draw: the destination rect the <b>source-sized</b> image occupies at
+    /// the given integer <paramref name="zoomPercent"/>. Mirrors
+    /// <c>ImageViewModel.OriginX/OriginY</c> exactly (lock per view, not per axis, B12-follow):
+    /// when <b>either</b> scaled axis overflows, both axes draw at <c>-offset</c>; only a both-fit
+    /// (locked) view is centered. Exposed for unit testing the renderer math without a GPU.
+    /// </summary>
+    public static Rect ComputeDrawRect(Size sourceSize, int zoomPercent, Size viewport, Vector offset)
+    {
+        var zw = zoomPercent / 100.0;
+        var sw = sourceSize.Width * zw;
+        var sh = sourceSize.Height * zw;
+        var unlocked = sw > viewport.Width || sh > viewport.Height;
+        var x = unlocked ? -offset.X : (viewport.Width - sw) / 2.0;
+        var y = unlocked ? -offset.Y : (viewport.Height - sh) / 2.0;
+        return new Rect(x, y, sw, sh);
     }
 }

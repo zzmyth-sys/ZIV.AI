@@ -19,8 +19,16 @@ namespace ZivAiEditor.UI.Imaging;
 /// </summary>
 public sealed class ImageViewModel
 {
-    /// <summary>Lowest zoom (percent), matching the renderer's default.</summary>
+    /// <summary>Lowest zoom (percent) for <b>manual</b> zoom-out, matching the renderer's default.</summary>
     public const int MinZoomPercent = 10;
+
+    /// <summary>
+    /// Lowest zoom (percent) for a computed <b>fit</b>. Fit is not a manual zoom-out, so a very
+    /// large image may fit far below <see cref="MinZoomPercent"/> (e.g. an 8K portrait fits near
+    /// 4%); flooring it to 10% would overflow the viewport, unlock panning and left/top-align it.
+    /// Kept at 1 so the integer-percent zoom can never round down to 0.
+    /// </summary>
+    public const int MinFitZoomPercent = 1;
 
     /// <summary>Highest zoom (percent), matching the renderer's default.</summary>
     public const int MaxZoomPercent = 6400;
@@ -80,8 +88,10 @@ public sealed class ImageViewModel
     /// <summary>
     /// The zoom that makes the whole image visible inside the viewport, preserving the
     /// aspect ratio (the smaller of the two axis ratios). Truncated to an integer
-    /// percent and clamped to <c>[MinZoomPercent, MaxZoomPercent]</c>. Returns
-    /// <see cref="ActualSizePercent"/> when the image or viewport is not yet known.
+    /// percent and clamped to <c>[MinFitZoomPercent, MaxZoomPercent]</c> — the fit floor is
+    /// deliberately <b>not</b> <see cref="MinZoomPercent"/>, so a huge image fits (and centers)
+    /// instead of being floored to 10% and overflowing. Returns <see cref="ActualSizePercent"/>
+    /// when the image or viewport is not yet known.
     /// </summary>
     public int FitZoomPercent
     {
@@ -93,7 +103,7 @@ public sealed class ImageViewModel
             }
 
             var scale = Math.Min(ViewportWidth / ImageWidth, ViewportHeight / ImageHeight);
-            return Clamp((int)(scale * 100.0));
+            return ClampFit((int)(scale * 100.0));
         }
     }
 
@@ -174,7 +184,7 @@ public sealed class ImageViewModel
             factor = 1.0;
         }
 
-        ZoomPercent = Clamp((int)(FitZoomPercent * factor));
+        ZoomPercent = ClampFit((int)(FitZoomPercent * factor));
         OffsetX = 0;
         OffsetY = 0;
         _pendingFit = false;
@@ -322,4 +332,8 @@ public sealed class ImageViewModel
 
     private static int Clamp(int zoomPercent)
         => Math.Clamp(zoomPercent, MinZoomPercent, MaxZoomPercent);
+
+    /// <summary>Clamp for a computed fit / fit-derived zoom (floor <see cref="MinFitZoomPercent"/>).</summary>
+    private static int ClampFit(int zoomPercent)
+        => Math.Clamp(zoomPercent, MinFitZoomPercent, MaxZoomPercent);
 }

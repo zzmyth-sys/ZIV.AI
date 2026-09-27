@@ -87,42 +87,29 @@ public partial class ImagePreview
 
     private async Task LoadParentAsync(string path, int generation)
     {
-        Bitmap? bitmap = null;
-        var failed = false;
-
-        await Task.Run(() =>
-        {
-            try
-            {
-                bitmap = new Bitmap(path);
-            }
-            catch (Exception ex)
-            {
-                failed = true;
-                System.Diagnostics.Debug.WriteLine($"[compare] {ex.Message}");
-            }
-        });
+        // Same 8K-safe display path as the main image: a proxy bitmap plus the original size.
+        var display = await _displayLoader.LoadDisplayAsync(path);
 
         if (generation != _parentGeneration)
         {
-            bitmap?.Dispose();
+            display?.Bitmap.Dispose();
             return;
         }
 
         _parentLoadRequested = false;
 
-        if (failed || bitmap is null)
+        if (display is null)
         {
             _compareState.SetCanCompare(false);
             UpdateCompareButton();
             return;
         }
 
-        _parentBitmap = bitmap;
-        _overlay?.SetParent(bitmap);
+        _parentBitmap = display.Bitmap;
+        _overlay?.SetParent(display.Bitmap);
         if (_compareInfoText is not null)
         {
-            _compareInfoText.Text = $"原图 {bitmap.Size.Width} × {bitmap.Size.Height}";
+            _compareInfoText.Text = $"原图 {display.SourcePixelSize.Width} × {display.SourcePixelSize.Height}";
         }
 
         _compareState.SetCanCompare(true);

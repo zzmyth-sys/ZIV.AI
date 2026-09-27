@@ -9,6 +9,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using ZivAiEditor.App.Controls;
+using ZivAiEditor.App.Imaging;
 using ZivAiEditor.UI.Chat;
 using Path = Avalonia.Controls.Shapes.Path;
 
@@ -21,6 +22,19 @@ namespace ZivAiEditor.App;
 /// </summary>
 public partial class MainWindow
 {
+    /// <summary>
+    /// Decode size for a 72px pack thumbnail: comfortably above the display size (crisp on HiDPI)
+    /// yet far below the display-proxy cap, so showing a huge pack image stays cheap.
+    /// </summary>
+    private const int PackThumbDecodeSize = 512;
+
+    /// <summary>
+    /// Shared display decoder (8K fix): chat bubbles and pack thumbnails go through the same
+    /// proxy-aware loader as the preview window. Constructed here (no ctor change); tests can
+    /// exercise it directly via <c>ImagePreview</c>/<c>DisplayImageLoader</c>.
+    /// </summary>
+    private readonly IDisplayImageLoader _displayLoader = new DisplayImageLoader();
+
     /// <summary>A row with the status text (fills) and the action button docked right.</summary>
     private static Control BuildActionRow(TextBlock? text, Button? action)
     {
@@ -130,7 +144,10 @@ public partial class MainWindow
     {
         try
         {
-            var bitmap = new Bitmap(path);
+            // One display path for every bubble image: the loader caps the long side (8K fix) and
+            // reports the ORIGINAL pipeline size the mask buffer is sized against.
+            var display = _displayLoader.LoadDisplay(path);
+            var bitmap = display.Bitmap;
             _bitmaps.Add(bitmap);
 
             // Clicking a chat image opens the standalone large-image preview window.
@@ -158,7 +175,7 @@ public partial class MainWindow
             AttachRerunMenuToImage(image, path);
             ToolTip.SetTip(image, "左键查看大图 / 右键重跑");
 
-            AddImageWithMaskOverlay(panel, image, bitmap, maskPath, maskFeatherPx, overlay =>
+            AddImageWithMaskOverlay(panel, image, display.SourcePixelSize, maskPath, maskFeatherPx, overlay =>
             {
                 overlay.MaxWidth = BubbleImageSize;
                 overlay.MaxHeight = BubbleImageSize;
@@ -184,7 +201,7 @@ public partial class MainWindow
     private void AddImageWithMaskOverlay(
         Panel panel,
         Image image,
-        Bitmap original,
+        PixelSize pipelineSize,
         string? maskPath,
         int maskFeatherPx,
         Action<Image> configureOverlay)
@@ -213,7 +230,7 @@ public partial class MainWindow
         panel.Children.Add(host);
 
         var generation = _chatGeneration;
-        _ = AddMaskOverlayAsync(host, original.PixelSize, maskPath, maskFeatherPx, generation, configureOverlay);
+        _ = AddMaskOverlayAsync(host, pipelineSize, maskPath, maskFeatherPx, generation, configureOverlay);
     }
 
     /// <summary>
@@ -222,7 +239,7 @@ public partial class MainWindow
     /// </summary>
     private async Task AddMaskOverlayAsync(
         Grid host,
-        PixelSize size,
+        PixelSize pipelineSize,
         string maskPath,
         int maskFeatherPx,
         int generation,
@@ -236,11 +253,12 @@ public partial class MainWindow
             return;
         }
 
-        // The mask lives in the pipeline-image pixel space, so it must match the bubble image.
-        if (data.Width != size.Width || data.Height != size.Height)
+        // The mask lives in the ORIGINAL pipeline-image pixel space, so it must match the
+        // pipeline size — not the (possibly downscaled) bubble bitmap's size.
+        if (data.Width != pipelineSize.Width || data.Height != pipelineSize.Height)
         {
             MaskDiagnostics.Log(
-                $"[overlay] skip (size {data.Width}x{data.Height} vs {size.Width}x{size.Height}): {maskPath}");
+                $"[overlay] skip (size {data.Width}x{data.Height} vs {pipelineSize.Width}x{pipelineSize.Height}): {maskPath}");
             return;
         }
 
@@ -248,7 +266,10 @@ public partial class MainWindow
             ? _imaging.FeatherMask(data.Pixels, data.Width, data.Height, maskFeatherPx)
             : data.Pixels;
 
-        var overlay = MaskOverlayBitmap.Build(display, data.Width, data.Height);
+        // Cap the display overlay so an 8K mask is not uploaded as an 8K texture; the Image's
+        // uniform stretch keeps it aligned with the bubble bitmap (same aspect ratio).
+        var overlay = MaskOverlayBitmap.BuildScaled(
+            display, data.Width, data.Height, IDisplayImageLoader.MaxDisplaySide, out _, out _);
         if (overlay is null || generation != _chatGeneration)
         {
             MaskDiagnostics.Log($"[overlay] skip (build null or gen {generation}/{_chatGeneration}): {maskPath}");
@@ -328,7 +349,10 @@ public partial class MainWindow
     {
         try
         {
-            var bitmap = new Bitmap(path);
+            // A 72px thumbnail: the loader caps the decode, so a large pack image is never
+            // decoded at full size just to be shown tiny.
+            var display = _displayLoader.LoadDisplay(path, PackThumbDecodeSize);
+            var bitmap = display.Bitmap;
             _bitmaps.Add(bitmap);
 
             var image = new Image
@@ -352,7 +376,7 @@ public partial class MainWindow
             AttachRerunMenuToImage(image, path);
             ToolTip.SetTip(image, "左键查看大图 / 右键重跑");
 
-            AddImageWithMaskOverlay(row, image, bitmap, maskPath, maskFeatherPx, overlay =>
+            AddImageWithMaskOverlay(row, image, display.SourcePixelSize, maskPath, maskFeatherPx, overlay =>
             {
                 overlay.Width = PackThumbSize;
                 overlay.Height = PackThumbSize;

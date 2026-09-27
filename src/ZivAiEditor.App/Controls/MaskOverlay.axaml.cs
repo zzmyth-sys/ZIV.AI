@@ -33,6 +33,9 @@ public partial class MaskOverlay : UserControl
     private static readonly IPen HaloPen = new Pen(new SolidColorBrush(Color.FromArgb(0xC0, 0x00, 0x00, 0x00)), 3);
     private static readonly IPen CorePen = new Pen(new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF)), 1);
 
+    /// <summary>Long-side cap for the display-only overlay bitmap (same cap as the display proxy).</summary>
+    private const int MaxOverlaySide = ZivAiEditor.App.Imaging.IDisplayImageLoader.MaxDisplaySide;
+
     private ImageViewModel? _model;
     private MaskState? _state;
 
@@ -114,7 +117,22 @@ public partial class MaskOverlay : UserControl
     /// </summary>
     public void PatchRegion(MaskState state, int x, int y, int width, int height)
     {
-        if (state is null || !EnsureHardBitmap(state))
+        if (state is null)
+        {
+            return;
+        }
+
+        // An oversize mask is stored downsampled, so a region patch would need matching scaled
+        // coordinates. Rather than pay that cost on every in-stroke move, fall back to a full
+        // (downsampled) rebuild; strokes on >2.5K masks are rare and stay correct.
+        if (state.Width > MaxOverlaySide || state.Height > MaxOverlaySide)
+        {
+            _dirty = true;
+            InvalidateVisual();
+            return;
+        }
+
+        if (!EnsureHardBitmap(state))
         {
             return;
         }
@@ -131,8 +149,7 @@ public partial class MaskOverlay : UserControl
     /// </summary>
     private bool EnsureHardBitmap(MaskState state)
     {
-        if (_bitmap is not null && !_dirty
-            && _bitmap.PixelSize.Width == state.Width && _bitmap.PixelSize.Height == state.Height)
+        if (_bitmap is not null && !_dirty && MatchesDisplaySize(state))
         {
             return true;
         }
@@ -141,6 +158,32 @@ public partial class MaskOverlay : UserControl
         _bitmap = MaskOverlayBitmap.Build(state.CopyPixels(), state.Width, state.Height);
         _dirty = false;
         return _bitmap is not null;
+    }
+
+    /// <summary>Expected downsampled overlay size for the current mask (≤ <see cref="MaxOverlaySide"/>).</summary>
+    private static (int Width, int Height) DisplaySize(MaskState state)
+    {
+        if (state.Width <= 0 || state.Height <= 0)
+        {
+            return (0, 0);
+        }
+
+        if (state.Width <= MaxOverlaySide && state.Height <= MaxOverlaySide)
+        {
+            return (state.Width, state.Height);
+        }
+
+        var scale = (double)MaxOverlaySide / Math.Max(state.Width, state.Height);
+        return (Math.Max(1, (int)Math.Round(state.Width * scale)),
+                Math.Max(1, (int)Math.Round(state.Height * scale)));
+    }
+
+    private bool MatchesDisplaySize(MaskState state)
+    {
+        var (width, height) = DisplaySize(state);
+        return _bitmap is not null
+            && _bitmap.PixelSize.Width == width
+            && _bitmap.PixelSize.Height == height;
     }
 
     public override void Render(DrawingContext context)
@@ -173,8 +216,7 @@ public partial class MaskOverlay : UserControl
             return;
         }
 
-        if (_dirty || _bitmap is null
-            || _bitmap.PixelSize.Width != state.Width || _bitmap.PixelSize.Height != state.Height)
+        if (_dirty || _bitmap is null || !MatchesDisplaySize(state))
         {
             Rebuild(state);
         }
@@ -221,8 +263,10 @@ public partial class MaskOverlay : UserControl
         // Display-only feather: the live buffer stays hard; the same pure function the
         // exporter uses blooms it into the alpha ramp (byte-identical on both surfaces).
         // The red BGRA composition is shared with the chat bubble (MaskOverlayBitmap).
+        // The overlay bitmap's long side is capped so an 8K mask never becomes an 8K texture;
+        // it is stretched back over the mask's original rectangle by RenderMask.
         var display = Imaging?.FeatherMask(pixels, width, height, state.FeatherPx) ?? pixels;
-        _bitmap = MaskOverlayBitmap.Build(display, width, height);
+        _bitmap = MaskOverlayBitmap.BuildScaled(display, width, height, MaxOverlaySide, out _, out _);
         _dirty = false;
     }
 

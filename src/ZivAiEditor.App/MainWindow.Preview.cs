@@ -36,7 +36,8 @@ public partial class MainWindow
 
         if (_imagePreview is null)
         {
-            var preview = new ImagePreview(_imaging);
+            // Shared display loader (8K proxy path); the chat/import thumbs use the same instance.
+            var preview = new ImagePreview(_imaging, _displayLoader);
 
             // F5.2: the preview is a child window of the main window — no separate taskbar
             // entry. F5.3 (Owner / follow-on-close) is already provided by Show(this) below;

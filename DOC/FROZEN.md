@@ -5143,3 +5143,13 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **C（重构，无签名变更）**：新增共享内部类型 `Tools/ToolParameters`、`Tools/StepProgressAdapter`、`UI/Editing/CommandText`（public）、`App/ResolutionTierText`、`Imaging/DirectoryCleanup`；调用方改调，行为不变。
 - **D（seam 标注）**：`tagger.py` docstring 明示 L1 已实现 / L2 未接 / 触发条件；`TAGGER_*` 加注释。不删能力、不改默认值。
 - **不做**：不改 IPC 契约 / 命令集；不推送。
+
+## 8K 显示代理重构（2026-09-27，只增）
+
+- **新增（无既有签名变更）**：`Imaging/ProxyImageCache`（public static，Skia 降采样 + 内容寻址 `_cache/proxies/{sha256(path|mtime|side)}.png` + 500MB 有界淘汰 + `CleanupAll`）；`App/Imaging/{DisplayImage, IDisplayImageLoader, DisplayImageLoader, DisplayProxyPersistence}`（App 层端口/实现，UI 保持无 Avalonia/Skia）；`App/CrashLog`。
+- **追加成员**：`ImageViewModel.MinFitZoomPercent=1`（Fit 底与手动 `MinZoomPercent=10` 分离）；`PanZoomCanvas.SourceSize` + `ComputeDrawRect`；`MaskOverlayBitmap.BuildScaled`；`ImagePreview(IImagingService, IDisplayImageLoader)` 重载。
+- **行为**：渲染按 `SourceSize × Zoom`（DPI 统一为设备像素）；遮罩叠加位图长边 ≤2560；预览/聊天/附件解码统一走 `IDisplayImageLoader`；保存项目写同级 `{nodeId}_proxy.png`（App 编排，`Task.Run`）；退出 `CleanupAll`（含代理）。
+- **未改**：`SessionStore` / `SessionLoader` / Contracts 签名；项目格式 v2；IPC / 命令集 / Python；无新 NuGet；`ZivAiEditor.UI` 仍无 Avalonia/Skia。
+- **验证**：build 0/0；非 GPU 全量 671 → **695**，0 失败；所有改动文件 <600 行。
+- **不做**：不跑 GPU / Python / 真实 App；不 git commit / 不推送。
+- **已知行为**：手轮在 Fit<10% 时向下缩放上抬到 10%；>2.5K 遮罩描边整幅重建；极端长宽比仍受 1% 底限制。

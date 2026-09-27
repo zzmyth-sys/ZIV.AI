@@ -33,6 +33,39 @@ public class ImageViewModelTests
     }
 
     [Fact]
+    public void Fit_Tall_8K_Image_Is_Not_Floored_To_MinZoom_And_Centers()
+    {
+        // 8K portrait left-align regression: the fit (~5%) must NOT be floored to MinZoomPercent
+        // (10%), which would overflow the viewport, unlock panning and left/top-align the image.
+        var vm = new ImageViewModel();
+        vm.SetViewport(1000, 700);
+        vm.SetImage(8192, 12288); // fit = 700 / 12288 ≈ 5.7% -> 5%
+
+        Assert.Equal(5, vm.ZoomPercent);
+        Assert.True(vm.ZoomPercent < ImageViewModel.MinZoomPercent);
+        Assert.True(vm.IsAtFit);
+
+        // Both scaled axes fit, so the view is locked and centered: origin X is positive.
+        var (x, y) = vm.ImageToViewport(0, 0);
+        Assert.Equal((1000 - 8192 * 0.05) / 2.0, x, 3);
+        Assert.Equal((700 - 12288 * 0.05) / 2.0, y, 3);
+        Assert.True(x > 0 && y > 0);
+    }
+
+    [Fact]
+    public void Manual_Zoom_Out_Still_Clamps_To_MinZoomPercent()
+    {
+        // The fit floor split must not loosen the manual zoom-out floor.
+        var vm = new ImageViewModel();
+        vm.SetViewport(1000, 700);
+        vm.SetImage(8192, 12288);
+        vm.Fit(); // ~5%
+        vm.SetZoomAt(1, 500, 350);
+
+        Assert.Equal(ImageViewModel.MinZoomPercent, vm.ZoomPercent);
+    }
+
+    [Fact]
     public void Fit_Recomputes_Once_The_Viewport_Is_Known()
     {
         var vm = new ImageViewModel();

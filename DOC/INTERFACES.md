@@ -440,3 +440,17 @@
 - **测试侧宿主**：`ZivAiEditor.Tests/UI/TestApplication`（继承 `Application`）经 `[assembly: AvaloniaTestApplication]` 注册；`HeadlessTest.Run(Action)` 经 `Avalonia.Headless.HeadlessUnitTestSession` 在 UI 线程执行测试体。
 - **依赖**：`Avalonia.Headless` 12.1.1（仅测试项目）。**不用** `Avalonia.Headless.XUnit`（其依赖 xUnit v3，与本仓 xUnit v2 不兼容）。
 - **不改**：`ShellService` 仍为 `internal sealed` 具体类（测试用真实实例，接受其 Mutex+命名管道副作用）。
+
+## 34. 8K 显示代理：新增端口与实现（2026-09-27，只增）
+
+- **Contracts**：**无变化**（未新增/修改任何 Contracts 成员）。
+- **`ZivAiEditor.Imaging.ProxyImageCache`**（新增 `public static`）：`DefaultMaxSide=2560`；`ProxiesRootDirectory`；`ReadPixelSize(string?) : (int,int)`；`TryGetOrCreate(string,int=2560) : string?`（≤上限直通源文件，否则内容寻址代理）；`SaveProjectProxy(string,int,string) : bool`；`CleanupAll()`。内部实现，非 Contracts。
+- **`ZivAiEditor.App.Imaging`**（新增，App 层）：`DisplayImage`（record：`Bitmap` / `SourcePixelSize` / `ProxyPath?`）；`IDisplayImageLoader`（`const MaxDisplaySide=2560`；`LoadDisplay` / `LoadDisplayAsync`）；`DisplayImageLoader`（默认实现）；`DisplayProxyPersistence`（`internal static`，`WriteNodeProxies(IReadOnlyList<IEditNode>,string,int)`）。
+- **`ZivAiEditor.UI.Imaging.ImageViewModel`**：新增 `public const int MinFitZoomPercent = 1`；`FitZoomPercent` / `FitWithMargin` 的底改为 `MinFitZoomPercent`（**签名不变**）；`MinZoomPercent=10` 语义收窄为「手动缩出下限」。
+- **`ZivAiEditor.App.Controls.PanZoomCanvas`**：新增 `public Size SourceSize { get; set; }` 与 `public static Rect ComputeDrawRect(Size,int,Size,Vector)`；`Render` 改按 `SourceSize × Zoom`（**未改既有成员签名**）。
+- **`ZivAiEditor.App.Controls.MaskOverlayBitmap`**：新增 `BuildScaled(byte[],int,int,int,out int,out int)`；既有 `Build` / `WriteRegion` 不变。
+- **`ZivAiEditor.App.Controls.ImagePreview`**：新增构造重载 `ImagePreview(IImagingService, IDisplayImageLoader)`；既有 `ImagePreview()` / `ImagePreview(IImagingService)` 保留。
+- **`ZivAiEditor.Imaging.ImagingService.CleanupAll`**：签名不变；行为追加清 `_cache/proxies/`。
+- **`ZivAiEditor.App.App`**：退出清理由 `CleanupSession` 改为 `CleanupAll`（App 内部）。
+- **不改**：`SessionStore` / `SessionLoader` / `SessionFileDto` / `ISessionPersistence` 签名；项目格式仍 **v2**；代理为同级文件（`{nodeId}_proxy.png`），不写入 JSON。
+- **不做**：不改 IPC / 命令集 / Python；未加 NuGet。

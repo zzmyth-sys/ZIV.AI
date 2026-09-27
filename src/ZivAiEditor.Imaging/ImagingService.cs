@@ -58,6 +58,9 @@ public sealed class ImagingService : IImagingService
     {
         ImageCropper.CleanupAll();
         MaskExporter.CleanupAll();
+        // Display proxies are a pure runtime cache (Z12): clearing them at startup / app close
+        // is always safe — a needed proxy is regenerated on demand from the source image.
+        ProxyImageCache.CleanupAll();
     }
 
     public void CleanupNode(string? sessionId, IReadOnlyList<string> nodeIds)

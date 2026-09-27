@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using ZivAiEditor.Agent.Project;
 using ZivAiEditor.Agent.Session;
+using ZivAiEditor.App.Imaging;
 using ZivAiEditor.Contracts.Session;
 using ZivAiEditor.UI;
 using ZivAiEditor.UI.Editing;
@@ -267,6 +268,15 @@ public partial class MainWindow
         {
             var name = ProjectNaming.EffectiveName(_projectName, _session.RootImagePath);
             await _store.SaveAsync(_session, name);
+
+            // 8K proxy persistence: alongside each copied original, drop a display proxy so a
+            // reopened project never re-decodes the full-size image. A source that already fits
+            // is skipped (no proxy needed). Off the UI thread (generation decodes large PNGs) and
+            // best effort: a failure only costs a re-decode later.
+            var history = _session.GetHistory();
+            var projectDirectory = _projects.GetDirectory(_session.SessionId);
+            await Task.Run(() => DisplayProxyPersistence.WriteNodeProxies(history, projectDirectory));
+
             _projectName = name;
             _savedSignature = SessionSignature.Compute(_session);
             await _projects.SetLastProjectIdAsync(_session.SessionId);
