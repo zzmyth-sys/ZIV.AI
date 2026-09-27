@@ -42,7 +42,7 @@ public class PlannerIntegrationTests
         var request = new PlanRequest
         {
             MainImagePath = Path.Combine(FindRepositoryRoot(), "_test_step2", "user_input_1024.png"),
-            Prompt = "�ѱ����滻Ϊ�Ŵ���ʽ����������������ǰ��",
+            Prompt = "把背景替换为古代中式茶肆，保留人物与前景",
         };
 
         await PrintRawLlmOutputAsync(llm, request);
