@@ -7010,3 +7010,15 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **悬空引用说明**：DOC 中约 **35 处 basename 引用**（`baseline_bench` / `DIAGNOSIS` / `RESULT` / `REPORT` / `wd_ab*` 等）现指向**仓库外**；对应文件本地可查，脚本可重跑（需自备 ComfyUI/模型）。
 - **死文件随此一并移出**：`diag_lora_*.py` / `inspect_lora.py` / `panorama_180*` / `baseline_bench_result.txt` / `comfy_extra_model_paths.yaml` / `csharp_*.txt`（无需单独操作）。
 - **不做**：不改 `publish.ps1`（其 `D:\devlop\` 为告警守卫，豁免）；不改 `DOC/*.md` 历史记录；不改 `contracts/ipc-protocol.md`（已尾部勘误）。
+
+## 工程线批次：Z8 拆分 / 死代码 / 重复抽取 / tagger seam（2026-09-27，只追加）
+
+### A · `PythonProcessManager` 拆分（Z8 解阻塞）+ B16 管道泄漏修复
+
+- **背景**：`PythonProcessManager.cs` = **599/600 行**（Z8 余量 1），P1-5 只能用「重排」绕过，`Start()` 抛仍漏管道。
+- **拆分（纯移动）**：`public sealed class` → `public sealed partial class`。
+  - 主文件 `PythonProcessManager.cs`：**334 行**（enum / `PythonBackendOptions` / 字段 / ctor / 属性 / 事件 / Attach/Detach/Notify / RequestRestart / 查询）。
+  - 新 `PythonProcessManager.Start.cs`：**293 行**（EnsureStartedAsync / StopAsync / Dispose / DisposeAsync / StopCoreAsync / BuildStartInfo / CreateSecurePipeServer / AppendOutput / FormatOutput）。`[SupportedOSPlatform("windows")]` 仅标主类一次。
+- **B16 修复**：`EnsureStartedAsync` 先 `BuildStartInfo()`（校验失败即抛、无资源）→ `new Process` → `try { pipe=CreateSecurePipeServer(); _pipe=pipe; process.Start() } catch { _pipe=null; pipe?.Dispose(); process.Dispose(); throw; }`。同时覆盖 `!Start()` 返回值与 `Start()` 抛两种路径（原 `!Start()` 分支未 Dispose Process）。原异常消息保留。
+- **测试**：`PythonProcessManagerTests` 2/2；新增 `Failed_Start_Releases_The_Pipe_Name`（有效脚本 + 不存在 python_exe → `Start()` 抛 → 断言管道名可再建，**强 oracle**：泄漏则 "all pipe instances are busy"）。
+- **验证**：Backend build `0/0`；两文件均 <600。
