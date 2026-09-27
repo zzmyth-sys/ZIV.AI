@@ -134,7 +134,7 @@ ZIV.AI 复用 ZIV 项目的共享库（`ZIV.Core` / `ZIV.Imaging`）。
 首次构建前，请先获取 ZIV 仓库并放在 ZIV.AI 的**同级目录**：
 
 ```
-D:\devlop\
+%REPO_ROOT%\
   ├─ ZIV\       ← ZIV 仓库
   └─ ZIV.AI\    ← 本项目
 ```
