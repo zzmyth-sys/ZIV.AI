@@ -353,9 +353,6 @@ public sealed class PythonProcessManager : IDisposable, IAsyncDisposable
 
             await StopCoreAsync().ConfigureAwait(false);
 
-            var pipe = CreateSecurePipeServer(_pipeName, Options.BufferSize);
-            _pipe = pipe;
-
             var process = new Process
             {
                 StartInfo = BuildStartInfo(),
@@ -363,6 +360,9 @@ public sealed class PythonProcessManager : IDisposable, IAsyncDisposable
             };
             process.OutputDataReceived += (_, e) => AppendOutput("out", e.Data);
             process.ErrorDataReceived += (_, e) => AppendOutput("err", e.Data);
+
+            var pipe = CreateSecurePipeServer(_pipeName, Options.BufferSize);
+            _pipe = pipe;
 
             if (!process.Start())
             {

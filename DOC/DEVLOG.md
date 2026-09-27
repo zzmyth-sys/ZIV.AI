@@ -6977,3 +6977,12 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
   - error 分支：先 ping 匹配（不变）；否则用该函数取目标任务，命中则 `Completion.TrySetException(new InferenceBackendException(code, message))`（与既有 `case "error"` :271-284 语义一致）；未命中则 `Debug.WriteLine` 记录（可观测）。
 - **测试**：新增 `InferenceErrorRoutingTests.cs`（类名**不含 "Ipc"** → 进非 GPU 基线；3 例：带 id 保持、无 id 回退 active、无 active 不可路由）。
 - **验证**：build `0/0`；`InferenceErrorRoutingTests` 3/3 绿。
+
+### P1-5 · B16 启动异常不泄漏资源（Z8 约束下的重排）
+
+- **问题**：`EnsureStartedAsync` 先 `CreateSecurePipeServer`（`_pipe=pipe`）后 `new Process{StartInfo=BuildStartInfo()}`；`BuildStartInfo` → `PythonScriptValidator.Validate` 会抛（脚本缺失）→ **管道泄漏**。
+- **Z8 阻断（复审）**：`PythonProcessManager.cs` 实测 **599/600 行**（`DOC/ACCEPTANCE.MD` 亦记「599/600，剩 1 行」）→ 计划中的 try/catch/finally（+6~8 行）**必超限**。
+- **改动（净 0 行）**：把 `new Process{StartInfo=BuildStartInfo()}` + 事件订阅**上移到 `CreateSecurePipeServer` 之前**。校验失败时管道尚未创建 → 无泄漏。`!process.Start()` 既有清理语义不变。
+- **残余（登记）**：`process.Start()` **抛**（非返回 false，如 `PythonExe` 不存在）时，管道仍会泄漏；受 Z8 行数所限本批未处理，记为已知缺口（后续可拆 partial / 申请 Z8 例外）。
+- **测试**：新增 `PythonProcessManagerTests.cs`（1 例：invalid script → 抛 + `ProcessId==null` + `IsPipeConnected==false`）。**弱 oracle**：`ProcessId`/`IsPipeConnected` 在修复前后均成立（管道释放不可直接观测），此测试为结构确认而非回归判别。
+- **验证**：build `0/0`；`PythonProcessManagerTests` 1/1 绿；文件仍 599 行。
