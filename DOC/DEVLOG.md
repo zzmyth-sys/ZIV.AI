@@ -6935,3 +6935,15 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 
 - **Finding A（`_findings.md` 备份位置）**：上文批 2 登记的「内容见 `DOC/DEVLOG.md` 243–272 / `DOC/FROZEN.md` 458–494」行号不准（那两处是 Step 2「问题与解决」/LLM Planner 章节，主题相关但非同一副本）。**`_sections/_findings.md` 的完整副本在 `_test_step2/REPORT.md`（「## 关键发现」/「## 建议」/附录，约 392/421/435 行）**；DEVLOG/FROZEN 另有同主题结论。删除安全（有 REPORT.md 副本）。
 - **Finding B（360 重建脚本）**：批 1 登记「重跑 `360_fetch_vocab.py`」，但该脚本本批已删；如需重建 `360_scene_vocab.json`，须先从退役前 commit（`b79fde4^`）恢复 `360_fetch_vocab.py`（+ `scene_filter.py`）再重跑（需联网 + WD14 `selected_tags.csv`）。
+
+## P1 批次：六项代码健康修复（2026-09-27，只追加）
+
+来源：`DOC/全代码分析.md` B5/B13/B11/B8/B16 + 开发机路径残留。六项互不依赖，各一条独立 commit。
+
+### P1-1 · B5 ApplyResolution 漏拷贝 ModelId
+
+- **问题**：`CommandParser.ApplyResolution`（`CommandParser.cs:134`）重建 `EditPlan` 时未拷贝 `ModelId`。
+- **改动**：重建 `EditPlan` 补 `ModelId = plan.ModelId,`（1 行，与 `ChatFlowRules.WithAdditionalImages`(ChatFlowRules.cs:240) / `Executor.WithAdditionalImages`(Executor.cs:213) 同款）。
+- **覆盖核实**：`new EditPlan` 共 3 处重建/拷贝——`ApplyResolution`（本次修）、`ChatFlowRules.WithAdditionalImages`（已有）、`Executor.WithAdditionalImages`（已有）；创建点 `LlmPlanner.cs:134` / `FallbackPlanner.cs:54` 已设 `request.ModelId`。
+- **可达性（复审确认）**：`CommandParser` **从不设置 ModelId**（grep 0 命中）→ 当前该字段在解析链恒为 null，本次为**防御性/潜伏修复**，无法构造 `ParseAsync` 级测试；不加测试 seam。
+- **验证**：build `0/0`。

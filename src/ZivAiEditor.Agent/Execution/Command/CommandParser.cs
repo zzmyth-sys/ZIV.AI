@@ -154,6 +154,10 @@ public sealed partial class CommandParser : ICommandParser
                 Steps = plan.Steps,
                 CreatedAt = plan.CreatedAt,
                 Resolution = resolution,
+                // B5: carry the plan's ModelId across the rebuild. Unreachable today (the
+                // parser never sets ModelId), but a parse path that does must not silently
+                // drop it. Same shape as WithAdditionalImages (ChatFlowRules / Executor).
+                ModelId = plan.ModelId,
             },
         };
     }
