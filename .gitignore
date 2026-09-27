@@ -63,3 +63,7 @@ sessions/
 
 # _test_step2 下所有层级的实验 PNG（含子目录；仅顶层规则见上）
 _test_step2/**/*.png
+
+# _test_step2 整体移出 git 跟踪（开发期实验目录；本地磁盘保留）
+# 2026-09-27：untrack（含 t1–t9 / e2e_*/ / diag_*/ / bench 等），README/DOC 勘误见 DEVLOG。
+_test_step2/

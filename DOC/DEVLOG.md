@@ -6999,3 +6999,14 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 6. **`contracts/ipc-protocol.md:321-322`**：属契约文件 → **不改既有行**，在**尾部追加「勘误」**说明 §6 路径为开发机示例。
 
 - **验证**：build `0/0`；`config.py` `py_compile` OK；非 GPU 全量 **671 通过 / 0 失败**。
+
+## 批次：开发机路径残留清理（2026-09-27，只追加）
+
+### A · `_test_step2/` 从 git 跟踪移除（本地保留）
+
+- **动作**：`git rm -r --cached _test_step2/`（**88 个 tracked 文件**移出索引；**工作区文件全部保留**，磁盘 112 文件不变）。`.gitignore` 尾部追加 `_test_step2/`。
+- **内容**：含 `t1–t9` 脚本、`e2e_*/`、`diag_*/`（含 `DiagMatrix`）、`dra*`/`wd_ab*`/`te_speed*`/`baseline_bench`/`mask_feather`/`outpaint`/`r6`/`panorama` 脚本与结论 JSON、`Pipe*/SharedMem*` bench、`prompt_optimize_result/runner` 等**开发期实验**。
+- **保留**：实验结论仍存于相关 DOC 段落（`WD+模板系统.md` / `OPTIMIZATION.md` / `DEVLOG` 等）；**脚本与报告保留在本地磁盘** `_test_step2/`。后续查阅见本地目录。
+- **悬空引用说明**：DOC 中约 **35 处 basename 引用**（`baseline_bench` / `DIAGNOSIS` / `RESULT` / `REPORT` / `wd_ab*` 等）现指向**仓库外**；对应文件本地可查，脚本可重跑（需自备 ComfyUI/模型）。
+- **死文件随此一并移出**：`diag_lora_*.py` / `inspect_lora.py` / `panorama_180*` / `baseline_bench_result.txt` / `comfy_extra_model_paths.yaml` / `csharp_*.txt`（无需单独操作）。
+- **不做**：不改 `publish.ps1`（其 `D:\devlop\` 为告警守卫，豁免）；不改 `DOC/*.md` 历史记录；不改 `contracts/ipc-protocol.md`（已尾部勘误）。
