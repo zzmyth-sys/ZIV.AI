@@ -35,7 +35,10 @@ def _resolve_comfy_root():
 
 COMFY_ROOT = _resolve_comfy_root()
 
-MODEL_ROOT = r"C:\AI\ComfyUI_PIC\ComfyUI\models"
+MODEL_ROOT = os.environ.get(
+    "ZIV_AI_MODEL_ROOT",
+    r"C:\AI\ComfyUI_PIC\ComfyUI\models",  # 开发期默认；生产建议用 env 或 models.json
+)
 
 DIT_MODEL_PATH = os.path.join(
     MODEL_ROOT, "diffusion_models", "image2", "qwen_image_2.1_int8_convrot.safetensors"

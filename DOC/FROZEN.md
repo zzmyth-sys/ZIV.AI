@@ -5121,3 +5121,17 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **P1-5（重新定位，见下条）**：`PythonProcessManager` 泄漏修复（`BuildStartInfo` 构造前置于管道创建）。
 - **P1-6（文本/路径）**：`config.py` COMFY_ROOT 开发默认改为仓库相对；`MODEL_ROOT` 硬编码**不动**（A10）；TablerIcons 注释通用化；`PlannerIntegrationTests` 相对路径；`python/server/README.md` 通用占位；`ipc-protocol.md` 尾部勘误（不改既有行）。
 - **不做**：不改 csproj 路径 / 不加 submodule / 不改 IPC 契约 / 不跑 GPU · Python · App。
+
+## A10 修订：MODEL_ROOT 支持 env 覆盖（2026-09-27，只增）
+
+- **变更**：`python/server/config.py` 的 `MODEL_ROOT` 由硬编码字面量改为
+  `os.environ.get("ZIV_AI_MODEL_ROOT", r"C:\AI\ComfyUI_PIC\ComfyUI\models")`。
+- **默认值保留**：`C:\AI\ComfyUI_PIC\...` 仍作**开发期兜底**（`test_models.py:94-97` 断言
+  `resolved["dit_path"].endswith(".safetensors")` 依赖 `config.DIT_MODEL_PATH` 存在）。
+- **派生路径不变**：`DIT_MODEL_PATH` / `TEXT_ENCODER_PATH` / `VAE_PATH` 仍 `os.path.join(MODEL_ROOT, …)`。
+- **优先级不变**：`env(ZIV_AI_DIT_PATH 等) → models.json 的 *_path → config 默认`（`models.py:89-91`）。
+- **A10 关系**：**不改变** A10 原裁决——`COMFY_ROOT` 纳入设置、`MODEL_ROOT` **不**进 `settings.ini`；
+  本次仅新增一个 **env**（`ZIV_AI_MODEL_ROOT`）覆盖点，默认与行为向后兼容。
+- **不做**：不改 `settings.ini` 结构 / 不改 Python 加载优先级 / 不改 A10 其它结论。
+- **说明**：`MODEL_ROOT` 指向仓库**外部**的用户模型库（实测模型不在仓库 `Comfyui/ComfyUI/models`），
+  故不做仓库相对推导。
