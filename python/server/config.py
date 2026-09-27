@@ -149,6 +149,7 @@ TE_SPEED_NODE_DIR = os.environ.get(
 # 外部节点 custom_nodes/comfyui-wd14-tagger 提供 ONNX 模型（wd-vit-tagger-v3）与参考实现；
 # ZIV.AI 侧 tagger.py 复刻其推理核心（路线 A，绕开节点对 PromptServer / web 的依赖）。
 # 默认开；onnxruntime 缺失 / 模型缺失 / 推理失败时静默跳过（返回空列表，不致命）。
+# WD14 Tagger 配置（L1 seam；未接 IPC。见 tagger.py 顶部说明）
 TAGGER_ENABLED = os.environ.get("ZIV_AI_TAGGER", "1") not in ("", "0", "false", "False")
 TAGGER_MODEL_DIR = os.environ.get(
     "ZIV_AI_TAGGER_MODEL_DIR",

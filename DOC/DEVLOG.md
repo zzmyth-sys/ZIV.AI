@@ -7038,3 +7038,10 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **C4（Imaging）**：新增 `Imaging/DirectoryCleanup.cs`（internal static：`CleanupSession(root,sessionId,tag)` / `CleanupAll(root,tag)` / `DeleteDirectorySafe(dir,tag)`）；`ImageCropper`（190→137）与 `MaskExporter`（219→166）删除私有 `DeleteDirectorySafe`，`CleanupSession/CleanupAll` 改转调（公开签名不变；tag 保持 `crop`/`mask` 日志前缀）。
 - **行为不变**：逐字等价，仅去重；无签名变更。
 - **验证**：build `0/0`；受影响类 **60/60**（`QwenImage21*` 31 + `ImageCropper*`/`MaskExporter*`/`Imaging*`/`CommandRequirements*` 等）；所有改动文件 <600。
+
+### D · `tagger.py` 状态明确（保留为能力 seam）
+
+- **`python/server/tagger.py`**：module docstring 增加状态段——L1 已实现（`tag_image`）/ L2（IPC 接入）**未接** / 触发条件（`/tag` 命令或批量打标落地）/ 依赖（onnxruntime CPU + 外置 wd14-tagger 节点）/ 当前无生产调用者（grep 0）。
+- **`python/server/config.py`**：`TAGGER_*` 块顶部加注释「WD14 Tagger 配置（L1 seam；未接 IPC。见 tagger.py 顶部说明）」。
+- **背景（前批）**：WD 实验链（源图/缓存/产物）已退役；本次**不删** `tagger.py`、不改 `TAGGER_*` 默认值。
+- **验证**：`py_compile tagger.py config.py` OK。

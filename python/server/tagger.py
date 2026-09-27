@@ -1,5 +1,10 @@
 """WD14 tagger for the ZIV.AI backend (L1: Python-side capability).
 
+状态：L1 已实现（``tag_image``）；L2（IPC 接入 / C# 调用）**未接**。
+触发条件：当 ``/tag`` 命令或批量打标需求落地时接入 IPC。
+依赖：onnxruntime（CPU）+ ComfyUI ``custom_nodes/comfyui-wd14-tagger``（外置）。
+当前无生产调用者（grep 0 命中）；保留为能力 seam。
+
 Reimplements the inference core of the external WD14 Tagger custom node
 (``custom_nodes/comfyui-wd14-tagger/wd14tagger.py``) so ZIV.AI can tag an image
 in-process without the node's web / ``PromptServer`` dependencies (route A; see

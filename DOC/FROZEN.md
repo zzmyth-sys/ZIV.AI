@@ -5135,3 +5135,11 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **不做**：不改 `settings.ini` 结构 / 不改 Python 加载优先级 / 不改 A10 其它结论。
 - **说明**：`MODEL_ROOT` 指向仓库**外部**的用户模型库（实测模型不在仓库 `Comfyui/ComfyUI/models`），
   故不做仓库相对推导。
+
+## 工程线批次：Z8 拆分 / 死代码 / 重复抽取 / tagger seam（2026-09-27，只增）
+
+- **A（Backend 内部）**：`PythonProcessManager` 拆为 partial——主文件 334 行 + `PythonProcessManager.Start.cs` 293 行（均 <600）。**公开面不变**。`EnsureStartedAsync` 用 try/catch 释放 pipe+process（B16：覆盖 `Start()` 抛与返回 false）。
+- **B（清理）**：删 `ipc.py` `write_binary`/`write_binary_frame`（无调用者）、`config.py` `VRAM_MODE`（0 引用）、`UI.csproj` 过时注释。无签名/契约变更。
+- **C（重构，无签名变更）**：新增共享内部类型 `Tools/ToolParameters`、`Tools/StepProgressAdapter`、`UI/Editing/CommandText`（public）、`App/ResolutionTierText`、`Imaging/DirectoryCleanup`；调用方改调，行为不变。
+- **D（seam 标注）**：`tagger.py` docstring 明示 L1 已实现 / L2 未接 / 触发条件；`TAGGER_*` 加注释。不删能力、不改默认值。
+- **不做**：不改 IPC 契约 / 命令集；不推送。
