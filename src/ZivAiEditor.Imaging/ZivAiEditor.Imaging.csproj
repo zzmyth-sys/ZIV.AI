@@ -10,7 +10,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ZivAiEditor.Contracts\ZivAiEditor.Contracts.csproj" />
-    <ProjectReference Include="..\..\..\ZIV\src\ZIV.Core\ZIV.Core.csproj" />
     <ProjectReference Include="..\..\..\ZIV\src\ZIV.Imaging\ZIV.Imaging.csproj" />
     <PackageReference Include="SkiaSharp" />
   </ItemGroup>

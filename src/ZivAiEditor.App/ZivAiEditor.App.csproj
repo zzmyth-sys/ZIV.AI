@@ -24,8 +24,6 @@
     <ProjectReference Include="..\ZivAiEditor.Tools\ZivAiEditor.Tools.csproj" />
     <ProjectReference Include="..\ZivAiEditor.Contracts\ZivAiEditor.Contracts.csproj" />
     <ProjectReference Include="..\ZivAiEditor.Diagnostics\ZivAiEditor.Diagnostics.csproj" />
-    <ProjectReference Include="..\..\..\ZIV\src\ZIV.Core\ZIV.Core.csproj" />
-    <ProjectReference Include="..\..\..\ZIV\src\ZIV.Imaging\ZIV.Imaging.csproj" />
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
   </ItemGroup>

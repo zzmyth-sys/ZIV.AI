@@ -4338,3 +4338,7 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 ### 验收后动作
 
 1. 真机 D3 通过后，在「验收记录」追加“批次 2A 通过，日期：____”（待签）。
+
+### D2 结果补充
+
+- 删除三处零使用引用后 `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → 0 错误 0 警告；`ZIV.Imaging` 仅存于 `Imaging.csproj`。传递链无破（D2 停点未触发）。

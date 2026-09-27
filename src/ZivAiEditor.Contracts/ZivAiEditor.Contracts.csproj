@@ -8,8 +8,7 @@
     <RootNamespace>ZivAiEditor.Contracts</RootNamespace>
   </PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\..\..\ZIV\src\ZIV.Core\ZIV.Core.csproj" />
-  </ItemGroup>
+  <!-- Batch 2A / D2: the ZIV.Core ProjectReference was compile-unused (no Contracts type
+       references a ZIV.* type); removed to keep the contract layer dependency-free. -->
 
 </Project>

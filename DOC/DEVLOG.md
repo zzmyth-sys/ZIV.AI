@@ -6845,3 +6845,13 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **依赖方向**：Contracts ← Diagnostics ← {Agent, Backend, App}，**无环**（Contracts 零 `DiagLog`/`Diagnostics` 引用）。
 - **验证**：build `0/0`；非 GPU 全量 **659 通过 / 0 失败**（无回归）。
 - **不改**：DiagLog 逻辑/语义/env 门控（`ZIV_AI_DIAG=1`）不变；仅位置与命名空间。
+
+### D2 · 删除零使用的 ZIV.* 引用
+
+- **问题**：三处编译期零使用的跨仓引用（ZIV 为外部兄弟 git 仓）。
+- **改动**：
+  - `Contracts.csproj`：删 `ZIV.Core`（仅注释里出现字符串，无任何 `ZIV.*` 类型使用）。
+  - `App.csproj`：删 `ZIV.Core` + `ZIV.Imaging`（App 用 `ZivAiEditor.Imaging` 项目，非 `ZIV.Imaging`）。
+  - `Imaging.csproj`：删 `ZIV.Core`（经 `ZIV.Imaging` 传递可用）；**保留** `ZIV.Imaging`（`ImageCropper.cs:7` 用 `ZIV.Imaging.Codecs.Skia`）。
+- **验证**：`dotnet build src\ZIV.AI.sln -c Release`（含 `--no-incremental`）→ `0/0`；grep 确认全仓仅 `Imaging.csproj` 保留 `ZIV.Imaging` 引用。
+- **不改**：不动外部 ZIV 仓库依赖本身（submodule/vendor 属 2B）。`UI.csproj:13` 的「ZIV.Core flows transitively through Contracts」注释已过时（条件句，实际无契约类型需要），留待 2B 一并清理。
