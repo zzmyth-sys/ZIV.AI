@@ -13,9 +13,10 @@ namespace ZivAiEditor.App.Controls;
 /// and is pushed here by <see cref="ImagePreview"/>, which also routes pointer input via
 /// <c>AddHandler</c> on this control (so none of the input semantics live here).
 ///
-/// <para><b>Render rule</b> mirrors <c>ImageViewModel.OriginX/OriginY</c> exactly: the
-/// background is filled, then the bitmap is drawn centered on an axis whose scaled length
-/// fits the viewport, or at <c>-Offset</c> on an axis that overflows.</para>
+/// <para><b>Render rule</b> mirrors <c>ImageViewModel.OriginX/OriginY</c> exactly, and the
+/// lock is decided per <b>view</b>, not per axis (B12-follow): when <b>either</b> axis
+/// overflows, <b>both</b> axes draw at <c>-Offset</c>; only when <b>both</b> scaled axes fit
+/// is the bitmap centered on both.</para>
 /// </summary>
 public partial class PanZoomCanvas : UserControl
 {
@@ -75,8 +76,11 @@ public partial class PanZoomCanvas : UserControl
         var zw = Zoom / 100.0;
         var sw = image.PixelSize.Width * zw;
         var sh = image.PixelSize.Height * zw;
-        var x = sw > Bounds.Width ? -Offset.X : (Bounds.Width - sw) / 2.0;
-        var y = sh > Bounds.Height ? -Offset.Y : (Bounds.Height - sh) / 2.0;
+        // B12-follow: lock per view, not per axis — if either axis overflows both draw at
+        // -Offset; only a both-fit (locked) view is centered.
+        var unlocked = sw > Bounds.Width || sh > Bounds.Height;
+        var x = unlocked ? -Offset.X : (Bounds.Width - sw) / 2.0;
+        var y = unlocked ? -Offset.Y : (Bounds.Height - sh) / 2.0;
         context.DrawImage(image, new Rect(x, y, sw, sh));
     }
 }

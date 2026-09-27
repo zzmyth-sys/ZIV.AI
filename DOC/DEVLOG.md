@@ -6785,3 +6785,46 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - `dotnet test ... --filter "FullyQualifiedName!~Ipc"` → **658 通过 / 0 失败**（634 基线 + 24 新增，无回归）。
 - Z8：改动文件最大 `SessionStore.cs` 574 行，均 < 600。
 - 未改 IPC / 命令集 / Contracts 其它类型；未做缩放锚点 / 双击 / resize 逻辑。
+
+## B12 收尾：拖动锁定改为「整视图」判定（2026-09-27，只追加）
+
+### 问题
+
+- 上一轮 B12 后，`ClampOffset` / `OriginX` / `OriginY` 仍**每轴独立**判断溢出：一轴溢出、另一轴未溢出时，未溢出轴锁死为 0，无法拖动 → 用户体感「一轴能拖、一轴不能拖」不统一。
+
+### 新规则（lock 按视图，不按轴）
+
+- 两轴都不溢出（`scaledW ≤ vW` 且 `scaledH ≤ vH`）→ 居中锁定（offset 两轴均为 0，不可拖）。
+- **任一轴溢出 → 两轴都解锁**，各自范围 `[−v, s]`（X/Y 独立上下界）：
+  - `offsetX ∈ [−ViewportWidth, ScaledWidth]`
+  - `offsetY ∈ [−ViewportHeight, ScaledHeight]`
+- 缩态判定由 `HasHorizontalScroll` / `HasVerticalScroll` 的**每轴**语义，改为私有 `IsViewLocked => ScaledWidth <= ViewportWidth && ScaledHeight <= ViewportHeight`（两轴都不溢出才锁定）。`HasHorizontalScroll` / `HasVerticalScroll` 公共属性保留（仍表示各轴真实溢出，供测试 / 滚动条语义），不再用于锁定判断。
+
+### 改动
+
+- `ImageViewModel.ClampOffset`：锁定 → 两轴置 0；解锁 → 两轴 `Math.Clamp(offset, −v, s)`。
+- `ImageViewModel.OriginX/OriginY`：`IsViewLocked ? 居中 : −Offset`（用整视图判定）。
+- `ImageViewModel.SetZoomAt`：锚点保持改为「解锁时两轴都算 offset，锁定时两轴置 0」，单轴溢出时未溢出轴也保持锚点。
+- `PanZoomCanvas.Render`（**必需伴随改动**）：渲染端原先也按每轴 `sw > W` / `sh > H` 独立居中，与 ViewModel 重复。必须同步为「任一轴溢出 → 两轴都按 `−Offset` 绘制」，否则 ViewModel 解锁的未溢出轴在画面上仍被居中、拖动不可见。`PanZoomCanvas` 非契约类型，与 ViewModel 为等价渲染规则。
+
+### 示例（单轴溢出）
+
+- 图片 2000×500 / 视口 800×600，缩放到 50% → 1000×250：X 溢出、Y 不溢出。
+- 新规则下 X、Y 均可拖：X ∈ [−800, 1000]，Y ∈ [−600, 250]。
+- 旧规则下 Y 恒为 0（不可拖）。
+
+### 测试
+
+- 新增 `Single_Axis_Overflow_Unlocks_Both_Axes`（2000×500 / 800×600 验收场景，X 溢出但 Y 可拖到 `[−600, 250]`）。
+- 新增 `Both_Axes_Fit_Keeps_View_Locked_And_Centered`（两轴都恰好适配 → 锁定、不可拖）。
+- 更新 `ZoomAt_Preserves_The_Scrolling_Axis_And_Centers_The_Other` → 改名 `ZoomAt_Unlocks_Both_Axes_On_Single_Axis_Overflow`，断言未溢出轴锚点也保持、`OffsetY ≠ 0`。
+- 更新 `Pan_Overflowing_Axis_Clamps_While_Fitted_Axis_Stays_Zero` → 由 `Both_Axes_Fit_Keeps_View_Locked_And_Centered` 替代（旧断言「未溢出轴恒 0」按新规则失效）。
+- 其余（两轴都溢出 / 两轴都不溢出）行为不变，断言保持。
+
+### 验证（非 GPU / 不启动 App / 不启动 Python / 不跑 GPU）
+
+- `dotnet build src/ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 受影响类：`ImageViewModelTests` 全绿（20）。
+- `dotnet test ... --filter "FullyQualifiedName!~Ipc"` → **659 通过 / 0 失败**（658 基线 + 1 新增，无回归）。
+- Z8：改动文件最大 `ImageViewModel.cs` 325 行，均 < 600。
+- 未改契约；未改拖动范围数值（仍 `[−v, s]`）；未改双击回适配；缩态（两轴都不溢出）居中行为不变。

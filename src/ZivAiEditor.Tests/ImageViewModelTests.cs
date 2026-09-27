@@ -100,24 +100,27 @@ public class ImageViewModelTests
     }
 
     [Fact]
-    public void ZoomAt_Preserves_The_Scrolling_Axis_And_Centers_The_Other()
+    public void ZoomAt_Unlocks_Both_Axes_On_Single_Axis_Overflow()
     {
+        // B12-follow: lock is per view, not per axis — a single overflowing axis unlocks both.
         var vm = new ImageViewModel();
         vm.SetViewport(400, 400);
         vm.SetImage(800, 600); // fit 50% -> 400x300, both visible
         vm.Fit();
 
-        // 60% -> 480x360: only the horizontal axis overflows.
+        // 60% -> 480x360: only the horizontal axis overflows, but both unlock.
         const double cursorX = 300;
         const double cursorY = 100;
         var beforeX = vm.ViewportToImage(cursorX, cursorY).X;
+        var beforeY = vm.ViewportToImage(cursorX, cursorY).Y;
         vm.SetZoomAt(60, cursorX, cursorY);
 
         Assert.True(vm.HasHorizontalScroll);
         Assert.False(vm.HasVerticalScroll);
+        // The anchor is kept on both axes (the fitted axis is no longer forced to zero).
         Assert.Equal(beforeX, vm.ViewportToImage(cursorX, cursorY).X, 6);
-        // The fully visible axis is centered, so its offset stays at zero.
-        Assert.Equal(0, vm.OffsetY);
+        Assert.Equal(beforeY, vm.ViewportToImage(cursorX, cursorY).Y, 6);
+        Assert.NotEqual(0, vm.OffsetY);
     }
 
     [Fact]
@@ -199,22 +202,40 @@ public class ImageViewModelTests
     }
 
     [Fact]
-    public void Pan_Overflowing_Axis_Clamps_While_Fitted_Axis_Stays_Zero()
+    public void Single_Axis_Overflow_Unlocks_Both_Axes()
     {
+        // Acceptance scenario: 2000x500 image / 800x600 viewport. At 50% -> 1000x250 only X
+        // overflows, yet both axes must pan over [-v, s] (B12-follow).
         var vm = new ImageViewModel();
-        vm.SetViewport(400, 400);
+        vm.SetViewport(800, 600);
         vm.SetImage(2000, 500);
-        vm.SetZoomAt(50, 0, 0); // 50% -> 1000x250: X overflows, Y fits
+        vm.SetZoomAt(50, 0, 0); // 1000x250: X overflows, Y fits
 
         Assert.True(vm.HasHorizontalScroll);
         Assert.False(vm.HasVerticalScroll);
 
         vm.PanBy(10_000, 10_000);
-        Assert.Equal(-400, vm.OffsetX, 6); // -ViewportWidth
-        Assert.Equal(0, vm.OffsetY, 6);    // fitted axis stays 0
+        Assert.Equal(-800, vm.OffsetX, 6); // -ViewportWidth
+        Assert.Equal(-600, vm.OffsetY, 6); // -ViewportHeight: the fitted axis is unlocked too
 
         vm.PanBy(-10_000, -10_000);
         Assert.Equal(1000, vm.OffsetX, 6); // ScaledWidth
+        Assert.Equal(250, vm.OffsetY, 6);  // ScaledHeight
+    }
+
+    [Fact]
+    public void Both_Axes_Fit_Keeps_View_Locked_And_Centered()
+    {
+        // B12-follow: lock only when NEITHER axis overflows — panning is a no-op.
+        var vm = new ImageViewModel();
+        vm.SetViewport(800, 600);
+        vm.SetImage(400, 300); // fit 200% -> 800x600: both fit exactly
+
+        Assert.False(vm.HasHorizontalScroll);
+        Assert.False(vm.HasVerticalScroll);
+
+        vm.PanBy(10_000, 10_000);
+        Assert.Equal(0, vm.OffsetX, 6);
         Assert.Equal(0, vm.OffsetY, 6);
     }
 

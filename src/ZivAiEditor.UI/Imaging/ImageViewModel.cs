@@ -7,12 +7,12 @@ namespace ZivAiEditor.UI.Imaging;
 /// layer renders it and feeds it pointer / wheel input.
 ///
 /// Coordinate convention (identical to the renderer's offset model):
-/// <c>viewportPoint = imagePoint * Zoom - Offset</c>. The pan offset is clamped so the
-/// overflowing axis may move until the image is fully off the viewport, i.e.
-/// <c>OffsetX ∈ [-ViewportWidth, ScaledWidth]</c> (likewise for Y; B12 allows "露白").
-/// When the scaled image is smaller than the viewport on an axis it is
-/// <b>centered</b> on that axis and its offset is forced to 0, so the effective origin
-/// becomes <c>(ViewportSize - ScaledSize) / 2</c> instead of <c>-Offset</c>.
+/// <c>viewportPoint = imagePoint * Zoom - Offset</c>. Lock vs pan is decided <b>per view,
+/// not per axis</b> (B12-follow): only when <b>both</b> scaled axes fit inside the viewport
+/// is the image locked and centered (offset 0, effective origin
+/// <c>(ViewportSize - ScaledSize) / 2</c>). When <b>either</b> axis overflows, <b>both</b>
+/// axes unlock and pan over the extended range <c>[-ViewportSize, ScaledSize]</c> (likewise
+/// for Y; the image may be moved fully off the viewport, i.e. "露白" is allowed).
 ///
 /// All dimensions are in device-independent pixels; <see cref="ZoomPercent"/> is an
 /// integer percentage (100 = actual size) to match the renderer's integer zoom levels.
@@ -230,10 +230,19 @@ public sealed class ImageViewModel
 
         ZoomPercent = target;
 
-        // Preserve the anchor on each axis that now scrolls; a fully visible axis is
-        // centered, so the anchor cannot be kept there (and need not be).
-        OffsetX = HasHorizontalScroll ? imageX * Zoom - viewportX : 0;
-        OffsetY = HasVerticalScroll ? imageY * Zoom - viewportY : 0;
+        // Preserve the anchor on both axes when the view is unlocked; a locked (both-fit) view
+        // is centered, so the anchor cannot be kept there (and need not be).
+        if (IsViewLocked)
+        {
+            OffsetX = 0;
+            OffsetY = 0;
+        }
+        else
+        {
+            OffsetX = imageX * Zoom - viewportX;
+            OffsetY = imageY * Zoom - viewportY;
+        }
+
         ClampOffset();
     }
 
@@ -278,28 +287,38 @@ public sealed class ImageViewModel
     }
 
     /// <summary>
-    /// Clamps the pan offset for the current zoom. While an axis overflows, the image may be
-    /// paned until it is <b>fully off the viewport</b> on that axis — the extended range
-    /// <c>[−ViewportSize, ScaledSize]</c> (B12: panning past the edge is allowed, i.e. white
-    /// "露白" is permitted). A fitted axis stays centered (offset 0, not pannable).
+    /// Clamps the pan offset for the current zoom (B12-follow: lock is per view, not per axis).
+    /// When <b>either</b> axis overflows, <b>both</b> axes unlock and may pan until the image is
+    /// fully off the viewport, the extended range <c>[−ViewportSize, ScaledSize]</c> (panning
+    /// past the edge is allowed, i.e. white "露白"). Only when <b>both</b> scaled axes fit is the
+    /// image locked: both offsets are forced to 0 (centered).
     /// </summary>
     public void ClampOffset()
     {
-        OffsetX = ScaledWidth > ViewportWidth
-            ? Math.Clamp(OffsetX, -ViewportWidth, ScaledWidth)
-            : 0;
-        OffsetY = ScaledHeight > ViewportHeight
-            ? Math.Clamp(OffsetY, -ViewportHeight, ScaledHeight)
-            : 0;
+        if (IsViewLocked)
+        {
+            OffsetX = 0;
+            OffsetY = 0;
+            return;
+        }
+
+        OffsetX = Math.Clamp(OffsetX, -ViewportWidth, ScaledWidth);
+        OffsetY = Math.Clamp(OffsetY, -ViewportHeight, ScaledHeight);
     }
 
     /// <summary>
-    /// Viewport position of the image origin: negative of the scroll offset while the
-    /// axis scrolls, otherwise the centering offset.
+    /// True when <b>neither</b> scaled axis overflows the viewport, so the image is locked and
+    /// centered. As soon as <b>either</b> axis overflows, both axes unlock (B12-follow).
     /// </summary>
-    private double OriginX => HasHorizontalScroll ? -OffsetX : (ViewportWidth - ScaledWidth) / 2.0;
+    private bool IsViewLocked => ScaledWidth <= ViewportWidth && ScaledHeight <= ViewportHeight;
 
-    private double OriginY => HasVerticalScroll ? -OffsetY : (ViewportHeight - ScaledHeight) / 2.0;
+    /// <summary>
+    /// Viewport position of the image origin: negative of the scroll offset while the view is
+    /// unlocked, otherwise the centering offset.
+    /// </summary>
+    private double OriginX => IsViewLocked ? (ViewportWidth - ScaledWidth) / 2.0 : -OffsetX;
+
+    private double OriginY => IsViewLocked ? (ViewportHeight - ScaledHeight) / 2.0 : -OffsetY;
 
     private static int Clamp(int zoomPercent)
         => Math.Clamp(zoomPercent, MinZoomPercent, MaxZoomPercent);
