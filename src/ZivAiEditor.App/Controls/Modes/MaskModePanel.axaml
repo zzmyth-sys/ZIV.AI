@@ -35,8 +35,8 @@
     <StackPanel Orientation="Vertical"
                 Spacing="8"
                 HorizontalAlignment="Left"
-                VerticalAlignment="Top"
-                Margin="8,8,0,0">
+                VerticalAlignment="Center"
+                Margin="8,0,0,0">
       <Border Padding="8,10"
               CornerRadius="6"
               Background="{StaticResource ZivOverlayBrush}">
@@ -46,8 +46,10 @@
                     ToolTip.Tip="笔刷大小">
           <Path Classes="toolIcon"
                 Data="{StaticResource IconCircle}"
+                Width="14"
+                Height="14"
                 HorizontalAlignment="Center" />
-          <Slider x:Name="PART_BrushSlider"
+          <Slider x:Name="PART_BrushSlider" Classes="maskVert"
                   Orientation="Vertical"
                   Width="28"
                   Height="120"
@@ -68,8 +70,10 @@
                     ToolTip.Tip="羽化">
           <Path Classes="toolIcon"
                 Data="{StaticResource IconFeather}"
+                Width="14"
+                Height="14"
                 HorizontalAlignment="Center" />
-          <Slider x:Name="PART_FeatherSlider"
+          <Slider x:Name="PART_FeatherSlider" Classes="maskVert"
                   Orientation="Vertical"
                   Width="28"
                   Height="120"

@@ -201,4 +201,15 @@
     <Setter Property="StrokeJoin" Value="Round" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
+
+  <!-- Mask brush/feather vertical sliders: Fluent's vertical Slider template places the
+       Track inside an implicit "15,Auto,15" grid (needs ~50px). In our narrow 28px column
+       that squeezes the template and pushes the Track/knob off the panel's centre line, so
+       the knob no longer lines up with the icon above it. Span the Track across all columns
+       and centre it so the knob shares the icon's vertical axis. -->
+  <Style Selector="Slider.maskVert /template/ Track#PART_Track">
+    <Setter Property="Grid.Column" Value="0" />
+    <Setter Property="Grid.ColumnSpan" Value="3" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+  </Style>
 </Styles>
