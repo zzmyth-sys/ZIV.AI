@@ -19,14 +19,14 @@ namespace ZivAiEditor.UI.Imaging;
 /// </summary>
 public sealed class ImageViewModel
 {
-    /// <summary>Lowest zoom (percent) for <b>manual</b> zoom-out, matching the renderer's default.</summary>
-    public const int MinZoomPercent = 10;
+    /// <summary>Lowest zoom (percent) reachable by <b>manual</b> zoom-out (wheel / anchor).</summary>
+    public const int MinZoomPercent = 5;
 
     /// <summary>
     /// Lowest zoom (percent) for a computed <b>fit</b>. Fit is not a manual zoom-out, so a very
     /// large image may fit far below <see cref="MinZoomPercent"/> (e.g. an 8K portrait fits near
-    /// 4%); flooring it to 10% would overflow the viewport, unlock panning and left/top-align it.
-    /// Kept at 1 so the integer-percent zoom can never round down to 0.
+    /// 4%); flooring it to the manual limit would overflow the viewport, unlock panning and
+    /// left/top-align it. Kept at 1 so the integer-percent zoom can never round down to 0.
     /// </summary>
     public const int MinFitZoomPercent = 1;
 

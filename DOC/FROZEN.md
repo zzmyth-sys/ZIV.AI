@@ -5153,3 +5153,11 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **验证**：build 0/0；非 GPU 全量 671 → **695**，0 失败；所有改动文件 <600 行。
 - **不做**：不跑 GPU / Python / 真实 App；不 git commit / 不推送。
 - **已知行为**：手轮在 Fit<10% 时向下缩放上抬到 10%；>2.5K 遮罩描边整幅重建；极端长宽比仍受 1% 底限制。
+
+## 手动缩放下限 10% → 5%（2026-09-27，只增）
+
+- **变更**：`ZivAiEditor.UI.Imaging.ImageViewModel.MinZoomPercent` 由 **10** 改为 **5**（手动缩出下限）。同文件的 `MinFitZoomPercent=1` **不变**。
+- **语义**：`Clamp`（手动：`SetZoomAt`/`ZoomBy`/`RestoreView`）底=5；`ClampFit`（`FitZoomPercent`/`FitWithMargin`）底=1。双击回适配 / 滚轮锚点 / 平移边界逻辑不变。**无签名变更**。
+- **历史说明**：上方 8K 代理条目中的 `MinZoomPercent=10`（FROZEN:5150 / INTERFACES:449 / DEVLOG 8K 节）为**当时值记录**，按「文档只增不改」保留；本条为其后的最新值。
+- **验证**：build 0/0；`ImageViewModelTests` + `PanZoomCanvasGeometryTests` 27/27；非 GPU 全量 695 → **696**，0 失败。
+- **不做**：不改 Fit 下限 / 其它缩放逻辑；未 commit / 未推送。

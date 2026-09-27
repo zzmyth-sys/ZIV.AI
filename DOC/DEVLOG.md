@@ -7112,3 +7112,14 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **不做**：未改 IPC / 命令集 / Python；未推 GPU / Python / 真实窗口；未 git commit。
 - **已知行为（保留）**：① 手轮在「<10% 的 Fit」视图向下缩放会上抬到 10%（手动下限设计，已登记）；② >2.5K 遮罩描边每帧整幅重建（正确但可能顿）；③ 极端长宽比（>~140:1）仍会超 1% 底而左/上对齐（整数百分比缩放固有）。
 - **未决**：真机确认 8K 竖图居中 / 非 96 DPI 对齐 / 保存-重开不重解原图（用户执行）。
+
+## 手动缩放下限 10% → 5%（2026-09-27，只追加）
+
+> 小改动：`ImageViewModel.MinZoomPercent` 由 **10** 改为 **5**，与 Fit 下限 `MinFitZoomPercent=1` 保持合理区间（手动可缩得比旧值更小，但仍有下限）。
+
+- **改动**：`src/ZivAiEditor.UI/Imaging/ImageViewModel.cs`：`public const int MinZoomPercent = 5;`（原 10）；同文件 `MinFitZoomPercent=1` **不动**。`Clamp`（手动：`SetZoomAt` / `ZoomBy` / `RestoreView`）用 5，`ClampFit`（`FitZoomPercent` / `FitWithMargin`）仍用 1。双击回适配 / 滚轮锚点 / 平移边界等逻辑**未动**。
+- **范围检查**：全仓唯一硬编码下限即该常量；App/UI 其余缩放代码仅引用 `MinZoomPercent` 符号，无散落字面量 10。
+- **测试**：`ImageViewModelTests` 中仅 3 处以符号 `MinZoomPercent` 断言（自动随常量更新）。原「8K 竖图不被截断」用例因 fit(≈5%) 与新下限相等而失去区分度 → 改用更高竖图（8192×16384，fit≈4%）继续证明 fit 可低于手动下限且居中；原「手动仍钳到下限」用例同样改用该图以保持「fit < 手动下限」的区分；新增 `Manual_Zoom_Stops_At_Five_Percent`（`SetZoomAt(4)`→5、5% 再 `ZoomBy(0.5)` 停住 5、`SetZoomAt(6)`→6）。
+- **验证**：`dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**；`ImageViewModelTests` + `PanZoomCanvasGeometryTests` 27/27；非 GPU 全量 **695 → 696**，0 失败。
+- **不做**：不改 `MinFitZoomPercent` / 其它缩放逻辑；不跑 GPU / Python / App；未 commit / 未推送（上一批 8K 改动仍未提交，待裁决）。
+- **未决**：是否将本改动与上一批 8K 代理**分批**提交（本改动为 `ImageViewModel.cs` + `ImageViewModelTests.cs` 两文件）。
