@@ -190,13 +190,6 @@ class FrameIO:
     def write_json(self, obj):
         self.write_frame(FRAME_JSON, encode_json(obj))
 
-    def write_binary(self, payload):
-        self.write_frame(FRAME_BINARY, payload)
-
-    def write_binary_frame(self, payload):
-        """Send a single 0x02 binary frame (contract §2 / §3.5)."""
-        self.write_frame(FRAME_BINARY, payload)
-
     def build_preview_payload(self, task_id, jpeg_bytes):
         """Payload for a 0x02 preview frame: [4B id][id][4B JPEG len][JPEG]."""
         task = (task_id or "").encode("utf-8")

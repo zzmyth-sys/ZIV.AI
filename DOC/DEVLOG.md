@@ -7022,3 +7022,10 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **B16 修复**：`EnsureStartedAsync` 先 `BuildStartInfo()`（校验失败即抛、无资源）→ `new Process` → `try { pipe=CreateSecurePipeServer(); _pipe=pipe; process.Start() } catch { _pipe=null; pipe?.Dispose(); process.Dispose(); throw; }`。同时覆盖 `!Start()` 返回值与 `Start()` 抛两种路径（原 `!Start()` 分支未 Dispose Process）。原异常消息保留。
 - **测试**：`PythonProcessManagerTests` 2/2；新增 `Failed_Start_Releases_The_Pipe_Name`（有效脚本 + 不存在 python_exe → `Start()` 抛 → 断言管道名可再建，**强 oracle**：泄漏则 "all pipe instances are busy"）。
 - **验证**：Backend build `0/0`；两文件均 <600。
+
+### B · 死代码清理
+
+- **`python/server/ipc.py`**：删除 `write_binary`（:193-194）与 `write_binary_frame`（:196-198）——二者逐字重复且**全仓无调用者**（真正的二进制发送走 `write_preview` 的 `_write_frame_locked`）。
+- **`python/server/config.py`**：删除 `VRAM_MODE = "auto"` 块（3 行）——**0 代码引用**（仅 `DEVLOG.md:311` 历史提及，豁免）。
+- **`src/ZivAiEditor.UI/ZivAiEditor.UI.csproj`**：删除过时注释句「ZIV.Core flows transitively through Contracts …」（`Contracts.csproj` 已无任何 ProjectReference）。
+- **验证**：`py_compile ipc.py config.py` OK；`write_binary` 全仓 0 命中；build `0/0`。

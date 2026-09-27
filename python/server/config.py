@@ -158,9 +158,6 @@ TAGGER_MODEL = os.environ.get("ZIV_AI_TAGGER_MODEL", "wd-vit-tagger-v3")
 TAGGER_THRESHOLD = float(os.environ.get("ZIV_AI_TAGGER_THRESHOLD", "0.35"))
 TAGGER_CHARACTER_THRESHOLD = float(os.environ.get("ZIV_AI_TAGGER_CHARACTER_THRESHOLD", "0.85"))
 
-# ---- 显存策略（Z21 空闲卸载：Step 3 实现）----
-# auto = 交给 ComfyUI 的 model_management 决定权重驻留（CPU/GPU/offload）
-VRAM_MODE = "auto"
 # 是否关闭 ComfyUI「智能显存优化」（等效官方 --disable-smart-memory）。**默认关闭（1）**。
 # Step 6 实测（side 1280 / 25 步 / RTX 4080 16GB）：启用智能显存时耗时 60.19s 且 VAE decode
 #   触发 OOM→tiled 回退；故维持 Step 3.4 的关闭策略，显存改由管线内编排（pipeline._release）控制。
