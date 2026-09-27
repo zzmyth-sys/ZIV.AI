@@ -419,3 +419,10 @@
 - **`DiagLog` 迁址（D1）**：`public static class DiagLog` 由程序集 `ZivAiEditor.Contracts`（命名空间 `ZivAiEditor.Contracts.Diagnostics`）迁到新程序集 `ZivAiEditor.Diagnostics`（命名空间 `ZivAiEditor.Diagnostics`）。成员 `IsEnabled` / `Log(string)` / `Exists(string?)` / `DescribeCrop(CropSpec?)` **签名不变**。消费者（Agent/Backend/App）改为 `using ZivAiEditor.Diagnostics;`。Contracts 不再包含诊断类型。
 - **`OptimizationOptions` 线格式（D4）**：见下条批次 2A 记录 —— `MagCache` / `MagCacheThresh` 追加 `[JsonPropertyName("magcache")]` / `[JsonPropertyName("magcache_thresh")]`（注解，API 形状不变）。
 - **不做**：不改 IPC 帧格式 / 命令集 / 其它 Contracts 类型。
+
+## 31. D4 线格式确认：OptimizationOptions（2026-09-27）
+
+- **`ZivAiEditor.Contracts.Inference.OptimizationOptions`**：`bool MagCache` → wire 键 `magcache`；`double MagCacheThresh`（默认 0.24）→ wire 键 `magcache_thresh`。实现方式为成员级 `[JsonPropertyName]`（**不改属性名/类型/默认值，非签名变更**）。
+- **原因**：`IpcJsonContext` 的 `SnakeCaseLower` 策略会把 `MagCache` 渲染为 `mag_cache`，与 `contracts/ipc-protocol.md` 及 Python `handlers.py` 不一致；显式 `JsonPropertyName` 优先于命名策略。
+- **锁定**：`IpcSubmitMapperTests.OptimizationOptions_Serialize_To_Documented_Keys` 经真实 `IpcJsonContext` 断言键名。
+- **不做**：不改 Python / 不改 `ipc-protocol.md`。

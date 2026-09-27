@@ -6867,3 +6867,22 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **真机待验证**：ACL「他用户被拒」无法单进程单用户断言，需多账户真机验证（见 ACCEPTANCE）。
 - **验证**：build `0/0`；`SingleInstanceTests` 3/3 绿。
 - **不改**：管道名（SID+session）、Mutex 语义、`SendToExistingInstance` 行为。
+
+### D4 · MagCache 字段名对齐契约
+
+- **问题**：`OptimizationOptions.MagCache` / `MagCacheThresh` 经 `IpcJsonContext`（`PropertyNamingPolicy = SnakeCaseLower`）序列化为 `mag_cache` / `mag_cache_thresh`，与 Python `handlers.py:260,302`（读 `magcache` / `magcache_thresh`）及 `contracts/ipc-protocol.md:45,202` **不一致**。
+- **实测对照（BCL 探针，非 GPU/Python/App）**：
+  - 修复前：`JsonSerializer.Serialize({"MagCache":true}, SnakeCaseLower)` → `{"mag_cache":true,"mag_cache_thresh":0.24}`
+  - 修复后（加 `[JsonPropertyName]`）：→ `{"magcache":true,"magcache_thresh":0.24}`
+- **改动**：`Contracts/Inference/OptimizationOptions.cs` 两属性加 `[JsonPropertyName("magcache")]` / `[JsonPropertyName("magcache_thresh")]`（+ `using System.Text.Json.Serialization;`）。注解不改 API 形状（属性名/类型/默认值不变）；线格式对齐**已冻结**契约，非改契约。
+- **测试**：`IpcSubmitMapperTests.OptimizationOptions_Serialize_To_Documented_Keys` 经 `IpcJsonContext.Default.OptimizationOptions` 序列化，断言含 `"magcache":true` / `"magcache_thresh":0.24` 且不含 `mag_cache`。
+- **验证**：build `0/0`；`IpcSubmitMapperTests` 11/11 绿（该测试类 FQN 含 `Ipc`，故不在 `!~Ipc` 全量口径内，单独验证）。
+- **不改**：Python 侧读键不变；`ipc-protocol.md` 不变。
+
+### 批次 2A 验证汇总
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**（D2 另经 `--no-incremental` 验证）。
+- 非 GPU 全量 `--filter "FullyQualifiedName!~Ipc"` → **660 通过 / 0 失败**（基线 659 + D3 新增 1）。
+- `IpcSubmitMapperTests`（含 D4 新测试）→ 11 通过 / 0 失败。
+- Z8：改动文件最大 `SingleInstance.cs` ≈ 215 行，均 < 600。
+- 未跑 GPU / 未启动 Python / 未启动 App。

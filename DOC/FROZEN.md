@@ -5098,3 +5098,16 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **依赖方向**：`Diagnostics → Contracts`（单向，`DescribeCrop` 需 `Contracts.Session.CropSpec`）；`Agent` / `Backend` / `App → Diagnostics`。**Contracts 不再引用 DiagLog / Diagnostics**。
 - **契约**：无 Contracts 类型签名变更；仅类型所在程序集与命名空间改变（消费者改 using）。
 - **不改**：DiagLog 行为、日志路径、env 门控。
+
+### D2 · 冗余引用删除（构建配置）
+
+- `Contracts.csproj` 删 `ZIV.Core`；`App.csproj` 删 `ZIV.Core` + `ZIV.Imaging`；`Imaging.csproj` 删 `ZIV.Core`（保留 `ZIV.Imaging`）。三处均为编译期零使用。无 Contracts 类型/签名变更；无 IPC/命令集变更。
+
+### D3 · 单实例管道加固（App 内部）
+
+- `SingleInstance`（`internal sealed`，App 层）新增 ACL `CreateSecureServer` + `MaxPayloadChars=64*1024` 有界读。**无契约类型/签名变更**（App 内部实现）。
+
+### D4 · OptimizationOptions 线格式（修正实现以对齐已冻结契约）
+
+- `Contracts/Inference/OptimizationOptions.MagCache` / `MagCacheThresh` 追加 `[JsonPropertyName("magcache")]` / `[JsonPropertyName("magcache_thresh")]`。属性名/类型/默认值 **不变**（非签名变更）；仅 C# 序列化键由 `mag_cache` / `mag_cache_thresh` 修正为契约文档既有的 `magcache` / `magcache_thresh`，与 Python `handlers.py` 读取一致。
+- **不做**：不改 Python、不改 `contracts/ipc-protocol.md`（C# 端向文档对齐）。

@@ -4346,3 +4346,8 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 ### D3 结果补充
 
 - `SingleInstanceTests` 3/3 绿：同用户转发正常（ACL 不挡自身，停点未触发）+ 超长（>64K 字符）行被丢弃且监听器存活。ACL「他用户被拒」仍属真机多账户验证项。
+
+### D4 结果补充（批次 2A 收尾）
+
+- 实测对照：修复前 `SnakeCaseLower` → `mag_cache` / `mag_cache_thresh`；加 `[JsonPropertyName]` 后 → `magcache` / `magcache_thresh`。`IpcSubmitMapperTests` 11/11（含新键名断言）。
+- **批次 2A 最终**：`dotnet build src\ZIV.AI.sln -c Release` → 0 错误 0 警告；非 GPU 全量（`!~Ipc`）→ **660 通过 / 0 失败**（基线 659 + D3 新增 1）；`IpcSubmitMapperTests` → 11 通过 / 0 失败。D1–D4 停点均未触发。

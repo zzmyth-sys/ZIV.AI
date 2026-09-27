@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ZivAiEditor.Backend;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Inference;
@@ -189,5 +190,20 @@ public class IpcSubmitMapperTests
 
         Assert.Equal("inpaint", request.Op);
         Assert.Equal("mask.png", request.Payload.MaskPath);
+    }
+
+    [Fact]
+    public void OptimizationOptions_Serialize_To_Documented_Keys()
+    {
+        // Batch 2A / D4: the real IPC serializer must emit the frozen contract keys
+        // "magcache" / "magcache_thresh" (NOT the SnakeCaseLower "mag_cache"). Locks the
+        // C# wire format to Python handlers.py + contracts/ipc-protocol.md.
+        var json = JsonSerializer.Serialize(
+            new OptimizationOptions { MagCache = true, MagCacheThresh = 0.24 },
+            IpcJsonContext.Default.OptimizationOptions);
+
+        Assert.Contains("\"magcache\":true", json);
+        Assert.Contains("\"magcache_thresh\":0.24", json);
+        Assert.DoesNotContain("mag_cache", json);
     }
 }
