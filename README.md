@@ -127,3 +127,26 @@ pwsh -File publish.ps1
 ## 状态
 
 当前已落地到 **Step 9C.13**（UI 交互与预览增强）。逐步进展与新冻结契约见 `DOC/DEVLOG.md`、`DOC/FROZEN.md`。
+
+## 前置依赖
+
+ZIV.AI 复用 ZIV 项目的共享库（`ZIV.Core` / `ZIV.Imaging`）。
+首次构建前，请先获取 ZIV 仓库并放在 ZIV.AI 的**同级目录**：
+
+```
+D:\devlop\
+  ├─ ZIV\       ← ZIV 仓库
+  └─ ZIV.AI\    ← 本项目
+```
+
+获取方式（二选一）：
+
+- `git clone https://github.com/zzmyth-sys/ZIV.git` （ZIV 公开后）
+- 或复制已有的 ZIV 目录到同级位置
+
+然后 `dotnet build src\ZIV.AI.sln -c Release`
+
+## 未来计划
+
+ZIV 正式发布到 GitHub 后，本项目将切换为 git submodule 引用，
+简化前置步骤。（当前为同级目录依赖）
