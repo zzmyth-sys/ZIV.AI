@@ -7123,3 +7123,80 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **验证**：`dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**；`ImageViewModelTests` + `PanZoomCanvasGeometryTests` 27/27；非 GPU 全量 **695 → 696**，0 失败。
 - **不做**：不改 `MinFitZoomPercent` / 其它缩放逻辑；不跑 GPU / Python / App；未 commit / 未推送（上一批 8K 改动仍未提交，待裁决）。
 - **未决**：是否将本改动与上一批 8K 代理**分批**提交（本改动为 `ImageViewModel.cs` + `ImageViewModelTests.cs` 两文件）。
+
+## 显示坐标系合并为单层 2.5K（2026-09-27，只追加）
+
+> 修正上一批 8K 代理的「双层坐标系」（显示=代理 ≤2560；模型/叠加=原图尺寸，代理位图拉伸覆盖原图矩形）：现统一为**单层 2.5K 坐标系**。理由：代理目的只是裁切精度；显示链（图/遮罩/裁切框/对比）2.5K 够用；双层引入 OriginalW/H、遮罩坐标缩放、叠加矩形换算等复杂度。
+
+### A · 简化前后对照
+- **上一批（双层）**：`DisplayImage.SourcePixelSize` = 原图；`ImageViewModel.ImageWidth/Height` = 原图；`PanZoomCanvas.SourceSize` = 原图，代理位图被**拉伸**覆盖原图矩形；遮罩缓冲 = 原图（8K）→ 绘制/羽化/导出遍历 8K；裁切框 = 原图坐标（8K）。
+- **本次（单层）**：`DisplayImage.DisplayPixelSize` = 显示位图尺寸（≤2560）；模型/渲染/叠加全部用显示尺寸；`PanZoomCanvas` 按显示尺寸绘制（**不拉伸**）；遮罩缓冲 = 显示尺寸（≤2560）；裁切框 = 显示坐标，确认时 **×scale** 换算到原图再裁。
+
+### B · 关键改动
+- `App/Imaging/IDisplayImageLoader.cs`：`DisplayImage` 记录改为 `(Bitmap, DisplayPixelSize, OriginalPixelSize, ProxyPath?)`——`DisplayPixelSize` 是唯一 UI 坐标空间；`OriginalPixelSize` 仅供尺寸徽标 + 裁切换算。
+- `App/Imaging/DisplayImageLoader.cs`：小图两尺寸相同；代理图 `DisplayPixelSize` 取代理头信息、`OriginalPixelSize` 取原图头信息（均只读头，不解码像素）。
+- `App/Controls/ImagePreview.axaml.cs`：模型/画布用 `DisplayPixelSize`；尺寸徽标用 `OriginalPixelSize`；新增 `_originalPixelSize` 字段与 `DisplayScale`（=显示/原图）。
+- `App/Controls/ImagePreview.Crop.cs`：`RefreshCropBounds` 下发 `_crop.DisplayScale`；`RestoreOrDefaultCrop` 把持久化的原图坐标 ×DisplayScale 转显示坐标；`ConfirmCropAsync` 把显示框 ×toOriginal 转原图坐标（`right/left` 分别取整再差，避免缝隙），`CropSpec.X/Y/W/H` 存原图坐标、`SourceWidth/Height` 存原图尺寸。
+- `UI/Editing/CropState.cs`：新增 `DisplayScale`；唯一**绝对**上限 `MaxPixelCount` 按 `DisplayScale²` 缩小（相对上限 `MaxExpandFactor`/`MinSize` 不变），使放大回原图后的画布仍 ≤36M 像素。
+- `UI/Editing/MaskState.cs`：新增 `DisplayScale`；`EffectiveBrushDiameter` / `EffectiveFeatherPx` = 用户原图像素值 ×DisplayScale（缓冲像素）；笔刷步长/半径用 effective。
+- `App/Controls/ImagePreview.Mask.cs`：`RefreshMaskCanvas` 下发 `_mask.DisplayScale`；笔刷圈用 `EffectiveBrushDiameter`；导出羽化传 `EffectiveFeatherPx`；`MaskSpec.Width/Height` = 缓冲（显示）尺寸、`FeatherPx` = 用户原图值。
+- `App/Controls/MaskOverlay.axaml.cs`：`Rebuild` 用 `EffectiveFeatherPx`；目标矩形仍按缓冲尺寸（=显示）经 `ImageToViewport`，与画布同坐标系。
+- `App/MainWindow.Chat.cs`：遮罩叠加尺寸校验改用 `DisplayPixelSize`（与遮罩 PNG/缓冲同空间）。
+- `ImageCropper.CropAsync` / `IImagingService.CropAsync` **签名未改**：scale 换算在 `ImagePreview` 侧完成后再用原图坐标调用（避免契约签名变更）。
+
+### C · 裁切坐标换算（2.5K → 原图）
+`toOriginal = OriginalWidth / DisplayWidth`（8K/2560 ≈ 3.2）。`x=round(dx·toOriginal)`、`y=round(dy·toOriginal)`、`width=round((dx+dw)·toOriginal)−x`、`height=round((dy+dh)·toOriginal)−y`；再交给 `ImageCropper.CropAsync`（从**原图**裁）→ 输出**原图分辨率**。裁切结果回预览时再次经 `IDisplayImageLoader`（若 >2560 → 重新生成代理）。
+
+### D · 遮罩缓冲尺寸 / 落笔坐标
+缓冲 = `RefreshMaskCanvas` 里的 `_model.ImageWidth/Height` = **显示尺寸**（≤2560，小图=原图）。指针 `ViewportToImage` 直接得显示坐标 → 直接落笔（**无缓冲内缩放**）。用户可见的 `BrushDiameter`（如 40）/`FeatherPx`（如 15）仍是**原图像素**语义，`MaskState` 乘 `DisplayScale` 后用于缓冲内操作；重开同图 scale 可复现，故持久化的原图值仍有效。
+
+### E · 契约（MaskSpec.W/H）
+- `MaskSpec.Width/Height` 语义由「主图原始像素」改为「遮罩 PNG 实际尺寸（=缓冲=显示，≤2.5K）」。`MaskSpec` **未加字段**；`session.json` 无新字段。后端 `_resize_mask` 本就把遮罩缩放到生成目标，不读该字段 → 送管线无需放大。
+- **FROZEN 尾部**记该语义修订（见 FROZEN）。
+
+### F · 验证
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 → **696 → 702**（+6 新测试），0 失败。
+- 新测试：`ImagePreviewHeadlessTests`（大图显示尺寸=2560×640；进遮罩 → 缓冲 ≤2560 且 DisplayScale<1）· `DisplayImageLoaderTests`（Display/Original 尺寸分离）· `MaskStateTests`（DisplayScale 缩放 brush/feather、小半径落笔）· `CropStateTests`（DisplayScale 缩小绝对面积上限）。
+- **不做**：未改 `ImageCropper`/`IImagingService` 签名；未改 IPC/命令集/Python；未 commit/推送；未跑 GPU/Python/App。
+- **未决**：真机确认 8K 裁切输出=原图分辨率、遮罩落笔视觉无偏移；裁切框 2.5K 边缘精度（1 显示 px≈3.2 原图 px）是否可接受。
+
+## 遮罩笔刷/羽化语义修正：UI 值 = 缓冲（2.5K）像素（2026-09-27，只追加）
+
+> 用户真机反馈（8K 图进入遮罩）：描边不连续、羽化看不出软边、笔刷视觉偏小。根因=上一批把遮罩的 `BrushDiameter`/`FeatherPx` 解释为「原图像素」并在缓冲内 ×`DisplayScale`（2560/8192≈0.31）。本次统一为**UI 值 = 缓冲像素**，删除遮罩路径的全部 DisplayScale 换算。裁切路径**未动**。
+
+### A · 语义修正前后对照
+| | 旧（原图语义 + 缩放） | 新（缓冲语义，直接用） |
+|---|---|---|
+| `MaskState.BrushDiameter` | 原图 px，落笔时 ×DisplayScale | **缓冲 px**，落笔直接用 |
+| `MaskState.FeatherPx` | 原图 px，羽化时 ×DisplayScale | **缓冲 px**，羽化直接用 |
+| `EffectiveBrushDiameter`/`EffectiveFeatherPx` | 缩放中间量 | **已删除** |
+| 笔刷圈屏幕半径 | `Effective × Zoom / 2` | `BrushDiameter × Zoom / 2`（与落笔一致） |
+| `MaskSpec.FeatherPx` | 原图 px | **缓冲 px** |
+
+### B · 根因（分别）
+- **笔刷太小**：`EffectiveBrushDiameter = round(40×0.31) ≈ 12`，而用户期望 40（缓冲 px）；2560 显示下 12/2560 vs 40/2560 → 约 **3.3× 偏小**。
+- **描边不连续**：直径被缩到 ~12px（半径 ~6）后，插值步长 `max(1, effective/4)` 在极小直径（如滑块调小到 5 → effective 2，半径 1、步长 1）退化为近乎**逐点**，视觉断续；且整条笔画偏细。去掉缩放后半径 20、步长 10 → 实心连续。
+- **羽化失效**：`EffectiveFeatherPx = round(15×0.31) ≈ 5`，用户设 15（期望缓冲 15）却只得 5；2560 缓冲下 5px 斜坡过窄 → 看不出软边。
+
+### C · 改动清单（文件:行号）
+- `src/ZivAiEditor.UI/Editing/MaskState.cs`：删 `_displayScale` / `DisplayScale` / `EffectiveBrushDiameter` / `EffectiveFeatherPx`；`StampSegment` 步长 `BrushDiameter/4`（原 `Effective…/4`）；`StampCircle` 半径 `BrushDiameter/2`；类/属性注释改「缓冲像素」。
+- `src/ZivAiEditor.App/Controls/ImagePreview.Mask.cs`：删 `_mask.DisplayScale = DisplayScale;`；笔刷圈 `SetBrush(_mask.BrushDiameter)`（2 处）；导出 `featherPx = _mask.FeatherPx`；注释更新。
+- `src/ZivAiEditor.App/Controls/MaskOverlay.axaml.cs`：`FeatherMask(..., state.FeatherPx)`（原 `EffectiveFeatherPx`）。
+- `src/ZivAiEditor.Contracts/Imaging/MaskSpec.cs`：`FeatherPx` 注释改为「缓冲像素」（**语义修订**，FROZEN 尾部记录）。
+- 测试：`MaskStateTests`（3 例→3 例：缓冲语义 / 未缩放直径落笔 / 描边连续）· `ImagePreviewHeadlessTests`（去 `DisplayScale<1` 断言，改断言缓冲 ≤2560 + 默认笔刷 40 + 大图落笔连续）。
+
+### D · DisplayScale 在遮罩路径的处置（全量）
+- `MaskState.DisplayScale` / `EffectiveBrushDiameter` / `EffectiveFeatherPx`：**已删除**。
+- `ImagePreview.Mask.cs`：`_mask.DisplayScale = DisplayScale` 赋值 **已删除**。
+- `ImagePreview.DisplayScale` 属性：**保留**（`ImagePreview.Crop.cs` 裁切换算仍在用，未触及）。
+- `CropState.DisplayScale`：**保留**（裁切路径，未触及）。
+
+### E · 旧数据兼容（开发期，接受）
+- 本次改动**之前**保存的遮罩（`feather_px` 为原图像素语义）：重开时按**缓冲像素**直接解释 → 在 8K 图上羽化视觉约为原先的 1/3（数值不变、含义变化）。**接受，不做迁移**（开发期）。旧工程若在意，重设羽化滑块即可。
+
+### F · 验证
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量 → **702**（+3−3，净 0），0 失败。
+- 新增/改写用例：`Brush_And_Feather_Are_Buffer_Pixels_Unchanged` · `Brush_Stamps_At_The_Unscaled_Diameter` · `Stroke_Is_Continuous_With_No_Gaps` · headless 大图落笔连续。
+- **不做**：未改裁切路径签名/逻辑；未改 IPC/命令集/Python；无新 NuGet；未 commit/推送；未跑 GPU/Python/App。

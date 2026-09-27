@@ -6,15 +6,22 @@ using Avalonia.Media.Imaging;
 namespace ZivAiEditor.App.Imaging;
 
 /// <summary>
-/// A decoded <b>display</b> image plus the <b>original</b> pixel size it represents. The bitmap is
-/// a proxy (≤ <see cref="IDisplayImageLoader.MaxDisplaySide"/> long side) while
-/// <see cref="SourcePixelSize"/> is the full-size source, so the preview view-model, the renderer
-/// and every overlay keep working in <b>original</b> image coordinates (Z29 8K fix).
+/// A decoded <b>display</b> image plus the <b>original</b> pixel size it was derived from. The
+/// bitmap is a proxy (≤ <see cref="IDisplayImageLoader.MaxDisplaySide"/> long side);
+/// <see cref="DisplayPixelSize"/> is that bitmap's real size and is the <b>single coordinate
+/// space</b> the preview view-model / renderer / overlays all work in (they never need the
+/// original size). <see cref="OriginalPixelSize"/> is carried only for two non-display uses:
+/// the size badge and the crop scale (display → original) so crop output keeps original precision.
 /// </summary>
 /// <param name="Bitmap">The decoded bitmap to draw (proxy or the source when already small).</param>
-/// <param name="SourcePixelSize">The original image's pixel size (device pixels, no DPI scaling).</param>
+/// <param name="DisplayPixelSize">The drawn bitmap's pixel size — the UI's coordinate space.</param>
+/// <param name="OriginalPixelSize">The full-size source pixel size (device pixels, no DPI scaling).</param>
 /// <param name="ProxyPath">The proxy file used, or <c>null</c> when the source was drawn directly.</param>
-public sealed record DisplayImage(Bitmap Bitmap, PixelSize SourcePixelSize, string? ProxyPath);
+public sealed record DisplayImage(
+    Bitmap Bitmap,
+    PixelSize DisplayPixelSize,
+    PixelSize OriginalPixelSize,
+    string? ProxyPath);
 
 /// <summary>
 /// App-layer port for producing a bounded-size <b>display</b> bitmap from an arbitrary image file

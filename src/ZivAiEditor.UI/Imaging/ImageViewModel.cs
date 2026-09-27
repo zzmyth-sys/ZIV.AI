@@ -40,16 +40,14 @@ public sealed class ImageViewModel
     private bool _pendingFit = true;
 
     /// <summary>
-    /// Source image pixel width; 0 when no image is loaded. This is the decoded
-    /// source image's own size — not a request target (<c>ResolutionPolicy.Width</c>),
-    /// a preset (<c>AspectPreset.Width</c>) nor a backend output size.
+    /// Display image pixel width; 0 when no image is loaded. This is the size of the bitmap
+    /// actually drawn (the display proxy, ≤2.5K for a large image) — the single coordinate space the
+    /// renderer and every overlay share. Not a request target (<c>ResolutionPolicy.Width</c>), a
+    /// preset (<c>AspectPreset.Width</c>) nor a backend output size.
     /// </summary>
     public double ImageWidth { get; private set; }
 
-    /// <summary>
-    /// Source image pixel height; 0 when no image is loaded. Not a request target,
-    /// preset nor backend output size.
-    /// </summary>
+    /// <summary>Display image pixel height; 0 when no image is loaded (see <see cref="ImageWidth"/>).</summary>
     public double ImageHeight { get; private set; }
 
     /// <summary>Visible content width in device pixels; 0 before first layout.</summary>

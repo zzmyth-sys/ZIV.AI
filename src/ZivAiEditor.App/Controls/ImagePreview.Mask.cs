@@ -154,6 +154,7 @@ public partial class ImagePreview
         _maskPanel.SetBrushSize(_mask.BrushDiameter);
         _maskPanel.SetFeather(_mask.FeatherPx);
         _maskPanel.SetToolState(_tools.CurrentTool, _tools.CanUndo, _tools.CanClearMask);
+        // The UI value IS the buffer value; the circle matches the actual painted area directly.
         _maskOverlay?.SetBrush(_mask.BrushDiameter);
     }
 
@@ -467,6 +468,9 @@ public partial class ImagePreview
             spec = new MaskSpec
             {
                 MaskImagePath = _imaging.ResolveMaskPath(_maskSessionId, _maskNodeId),
+                // Width / Height describe the exported PNG (= the buffer = display size). FeatherPx is
+                // the buffer-pixel value the user set (no scaling), so reopening restores the slider
+                // exactly.
                 Width = _mask.Width,
                 Height = _mask.Height,
                 IsBinary = true,
@@ -487,6 +491,8 @@ public partial class ImagePreview
             var pixels = _mask.CopyPixels();
             var width = _mask.Width;
             var height = _mask.Height;
+            // Feather is applied in buffer pixels (same function as the overlay); the value IS the
+            // user value. The backend then resizes the grayscale mask to the generation target.
             var featherPx = _mask.FeatherPx;
             _maskWrite = RunMaskExportAsync(_maskWrite, sessionId, nodeId, pixels, width, height, featherPx);
             MaskExportScheduled?.Invoke(this, _maskWrite);

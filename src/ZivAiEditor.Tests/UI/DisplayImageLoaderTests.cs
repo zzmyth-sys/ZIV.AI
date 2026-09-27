@@ -10,9 +10,10 @@ using ZivAiEditor.Tests.UI;
 namespace ZivAiEditor.Tests;
 
 /// <summary>
-/// Display-image loader tests (8K fix): the renderer must only ever receive a bounded-size bitmap
-/// while the model / overlays keep the ORIGINAL pixel size, and a saved-project sibling proxy must
-/// win over a re-decode. Runs on the headless Avalonia platform (Bitmap needs it).
+/// Display-image loader tests (8K single-coordinate-space): the loader reports the DISPLAY bitmap
+/// size (the UI's only coordinate space, ≤2.5K) plus the ORIGINAL size for the badge / crop scale,
+/// and a saved-project sibling proxy wins over a re-decode. Runs on the headless Avalonia platform
+/// (Bitmap needs it).
 /// </summary>
 [Collection(DisplayProxyCollection.Name)]
 public sealed class DisplayImageLoaderTests : IDisposable
@@ -52,7 +53,8 @@ public sealed class DisplayImageLoaderTests : IDisposable
             try
             {
                 Assert.Null(display.ProxyPath);
-                Assert.Equal(new PixelSize(800, 600), display.SourcePixelSize);
+                Assert.Equal(new PixelSize(800, 600), display.DisplayPixelSize);
+                Assert.Equal(new PixelSize(800, 600), display.OriginalPixelSize);
             }
             finally
             {
@@ -62,7 +64,7 @@ public sealed class DisplayImageLoaderTests : IDisposable
     }
 
     [Fact]
-    public void Large_Image_Loads_As_A_Bounded_Proxy_With_Original_Source_Size()
+    public void Large_Image_Loads_As_A_Bounded_Proxy_Display_Size_With_Original_Size()
     {
         var path = WritePng(Path.Combine(_dir, "huge.png"), 4000, 1000);
 
@@ -73,11 +75,11 @@ public sealed class DisplayImageLoaderTests : IDisposable
 
             try
             {
-                // The proxy file is real and bounded (its Skia decode is asserted in
-                // ProxyImageCacheTests); the loader must report the ORIGINAL source size so the
-                // view-model and overlays keep original coordinates.
                 Assert.NotNull(display.ProxyPath);
-                Assert.Equal(new PixelSize(4000, 1000), display.SourcePixelSize);
+                // The display size is the bounded proxy (4000x1000 -> 2560x640); the original size is
+                // the full source, carried for the badge / crop scale.
+                Assert.Equal(new PixelSize(2560, 640), display.DisplayPixelSize);
+                Assert.Equal(new PixelSize(4000, 1000), display.OriginalPixelSize);
             }
             finally
             {
@@ -101,8 +103,9 @@ public sealed class DisplayImageLoaderTests : IDisposable
             try
             {
                 Assert.Equal(sibling, display.ProxyPath);
-                // The source size still comes from the original header, not the proxy.
-                Assert.Equal(new PixelSize(4000, 1000), display.SourcePixelSize);
+                // Both sizes are read from headers: display = proxy, original = source.
+                Assert.Equal(new PixelSize(2560, 640), display.DisplayPixelSize);
+                Assert.Equal(new PixelSize(4000, 1000), display.OriginalPixelSize);
             }
             finally
             {

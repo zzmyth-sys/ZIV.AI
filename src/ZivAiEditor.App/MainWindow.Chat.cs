@@ -175,7 +175,9 @@ public partial class MainWindow
             AttachRerunMenuToImage(image, path);
             ToolTip.SetTip(image, "左键查看大图 / 右键重跑");
 
-            AddImageWithMaskOverlay(panel, image, display.SourcePixelSize, maskPath, maskFeatherPx, overlay =>
+            // The mask PNG shares the display coordinate space (both are ≤2.5K), so match the
+            // bubble bitmap's display size, not the original.
+            AddImageWithMaskOverlay(panel, image, display.DisplayPixelSize, maskPath, maskFeatherPx, overlay =>
             {
                 overlay.MaxWidth = BubbleImageSize;
                 overlay.MaxHeight = BubbleImageSize;
@@ -376,7 +378,7 @@ public partial class MainWindow
             AttachRerunMenuToImage(image, path);
             ToolTip.SetTip(image, "左键查看大图 / 右键重跑");
 
-            AddImageWithMaskOverlay(row, image, display.SourcePixelSize, maskPath, maskFeatherPx, overlay =>
+            AddImageWithMaskOverlay(row, image, display.DisplayPixelSize, maskPath, maskFeatherPx, overlay =>
             {
                 overlay.Width = PackThumbSize;
                 overlay.Height = PackThumbSize;

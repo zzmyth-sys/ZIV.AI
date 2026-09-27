@@ -7,11 +7,13 @@ namespace ZivAiEditor.UI.Editing;
 /// boundary clamping and undo stack are unit-testable (Z3/Z6). Skia is used only by the
 /// App-layer exporter for file IO; the on-screen overlay is a display-only bitmap.
 ///
-/// <para>Coordinates are the current <b>pipeline</b> image's pixel space (crop-result
-/// canvas), matching <c>MaskSpec</c>. The brush stamps a filled circle of
-/// <see cref="BrushDiameter"/> pixels; strokes interpolate between pointer samples so
-/// there are no gaps (R5). Undo keeps whole-buffer snapshots, bounded at
-/// <see cref="MaxUndo"/> (D4/R4).</para>
+/// <para>Coordinates are the current <b>pipeline</b> image's <b>display</b> pixel space — the mask
+/// buffer is sized to the display bitmap (≤2.5K for a large image, the same single coordinate space
+/// the renderer / overlays use), matching <c>MaskSpec</c>. <see cref="BrushDiameter"/> and
+/// <see cref="FeatherPx"/> are therefore in <b>buffer pixels</b> and are used directly (no display
+/// scaling). The brush stamps a filled circle of <see cref="BrushDiameter"/> pixels; strokes
+/// interpolate between pointer samples so there are no gaps (R5). Undo keeps whole-buffer snapshots,
+/// bounded at <see cref="MaxUndo"/> (D4/R4).</para>
 /// </summary>
 public sealed class MaskState
 {
@@ -96,9 +98,9 @@ public sealed class MaskState
     public bool CanClear => _hasContent;
 
     /// <summary>
-    /// Brush / eraser diameter in image pixels. Clamped to
-    /// <c>[<see cref="MinBrushDiameter"/>, <see cref="MaxBrushDiameter"/>]</c> so a stray
-    /// slider value can never degenerate the stamp.
+    /// Brush / eraser diameter in <b>buffer pixels</b> (the UI value is the buffer value, no display
+    /// scaling). Clamped to <c>[<see cref="MinBrushDiameter"/>, <see cref="MaxBrushDiameter"/>]</c>
+    /// so a stray slider value can never degenerate the stamp.
     /// </summary>
     public int BrushDiameter
     {
@@ -107,7 +109,7 @@ public sealed class MaskState
     }
 
     /// <summary>
-    /// Feather radius in image pixels applied only for display / export (the live buffer
+    /// Feather radius in <b>buffer pixels</b> applied only for display / export (the live buffer
     /// stays 0 / 255). Clamped to <c>[0, <see cref="MaxFeatherPx"/>]</c>.
     /// </summary>
     public int FeatherPx
@@ -348,7 +350,8 @@ public sealed class MaskState
         var dx = x1 - x0;
         var dy = y1 - y0;
         var distance = Math.Sqrt(dx * dx + dy * dy);
-        var step = Math.Max(1.0, BrushDiameter / 2.0 / 2.0);
+        // Half the radius: consecutive circles overlap so the stroke has no gaps (R5).
+        var step = Math.Max(1.0, BrushDiameter / 4.0);
         var steps = (int)Math.Ceiling(distance / step);
         if (steps < 1)
         {

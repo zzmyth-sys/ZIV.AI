@@ -56,6 +56,7 @@ public sealed partial class CropState
 
     private double _imageWidth;
     private double _imageHeight;
+    private double _displayScale = 1.0;
 
     private double _x;
     private double _y;
@@ -94,6 +95,20 @@ public sealed partial class CropState
 
     /// <summary>True when a source image with a non-zero size is known.</summary>
     public bool HasImage => _imageWidth > 0 && _imageHeight > 0;
+
+    /// <summary>
+    /// The ratio <c>display pixels / original pixels</c> of the image the rectangle is drawn on
+    /// (≤ 1 when a downscaled display proxy is shown; 1 otherwise). The rectangle itself is stored
+    /// in <b>display</b> pixels, so the one <b>absolute</b> limit (<see cref="MaxPixelCount"/>, a
+    /// memory bound on the outpaint canvas) is scaled by <c>DisplayScale²</c> to keep its meaning in
+    /// original pixels. The relative limits (<see cref="MaxExpandFactor"/>, <see cref="MinSize"/>)
+    /// are unaffected.
+    /// </summary>
+    public double DisplayScale
+    {
+        get => _displayScale;
+        set => _displayScale = value > 0 && value <= 1 ? value : 1.0;
+    }
 
     /// <summary>Sets the source-image pixel bounds the rectangle is clamped to.</summary>
     public void SetImageBounds(double width, double height)
@@ -485,10 +500,13 @@ public sealed partial class CropState
         width = Math.Clamp(width, 0, MaxWidth);
         height = Math.Clamp(height, 0, MaxHeight);
 
-        if (width > 0 && height > 0 && width * height > MaxPixelCount
+        // The pixel cap is absolute (an outpaint canvas memory bound), so in display coordinates it
+        // shrinks with DisplayScale². A DisplayScale of 1 (small image / no proxy) is unchanged.
+        var pixelCap = MaxPixelCount * _displayScale * _displayScale;
+        if (width > 0 && height > 0 && width * height > pixelCap
             && IsOutpaint(x, y, width, height))
         {
-            var scale = Math.Sqrt(MaxPixelCount / (width * height));
+            var scale = Math.Sqrt(pixelCap / (width * height));
             width *= scale;
             height *= scale;
         }

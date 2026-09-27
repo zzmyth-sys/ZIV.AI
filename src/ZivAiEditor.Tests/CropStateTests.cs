@@ -21,6 +21,34 @@ public class CropStateTests
         return state;
     }
 
+    [Fact]
+    public void DisplayScale_Shrinks_The_Absolute_Outpaint_Pixel_Cap()
+    {
+        // The outpoint area cap is absolute (original pixels); in display coordinates it shrinks by
+        // DisplayScale² so the produced original canvas stays within CropState.MaxPixelCount.
+        var state = new CropState { DisplayScale = 0.25 };
+        state.SetImageBounds(2560, 2560);
+        state.Enter();
+
+        // A huge outpaint rectangle far beyond the image; only the cap can bound it.
+        state.SetRect(-100000, -100000, 60000, 60000);
+
+        var area = state.Width * state.Height;
+        var displayCap = CropState.MaxPixelCount * 0.25 * 0.25;
+        Assert.True(area > 0);
+        Assert.True(area <= displayCap + 1, $"area {area} exceeds display cap {displayCap}");
+    }
+
+    [Fact]
+    public void Default_DisplayScale_Keeps_The_Full_Pixel_Cap()
+    {
+        var state = NewState();
+        state.SetRect(-100000, -100000, 60000, 60000);
+
+        // With DisplayScale = 1 the cap is unchanged, so a larger rect survives than with 0.25.
+        Assert.True(state.Width * state.Height > CropState.MaxPixelCount * 0.25 * 0.25);
+    }
+
     private static CropState StateWithRect(double x, double y, double w, double h)
     {
         var state = NewState();

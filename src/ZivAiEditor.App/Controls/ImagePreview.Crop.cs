@@ -275,7 +275,10 @@ public partial class ImagePreview
 
         if (_nodeCrop is { Width: > 0, Height: > 0 } stored)
         {
-            _crop.SetRect(stored.X, stored.Y, stored.Width, stored.Height);
+            // The stored rectangle is in ORIGINAL image pixels (CropSpec contract); the crop state
+            // works in DISPLAY pixels, so convert before seeding.
+            var scale = DisplayScale;
+            _crop.SetRect(stored.X * scale, stored.Y * scale, stored.Width * scale, stored.Height * scale);
         }
 
         if (!_crop.HasRect)
@@ -362,7 +365,23 @@ public partial class ImagePreview
             return;
         }
 
-        if (!_crop.TryGetPixelRect(out var x, out var y, out var width, out var height))
+        if (!_crop.TryGetPixelRect(out var displayX, out var displayY, out var displayW, out var displayH))
+        {
+            ShowCropToast("请先框选裁切区域");
+            return;
+        }
+
+        // Convert the DISPLAY-space rectangle to ORIGINAL image pixels: this is the one path that
+        // must keep full original precision. The cropper reads the original file at these pixels.
+        var original = _originalPixelSize;
+        var shownWidth = _model.ImageWidth;
+        var shownHeight = _model.ImageHeight;
+        var toOriginal = original.Width > 0 && shownWidth > 0 ? original.Width / shownWidth : 1.0;
+        var x = (int)Math.Round(displayX * toOriginal);
+        var y = (int)Math.Round(displayY * toOriginal);
+        var width = (int)Math.Round((displayX + displayW) * toOriginal) - x;
+        var height = (int)Math.Round((displayY + displayH) * toOriginal) - y;
+        if (width <= 0 || height <= 0)
         {
             ShowCropToast("请先框选裁切区域");
             return;
@@ -394,8 +413,8 @@ public partial class ImagePreview
                 Height = height,
                 // The preview shows the node's ORIGINAL while cropping, so these are the
                 // source pixels the rectangle is relative to (outpaint detection).
-                SourceWidth = (int)Math.Round(_model.ImageWidth),
-                SourceHeight = (int)Math.Round(_model.ImageHeight),
+                SourceWidth = original.Width > 0 ? original.Width : (int)Math.Round(shownWidth),
+                SourceHeight = original.Height > 0 ? original.Height : (int)Math.Round(shownHeight),
                 ResultImagePath = output,
             };
 
@@ -464,6 +483,7 @@ public partial class ImagePreview
             return;
         }
 
+        _crop.DisplayScale = DisplayScale;
         _crop.SetImageBounds(_model.ImageWidth, _model.ImageHeight);
         RestoreOrDefaultCrop();
         _cropPointerDown = false;

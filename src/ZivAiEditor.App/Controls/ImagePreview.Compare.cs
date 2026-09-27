@@ -109,7 +109,7 @@ public partial class ImagePreview
         _overlay?.SetParent(display.Bitmap);
         if (_compareInfoText is not null)
         {
-            _compareInfoText.Text = $"原图 {display.SourcePixelSize.Width} × {display.SourcePixelSize.Height}";
+            _compareInfoText.Text = $"原图 {display.OriginalPixelSize.Width} × {display.OriginalPixelSize.Height}";
         }
 
         _compareState.SetCanCompare(true);

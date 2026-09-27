@@ -265,6 +265,7 @@ public partial class MaskOverlay : UserControl
         // The red BGRA composition is shared with the chat bubble (MaskOverlayBitmap).
         // The overlay bitmap's long side is capped so an 8K mask never becomes an 8K texture;
         // it is stretched back over the mask's original rectangle by RenderMask.
+        // Feather in buffer pixels; the UI value IS the buffer value. Same function the exporter uses.
         var display = Imaging?.FeatherMask(pixels, width, height, state.FeatherPx) ?? pixels;
         _bitmap = MaskOverlayBitmap.BuildScaled(display, width, height, MaxOverlaySide, out _, out _);
         _dirty = false;

@@ -50,6 +50,14 @@ public partial class ImagePreview : Window
     private string? _path;
     private int _generation;
 
+    /// <summary>
+    /// The original (full-size) pixel size of the currently shown image, or empty when unknown.
+    /// The view-model works in <b>display</b> coordinates (see <see cref="DisplayImage"/>); this is
+    /// kept only for the size badge and the crop scale (display → original) so crop output stays at
+    /// original resolution.
+    /// </summary>
+    private PixelSize _originalPixelSize;
+
     /// <summary>Last tool seen by <see cref="OnToolsChanged"/>, so a switch can re-fit once (B3).</summary>
     private ToolMode _lastToolMode;
 
@@ -126,8 +134,9 @@ public partial class ImagePreview : Window
     private async Task LoadAsync(string path, int generation)
     {
         // Decode / downsample off the UI thread (Z11); the continuation resumes on the UI thread.
-        // The loader returns a proxy bitmap (≤2.5K) plus the ORIGINAL pixel size, so the model and
-        // every overlay keep working in original coordinates without uploading an 8K texture.
+        // The single coordinate space is the DISPLAY bitmap size (≤2.5K): the model, renderer and
+        // overlays all use it, so there is no second (original-size) coordinate system. The
+        // original size is kept only for the badge and the crop scale.
         var display = await _displayLoader.LoadDisplayAsync(path);
 
         if (generation != _generation)
@@ -143,16 +152,17 @@ public partial class ImagePreview : Window
         }
 
         var bitmap = display.Bitmap;
-        var source = display.SourcePixelSize;
+        var shown = display.DisplayPixelSize;
+        _originalPixelSize = display.OriginalPixelSize;
         _bitmap = bitmap;
         if (_canvas is not null)
         {
-            _canvas.SourceSize = new Size(source.Width, source.Height);
+            _canvas.SourceSize = new Size(shown.Width, shown.Height);
             _canvas.Image = bitmap;
         }
 
         _model.SetViewport(ViewportWidth(), ViewportHeight());
-        _model.SetImage(source.Width, source.Height);
+        _model.SetImage(shown.Width, shown.Height);
         ApplyModel();
         RefreshCropBounds();
         RefreshMaskCanvas();
@@ -169,7 +179,9 @@ public partial class ImagePreview : Window
 
         if (_sizeText is not null)
         {
-            _sizeText.Text = $"{source.Width} × {source.Height}";
+            // The badge reports the real image size, not the display proxy's.
+            var original = display.OriginalPixelSize;
+            _sizeText.Text = $"{original.Width} × {original.Height}";
         }
 
         if (_sizeBadge is not null)
@@ -261,6 +273,21 @@ public partial class ImagePreview : Window
     private double ViewportWidth() => _canvas?.Viewport.Width ?? 0;
 
     private double ViewportHeight() => _canvas?.Viewport.Height ?? 0;
+
+    /// <summary>
+    /// The scale from the original image to the display space: <c>display / original</c> (≤ 1 when a
+    /// proxy is shown, 1 for a small image / unknown original). The single display coordinate space
+    /// is <c>display</c>; crop output and user-facing brush / feather values are in original pixels.
+    /// </summary>
+    private double DisplayScale
+    {
+        get
+        {
+            var original = _originalPixelSize.Width;
+            var shown = _model.ImageWidth;
+            return original > 0 && shown > 0 ? shown / original : 1.0;
+        }
+    }
 
     private void OnViewportChanged()
     {
@@ -367,6 +394,7 @@ public partial class ImagePreview : Window
 
     private void ShowEmpty(string message)
     {
+        _originalPixelSize = default;
         _model.ClearImage();
         ResetMask();
 

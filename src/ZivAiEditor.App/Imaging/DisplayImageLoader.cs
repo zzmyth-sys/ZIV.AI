@@ -26,23 +26,26 @@ public sealed class DisplayImageLoader : IDisplayImageLoader
         if (width <= 0 || height <= 0)
         {
             // The original's header is unreadable; fall back to a project sibling proxy if any,
-            // and only then to a raw decode (which will honor the file's own size).
+            // and only then to a raw decode (which will honor the file's own size). With no
+            // reliable original size, display and original coincide.
             var sibling = ResolveSiblingProxy(path);
             if (sibling is not null)
             {
                 var proxy = new Bitmap(sibling);
-                return new DisplayImage(proxy, proxy.PixelSize, sibling);
+                var proxySize = SizeOf(sibling, proxy.PixelSize);
+                return new DisplayImage(proxy, proxySize, proxySize, sibling);
             }
 
             var direct = new Bitmap(path);
-            return new DisplayImage(direct, direct.PixelSize, null);
+            return new DisplayImage(direct, direct.PixelSize, direct.PixelSize, null);
         }
 
-        var source = new PixelSize(width, height);
+        var original = new PixelSize(width, height);
         if (width <= maxSide && height <= maxSide)
         {
+            // Already within the cap: the bitmap IS the original, so both sizes coincide.
             var small = new Bitmap(path);
-            return new DisplayImage(small, source, null);
+            return new DisplayImage(small, original, original, null);
         }
 
         // Large: a saved-project sibling proxy avoids re-decoding the original 8K image.
@@ -50,19 +53,30 @@ public sealed class DisplayImageLoader : IDisplayImageLoader
         if (projectProxy is not null)
         {
             var bitmap = new Bitmap(projectProxy);
-            return new DisplayImage(bitmap, source, projectProxy);
+            return new DisplayImage(bitmap, SizeOf(projectProxy, original), original, projectProxy);
         }
 
         var runtimeProxy = ProxyImageCache.TryGetOrCreate(path, maxSide);
         if (runtimeProxy is not null && !string.Equals(runtimeProxy, path, StringComparison.OrdinalIgnoreCase))
         {
             var bitmap = new Bitmap(runtimeProxy);
-            return new DisplayImage(bitmap, source, runtimeProxy);
+            return new DisplayImage(bitmap, SizeOf(runtimeProxy, original), original, runtimeProxy);
         }
 
-        // Proxy generation failed: decode the source so the caller still gets an image.
+        // Proxy generation failed: decode the source so the caller still gets an image (display =
+        // original here, since nothing was downscaled).
         var fallback = new Bitmap(path);
-        return new DisplayImage(fallback, source, null);
+        return new DisplayImage(fallback, original, original, null);
+    }
+
+    /// <summary>
+    /// The pixel size of <paramref name="path"/> read from its codec header, or
+    /// <paramref name="fallback"/> when the header is unreadable. Never decodes pixels.
+    /// </summary>
+    private static PixelSize SizeOf(string path, PixelSize fallback)
+    {
+        var (width, height) = ProxyImageCache.ReadPixelSize(path);
+        return width > 0 && height > 0 ? new PixelSize(width, height) : fallback;
     }
 
     /// <inheritdoc />

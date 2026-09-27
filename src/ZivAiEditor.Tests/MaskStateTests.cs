@@ -365,4 +365,49 @@ public class MaskStateTests
         Assert.Equal(100, outOfRange.Length);
         Assert.All(outOfRange, value => Assert.Equal(0, value));
     }
+
+    [Fact]
+    public void Brush_And_Feather_Are_Buffer_Pixels_Unchanged()
+    {
+        // UI value = buffer value: no display scaling, regardless of canvas size.
+        var mask = new MaskState();
+        mask.SetCanvas(2560, 1920);
+        mask.BrushDiameter = 40;
+        mask.FeatherPx = 15;
+
+        Assert.Equal(40, mask.BrushDiameter);
+        Assert.Equal(15, mask.FeatherPx);
+    }
+
+    [Fact]
+    public void Brush_Stamps_At_The_Unscaled_Diameter()
+    {
+        var mask = Canvas(400, 400);
+        mask.BrushDiameter = 40; // radius 20 in buffer pixels
+
+        mask.BeginStroke(100, 100, erase: false);
+        mask.EndStroke();
+
+        Assert.Equal(255, At(mask, 100, 100)); // center painted
+        Assert.Equal(255, At(mask, 118, 100)); // 18 px away: inside the 20 px radius
+        Assert.Equal(0, At(mask, 130, 100));   // 30 px away: outside the radius
+    }
+
+    [Fact]
+    public void Stroke_Is_Continuous_With_No_Gaps()
+    {
+        // A horizontal drag must leave an unbroken painted band (the downscaled-brush regression
+        // produced a dotted line). Every column along the stroke centre must be painted.
+        var mask = Canvas(400, 60);
+        mask.BrushDiameter = 40;
+
+        mask.BeginStroke(10, 30, erase: false);
+        mask.ContinueStroke(200, 30);
+        mask.EndStroke();
+
+        for (var x = 10; x <= 200; x++)
+        {
+            Assert.Equal(255, At(mask, x, 30));
+        }
+    }
 }

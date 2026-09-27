@@ -4428,3 +4428,43 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 - 手轮在 Fit<10% 视图向下缩放会上抬到 10%（手动下限设计的副作用）——是否需要「Fit 视图起轮可继续缩小到 Fit」？
 - `MaxDisplaySide=2560` 阈值 / 500MB 上限 / 淘汰策略是否需微调。
 - 设计层归属与任务书字面差异：端口落 App（非 UI）、会话代理由 App 编排（未改 SessionStore）——已记录，待用户确认。
+
+---
+
+## 显示坐标系合并为单层 2.5K 验收（2026-09-27，只追加）
+
+### 自动化（已通过，非 GPU）
+
+| 项 | 验证方式 | 判据 | 状态 |
+|---|---|---|---|
+| 构建 | `dotnet build src\ZIV.AI.sln -c Release` | 0 错误 0 警告 | ✅ |
+| 显示尺寸分离 | `DisplayImageLoaderTests` | 大图 `DisplayPixelSize`=2560×640、`OriginalPixelSize`=4000×1000 | ✅ |
+| 预览单坐标 | `ImagePreviewHeadlessTests` | 大图 `canvas.SourceSize`=2560×640（不拉伸） | ✅ |
+| 遮罩缓冲 2.5K | `ImagePreviewHeadlessTests` | 进遮罩 → `Mask.Width/Height`≤2560、`DisplayScale`<1 | ✅ |
+| 笔刷/羽化缩放 | `MaskStateTests` | `DisplayScale=0.25`：brush 40→10、feather 8→2；小半径落笔 | ✅ |
+| 裁切面积上限 | `CropStateTests` | `DisplayScale=0.25` → 绝对上限 ×1/16 | ✅ |
+| 非 GPU 全量 | `--filter "FullyQualifiedName!~Ipc&FullyQualifiedName!~PlannerIntegration"` | **696 → 702**，0 失败 | ✅ |
+| 铁律 | 签名 / 行数 / 包 | `ImageCropper.CropAsync` 等签名未变；均 <600 行；无新 NuGet | ✅ |
+
+### 真机验收清单（用户执行）
+
+1. **裁切精度**：8K 图进入预览（显示代理）→ 框选 → 确认；输出文件应为**原图分辨率**（如 4000×1000），不是 2.5K。
+2. **遮罩落笔**：8K 图进遮罩 → 画笔落笔位置与视觉一致（无偏移）；笔刷圈大小与旧行为观感一致；羽化生效。
+3. **坐标一致**：裁切框 / 遮罩 / 对比分割线在代理显示下均对齐（同一坐标系）。
+4. **重开**：保存项目含 8K 遮罩 → 重开 → 加载 2.5K 遮罩（不重解原图）；`session.json` mask W/H = 2.5K 值。
+5. **非 96 DPI**：300 DPI 图 → 显示/叠加正常。
+6. **裁切回预览**：裁切结果 >2560 → 预览再次生成代理、不崩。
+
+### 未决（停点 / 待裁决）
+
+- 裁切框边缘精度：2.5K 显示坐标下 1 显示 px ≈ 3.2 原图 px（8K）；用户已裁决「够用」，真机复核。
+- 羽化像素语义：用户值（原图 px）经 DisplayScale 缩小后落缓冲；极小羽化（原图 1–3px）在 8K 下可能 round 到 0（硬边）——是否可接受。
+- 遮罩 `MaskSpec.W/H` 已从「原图」改为「显示/缓冲尺寸」——依赖该字段语义的外部消费者需知晓（当前仅 UI/持久化）。
+
+### 建议 commit message（分批）
+
+1. `refactor(preview): 显示坐标系合并为单层 2.5K（DisplayImage 拆 Display/Original）`
+2. `fix(crop): 裁切框 2.5K 坐标 → 原图坐标换算，输出保持原图分辨率`
+3. `fix(mask): 遮罩缓冲统一 2.5K；brush/feather 按 displayScale 缩放；MaskSpec.W/H 语义修订`
+4. `test: 单坐标/裁切换算/遮罩缩放用例（+6）`
+5. `docs: DEVLOG/FROZEN/INTERFACES/ACCEPTANCE 追加单层 2.5K 记录`

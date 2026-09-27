@@ -5161,3 +5161,24 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **历史说明**：上方 8K 代理条目中的 `MinZoomPercent=10`（FROZEN:5150 / INTERFACES:449 / DEVLOG 8K 节）为**当时值记录**，按「文档只增不改」保留；本条为其后的最新值。
 - **验证**：build 0/0；`ImageViewModelTests` + `PanZoomCanvasGeometryTests` 27/27；非 GPU 全量 695 → **696**，0 失败。
 - **不做**：不改 Fit 下限 / 其它缩放逻辑；未 commit / 未推送。
+
+## 显示坐标系合并为单层 2.5K（2026-09-27，只增）
+
+- **MaskSpec.Width/Height 语义修订**：由「主图原始像素（SPEC §3.9）」改为「**遮罩 PNG 的实际尺寸**（=手绘缓冲=显示尺寸，≤2.5K；小图=原图）」。`MaskSpec` **未新增字段**（无 OriginalWidth/Height）；`session.json` mask 对象无新字段，格式仍 v2。后端 `pipeline._resize_mask` 会把遮罩缩放到生成目标（≤2K），不读该字段 → 送管线无需放大。`MaskSpec.FeatherPx` 仍为**原图像素**的用户值。
+- **新增成员（无签名变更）**：
+  - `App.Imaging.DisplayImage`：`(Bitmap, PixelSize DisplayPixelSize, PixelSize OriginalPixelSize, string? ProxyPath)`（App 内部记录，替换原 `SourcePixelSize`）。
+  - `UI.Editing.CropState.DisplayScale`（`double`，默认 1）：唯一绝对上限 `MaxPixelCount` 按 `DisplayScale²` 缩小。
+  - `UI.Editing.MaskState.DisplayScale`（`double`，默认 1）+ `EffectiveBrushDiameter` / `EffectiveFeatherPx`。
+- **未改签名**：`ImageCropper.CropAsync` / `IImagingService.CropAsync` / `MaskExporter` / `IImagingService` 全部不变；裁切 2.5K→原图换算在 App 侧完成。`CropSpec` 语义不变（仍原图坐标）。
+- **行为**：`ImageViewModel.ImageWidth/Height`、`PanZoomCanvas.SourceSize`、遮罩缓冲、裁切框、对比叠加 = **显示尺寸**（≤2.5K），单一坐标系；`PanZoomCanvas` 不再拉伸代理位图。裁切输出仍为**原图分辨率**。
+- **验证**：build 0/0；非 GPU 全量 696 → **702**，0 失败。
+- **不做**：不改 IPC / 命令集 / Python；无新 NuGet；未 commit / 未推送。
+
+## 遮罩笔刷/羽化语义修正（2026-09-27，只增）
+
+- **MaskSpec.FeatherPx 语义修订**：由「原图像素」改为「**遮罩 PNG/缓冲像素**（=同一 ≤2.5K 显示空间，与 W/H 一致）」。`MaskSpec` **未加字段**；`session.json` 仍 `feather_px`。
+- **`UI.Editing.MaskState` 成员删除**：`DisplayScale` / `EffectiveBrushDiameter` / `EffectiveFeatherPx` **已删除**（上一批新增的过渡成员）。`BrushDiameter` / `FeatherPx` 现直接为**缓冲像素**语义。
+- **未改**：`CropState.DisplayScale` 与其裁切换算、`ImagePreview.DisplayScale`、`ImageCropper.CropAsync` / `IImagingService` 签名 —— 裁切路径未触及。
+- **兼容**：改动前保存的遮罩 `feather_px`（原图语义）重开时按缓冲像素解释（8K 上视觉约 ×1/3）——**接受，不迁移**（开发期）。
+- **验证**：build 0/0；非 GPU 全量 702，0 失败。
+- **不做**：不改裁切 / IPC / 命令集 / Python；无新 NuGet；未 commit / 未推送。

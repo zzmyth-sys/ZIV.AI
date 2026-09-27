@@ -454,3 +454,16 @@
 - **`ZivAiEditor.App.App`**：退出清理由 `CleanupSession` 改为 `CleanupAll`（App 内部）。
 - **不改**：`SessionStore` / `SessionLoader` / `SessionFileDto` / `ISessionPersistence` 签名；项目格式仍 **v2**；代理为同级文件（`{nodeId}_proxy.png`），不写入 JSON。
 - **不做**：不改 IPC / 命令集 / Python；未加 NuGet。
+
+## 35. 显示坐标系合并为单层 2.5K（2026-09-27，只增）
+
+- **Contracts 签名**：无变化。**`MaskSpec.Width/Height` 语义修订**（非签名变更）：由「主图原始像素」改为「遮罩 PNG 实际尺寸（=缓冲=显示，≤2.5K）」。`MaskSpec.FeatherPx` 仍为原图像素值。
+- **`ZivAiEditor.App.Imaging.DisplayImage`**（App 内部记录，替换 `SourcePixelSize`）：`(Bitmap Bitmap, PixelSize DisplayPixelSize, PixelSize OriginalPixelSize, string? ProxyPath)`。`DisplayPixelSize` = 唯一 UI 坐标空间；`OriginalPixelSize` 仅供尺寸徽标 + 裁切换算。
+- **`ZivAiEditor.UI.Imaging.ImageViewModel.ImageWidth/Height`**：语义 = **显示尺寸**（≤2.5K），非原图；**签名不变**。
+- **`ZivAiEditor.App.Controls.PanZoomCanvas.SourceSize`**：语义 = 显示尺寸（不再=原图）；**签名不变**。`ComputeDrawRect` 不变。
+- **`ZivAiEditor.UI.Editing.CropState`**（新增成员，无既有签名变更）：`double DisplayScale { get; set; } = 1`；`MaxPixelCount` 的有效上限 = `MaxPixelCount · DisplayScale²`。
+- **`ZivAiEditor.UI.Editing.MaskState`**（新增成员）：`double DisplayScale { get; set; } = 1`；`int EffectiveBrushDiameter`；`int EffectiveFeatherPx`。
+- **`ImageCropper.CropAsync` / `IImagingService.CropAsync`**：**签名不变**（2.5K→原图换算在 `ImagePreview` 侧）。
+- **`ZivAiEditor.App.MainWindow.Chat`**：遮罩叠加尺寸校验改用 `DisplayImage.DisplayPixelSize`（App 内部）。
+- **不改**：`SessionStore` / `SessionLoader` / `SessionFileDto` 签名；项目格式 v2；`CropSpec` 语义（仍原图坐标）。
+- **不做**：不改 IPC / 命令集 / Python；无新 NuGet。
