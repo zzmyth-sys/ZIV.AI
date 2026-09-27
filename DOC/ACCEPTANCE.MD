@@ -4351,3 +4351,32 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 
 - 实测对照：修复前 `SnakeCaseLower` → `mag_cache` / `mag_cache_thresh`；加 `[JsonPropertyName]` 后 → `magcache` / `magcache_thresh`。`IpcSubmitMapperTests` 11/11（含新键名断言）。
 - **批次 2A 最终**：`dotnet build src\ZIV.AI.sln -c Release` → 0 错误 0 警告；非 GPU 全量（`!~Ipc`）→ **660 通过 / 0 失败**（基线 659 + D3 新增 1）；`IpcSubmitMapperTests` → 11 通过 / 0 失败。D1–D4 停点均未触发。
+
+## P1 批次：六项代码健康修复（2026-09-27，待真机验收）
+
+### 自动化（已通过，非 GPU）
+
+| 条目 | 验证方式 | 结果 |
+| --- | --- | --- |
+| P1-1 ApplyResolution 补 ModelId | build（潜伏防御，无可构造测试） | 通过 |
+| P1-2 脏标记补全 5 字段 | `SessionSignatureTests`（7 例） | 通过 |
+| P1-3 async void 观察点 | build（UI 处理器无单测，真机验证） | 通过 |
+| P1-4 无 task_id error 帧路由 | `InferenceErrorRoutingTests`（3 例） | 通过 |
+| P1-5 启动泄漏（重排） | `PythonProcessManagerTests`（1 例，弱 oracle） | 通过 |
+| P1-6 路径残留 | `py_compile` config.py + build | 通过 |
+| 构建 | `dotnet build src\ZIV.AI.sln -c Release` | 0 错误 0 警告 |
+| 全量 | `dotnet test … --filter "FullyQualifiedName!~Ipc"` | **671 通过 / 0 失败**（基线 660 + 11 新增） |
+
+### 真机验收清单（用户执行）
+
+1. **P1-2**：改动节点「命令 / 图片包 / 使用图 / 重跑快照 / 源图」后关闭窗口 → 出现保存提示（旧版不提示）。
+2. **P1-3**：遮罩绘制失败时 → 状态栏/聊天提示「遮罩处理失败」且不崩进程（真机触发失败路径）。
+3. **P1-4**：后端在无 task_id 时回 error → 提交立即失败（非等超时）；日志含记录。
+
+### 验收后动作
+
+1. 真机通过后在「验收记录」追加“P1 批次通过，日期：____”（待签）。
+
+### P1 未决（停点）
+
+- **P1-6 · `config.py:33 MODEL_ROOT`**：硬编码 `C:\AI\ComfyUI_PIC` **未改**（A10 明示「不动」，改动会破默认模型源）。需用户裁决：维持 A10，或改为 env-only / 占位（需同步修订 A10）。
