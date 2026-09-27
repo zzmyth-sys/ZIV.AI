@@ -6930,3 +6930,8 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **追加**（去重后）：`output/`、`_cache/`、`sessions/`、`_test_step2/**/*.png`。
 - **未加**（已被现有规则覆盖，避免冗余）：`_test_step2/**/bin/`、`_test_step2/**/obj/`、`_test_step2/**/__pycache__/`（现有 `**/bin/` / `**/obj/` / `**/__pycache__/` 已覆盖任意层级）。
 - **效果**：`_test_step2` 子目录实验图不再误入库；程序运行目录 `output/` / `_cache/` / `sessions/` 不入库。gitignore 不删除磁盘文件，故两枚代码引用夹具仍可用于本地测试。
+
+### 批 勘误（2026-09-27，只增；复审 Finding A/B 修正）
+
+- **Finding A（`_findings.md` 备份位置）**：上文批 2 登记的「内容见 `DOC/DEVLOG.md` 243–272 / `DOC/FROZEN.md` 458–494」行号不准（那两处是 Step 2「问题与解决」/LLM Planner 章节，主题相关但非同一副本）。**`_sections/_findings.md` 的完整副本在 `_test_step2/REPORT.md`（「## 关键发现」/「## 建议」/附录，约 392/421/435 行）**；DEVLOG/FROZEN 另有同主题结论。删除安全（有 REPORT.md 副本）。
+- **Finding B（360 重建脚本）**：批 1 登记「重跑 `360_fetch_vocab.py`」，但该脚本本批已删；如需重建 `360_scene_vocab.json`，须先从退役前 commit（`b79fde4^`）恢复 `360_fetch_vocab.py`（+ `scene_filter.py`）再重跑（需联网 + WD14 `selected_tags.csv`）。
