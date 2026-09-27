@@ -1,0 +1,5 @@
+{
+  "version": "1",
+  "_comment": "Plugin registry (batch 1). Add a plugin = add one entry here; no code change. `dir` is relative to the program directory (absolute allowed). `deps` are Python import names checked with importlib.util.find_spec. Enable/disable state lives in settings.ini [plugins] keyed by the raw id; absent = enabled_by_default.",
+  "plugins": []
+}

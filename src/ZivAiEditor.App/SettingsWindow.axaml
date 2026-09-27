@@ -26,7 +26,9 @@
                    FontWeight="SemiBold" />
       </Border>
 
-      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="18,0,18,8">
+      <TabControl x:Name="PART_SettingsTabs" Grid.Row="1" Margin="12,0,12,8">
+        <TabItem Header="环境">
+          <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="6,8,6,0">
         <StackPanel Spacing="20">
           <StackPanel Spacing="8">
             <TextBlock Text="模型三件套" Foreground="{StaticResource ZivTextSecondaryBrush}" />
@@ -78,7 +80,22 @@
                     MinWidth="160" Height="30" HorizontalAlignment="Left" />
           </StackPanel>
         </StackPanel>
-      </ScrollViewer>
+          </ScrollViewer>
+        </TabItem>
+
+        <TabItem Header="插件">
+          <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="6,8,6,0">
+            <StackPanel Spacing="8">
+              <TextBlock Text="插件列表（由 Template/plugins.json 登记）"
+                         Foreground="{StaticResource ZivTextSecondaryBrush}" />
+              <ItemsControl x:Name="PART_PluginList" />
+              <TextBlock Text="启用状态写入 settings.ini [plugins]，重启 App 后对后端生效。"
+                         TextWrapping="Wrap"
+                         Foreground="{StaticResource ZivTextSecondaryBrush}" />
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+      </TabControl>
 
       <StackPanel Grid.Row="2"
                   Orientation="Horizontal"

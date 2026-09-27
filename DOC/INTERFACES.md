@@ -479,3 +479,16 @@
 - **`ZivAiEditor.App.Controls.PanZoomCanvas.ComputeDrawRect`**：改为居中 − offset；**签名不变**。
 - **行为**：适应窗口 / 小图可拖动；溢出轴默认居中；拖到极限保留 5% 可见（**取代** B12 的整视图锁定与全白范围）。
 - **不做**：不改 IPC / 命令集 / Python；无新 NuGet。
+
+## 37. 插件标准形式（batch 1）（2026-09-28，只增）
+
+- **注册**：`Template/plugins.json` 的 `plugins[]`；字段 `id` / `display_name` / `version` / `dir` /
+  `entry` / `deps` / `enabled_by_default` / `description` / `kind`。
+- **目录**：`dir` 相对程序目录（允许绝对）；入口默认 `__init__.py`（`entry` 覆盖）。
+- **入口约定**：模块在 import 时**无副作用**（不加载模型 / 不占 GPU）；由加载器以
+  `spec_from_file_location` 独立命名空间（`zivai_plugin_<id>`）导入；可选导出 `PLUGIN_META`
+  （id / display_name / version / capabilities）与 capability 可调用对象（批 3 接线）。
+- **依赖**：只在 `deps` 声明 Python import 名；`plugins.loader.check_deps` 用 `find_spec` 检查，
+  **不安装**（无新依赖）。
+- **开关**：`settings.ini [plugins] <id> = 1|0` → env `ZIV_AI_PLUGIN_<ID>`；缺省 registry 默认。
+- **不做**：不改 IPC / 命令集；无新 NuGet。

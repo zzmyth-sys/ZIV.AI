@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Xunit;
 using ZivAiEditor.App;
@@ -206,6 +207,47 @@ public class SettingsWriterTests : IDisposable
         Assert.Equal("dit_path =", lines[1]);
         Assert.Equal("te_path =", lines[2]);
         Assert.Equal("vae_path =", lines[3]);
+    }
+
+    [Fact]
+    public void WritePluginStates_Writes_Raw_Flag_Not_A_Path()
+    {
+        SettingsWriter.WritePluginStates(SettingsPath, new Dictionary<string, string>
+        {
+            ["pose-map"] = "1",
+            ["sdpose.ood"] = "0",
+        });
+
+        var lines = Read();
+        Assert.Equal("[plugins]", lines[0]);
+        Assert.Contains("pose-map = 1", lines);
+        Assert.Contains("sdpose.ood = 0", lines);
+        // The value must never be path-normalized (it is a flag, not a file path).
+        Assert.DoesNotContain(lines, line => line.Contains(Full("1"), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void WritePluginStates_Preserves_Comments_And_Other_Sections()
+    {
+        File.WriteAllLines(SettingsPath, new[]
+        {
+            "; top",
+            "[backend]",
+            "pipe_name = zivai.infer.v1",
+            "",
+            "[plugins]",
+            "; plugin flags",
+            "pose-map = 1",
+        });
+
+        SettingsWriter.WritePluginStates(SettingsPath, new Dictionary<string, string> { ["pose-map"] = "0" });
+
+        var lines = Read();
+        Assert.Equal("; top", lines[0]);
+        Assert.Contains("; plugin flags", lines);
+        Assert.Contains("pipe_name = zivai.infer.v1", lines);
+        Assert.Contains("pose-map = 0", lines);
+        Assert.DoesNotContain("pose-map = 1", lines);
     }
 
     [Fact]

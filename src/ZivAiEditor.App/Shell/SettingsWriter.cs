@@ -54,10 +54,19 @@ internal static class SettingsWriter
                 ["comfy_root"] = comfyRoot ?? string.Empty,
             });
 
+    /// <summary>
+    /// Writes <c>[plugins]</c> enable states (batch 1). Keys are raw plugin ids; values are the
+    /// literal <c>"1"</c> / <c>"0"</c> and are NEVER path-normalized (they are flags, not paths).
+    /// Empty clears the key. Atomic and comment-preserving like the other writers.
+    /// </summary>
+    public static void WritePluginStates(string settingsPath, IReadOnlyDictionary<string, string> states)
+        => WriteSectionValues(settingsPath, "plugins", states, normalizePaths: false);
+
     private static void WriteSectionValues(
         string path,
         string section,
-        IReadOnlyDictionary<string, string> values)
+        IReadOnlyDictionary<string, string> values,
+        bool normalizePaths = true)
     {
         var fullPath = Path.GetFullPath(path);
         var directory = Path.GetDirectoryName(fullPath) ?? ".";
@@ -70,10 +79,10 @@ internal static class SettingsWriter
             var normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var pair in values)
             {
-                var value = pair.Value;
-                normalized[pair.Key] = string.IsNullOrWhiteSpace(value)
-                    ? string.Empty
-                    : Path.GetFullPath(value).Trim();
+                var value = pair.Value ?? string.Empty;
+                normalized[pair.Key] = normalizePaths && !string.IsNullOrWhiteSpace(value)
+                    ? Path.GetFullPath(value).Trim()
+                    : value;
             }
 
             var pending = new Dictionary<string, string>(normalized, StringComparer.OrdinalIgnoreCase);

@@ -39,7 +39,8 @@ public partial class App : Application
                 _context.Commands,
                 _context.PromptExpander,
                 _context.LlmPreflight,
-                _context.CreateExecutor);
+                _context.CreateExecutor,
+                _context.PluginRegistry);
             desktop.MainWindow = window;
 
             // Backend preview frames (0x02) → pending bubble, marshalled to the UI thread.

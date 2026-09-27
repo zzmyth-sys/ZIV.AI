@@ -159,6 +159,47 @@ TAGGER_MODEL = os.environ.get("ZIV_AI_TAGGER_MODEL", "wd-vit-tagger-v3")
 TAGGER_THRESHOLD = float(os.environ.get("ZIV_AI_TAGGER_THRESHOLD", "0.35"))
 TAGGER_CHARACTER_THRESHOLD = float(os.environ.get("ZIV_AI_TAGGER_CHARACTER_THRESHOLD", "0.85"))
 
+# ---- 插件注册表（batch 1 · 统一插件架构）----
+# 数据文件 Template/plugins.json：可选「可执行插件」的元数据（id / dir / entry / deps /
+# enabled_by_default ...）。启用状态存在 settings.ini [plugins]（键 = 原始插件 id），经 C# 注入
+# env ZIV_AI_PLUGIN_<ID> 到达 Python；env 名由 plugin_env_name() 规范化，必须与 C# 同规则。
+# 默认仓库根 Template/plugins.json；可用环境变量 ZIV_AI_PLUGINS_REGISTRY 覆盖。
+PLUGINS_REGISTRY_PATH = os.environ.get(
+    "ZIV_AI_PLUGINS_REGISTRY",
+    os.path.join(REPO_ROOT, "Template", "plugins.json"),
+)
+
+# 插件相对目录（entry['dir']）的基准目录。App 启动后端时由 C# 注入 ZIV_AI_PLUGINS_BASE_DIR =
+# 程序目录（与 C# PluginRegistry.ResolveDirectory 的 AppContext.BaseDirectory 同一值）；
+# 与 PLUGINS_REGISTRY_PATH 同理：Python 独立运行（无 env）回退仓库根 / 发布后的程序目录。
+PLUGINS_BASE_DIR = os.environ.get("ZIV_AI_PLUGINS_BASE_DIR") or REPO_ROOT
+
+
+def plugin_env_name(plugin_id):
+    """插件 id → 环境变量名 ``ZIV_AI_PLUGIN_<ID>``。
+
+    规则（必须与 C# ``PluginRegistry.EnvName`` 一致）：不在 ``[A-Za-z0-9]`` 的字符一律变 ``_``，
+    然后整体大写；``pose-map`` → ``ZIV_AI_PLUGIN_POSE_MAP``。
+    """
+    normalized = "".join(
+        ch if (ch.isascii() and ch.isalnum()) else "_" for ch in (plugin_id or "")
+    )
+    return "ZIV_AI_PLUGIN_" + normalized.upper()
+
+
+def plugin_enabled(plugin_id, entry=None):
+    """插件是否启用：env ``ZIV_AI_PLUGIN_<ID>`` 优先，否则用 ``entry`` 的 ``enabled_by_default``。
+
+    注册表读取由调用方负责（loader 传入 ``entry``），避免 config ↔ loader 循环导入。
+    假值拼写 ``0`` / ``false`` / ``False`` 表示禁用。
+    """
+    value = os.environ.get(plugin_env_name(plugin_id))
+    if value is not None and value != "":
+        return value not in ("0", "false", "False")
+    if isinstance(entry, dict):
+        return bool(entry.get("enabled_by_default", False))
+    return False
+
 # 是否关闭 ComfyUI「智能显存优化」（等效官方 --disable-smart-memory）。**默认关闭（1）**。
 # Step 6 实测（side 1280 / 25 步 / RTX 4080 16GB）：启用智能显存时耗时 60.19s 且 VAE decode
 #   触发 OOM→tiled 回退；故维持 Step 3.4 的关闭策略，显存改由管线内编排（pipeline._release）控制。

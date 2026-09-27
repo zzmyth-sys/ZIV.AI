@@ -5202,3 +5202,42 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
   不可拖」的行为描述；旧行按「只增不改」保留。
 - **验证**：build 0/0；非 GPU 全量 **707 通过 / 0 失败**。
 - **不做**：不改 IPC / 命令集 / Contracts 签名；无新 NuGet；未 commit/推送。
+
+---
+
+## 统一插件架构（batch 1 · 追加 → 非破坏）（日期：2026-09-28）
+
+> **只增不改**。新增统一插件「壳」：`Template/plugins.json`（数据）+ `plugins.loader`（Python）+
+> `PluginRegistry` / `[plugins]`（C#）+ 设置窗口 TAB。**不集成任何具体插件**；`config.TE_SPEED_*` /
+> `tagger.py` / `TAGGER_*` 零改；无新 NuGet；不改既有公开签名（仅新增重载 / 可选参数 / 新属性）。
+
+- **新增数据**：`Template/plugins.json` = `{ "version": "1", "plugins": [] }`；App csproj 随
+  `Template/` 拷贝。
+- **Python**：`config.PLUGINS_REGISTRY_PATH` / `plugin_env_name(id)` / `plugin_enabled(id, entry)`；
+  新 `plugins/loader.py`：`load_registry` / `resolve_dir` / `enabled` / `check_deps` / `load_plugin`。
+- **C#**：`PluginRegistry`（含 `PluginDescriptor`、`EnvName`、`ResolveDirectory`）；
+  `BackendSettings.PluginStates`（`[plugins]`，键 = 原始 id）；`SettingsWriter.WritePluginStates`；
+  `AppContext.PluginRegistry`；`BuildBackendEnvironment(settings, dir, plugins)` 重载（原 2 参保留）。
+- **env 名规则**（C# 与 Python 必须一致）：`ZIV_AI_PLUGIN_` + id 中每个非 `[A-Za-z0-9]` 变 `_` 后大写。
+- **开关**：`settings.ini [plugins] <id> = 1|0`；缺省回退 registry `enabled_by_default`。
+- **验证**：build 0/0；非 GPU 全量 **727 通过 / 0 失败**（基线 707 + 20）。
+- **不做**：不集成具体插件；无新 NuGet；未 commit/推送。
+
+### 插件注册表路径对齐（C# 权威 + env 注入）（2026-09-28，追加 → 非破坏）
+
+- **契约**：`AppContext.BuildBackendEnvironment` 注入 `ZIV_AI_PLUGINS_REGISTRY =
+  <templateDirectory>/plugins.json`（**仅当文件存在**，与 `ZIV_AI_MODELS_REGISTRY` /
+  `ZIV_AI_LORA_REGISTRY` 同模式）；Python `config.PLUGINS_REGISTRY_PATH` 读取该 env，为 Python 唯一
+  注册表入口。C# 读取与 env 注入同用 `shell.TemplateDirectory`，故两端恒指同一文件。
+- **无签名变更**（复用批 1 已冻结的 3 参重载）；无新 NuGet。
+- **验证**：build 0/0；非 GPU 全量 **728 通过 / 0 失败**；`python -m unittest test_plugins` 通过。
+
+### 插件目录解析基准对齐（ZIV_AI_PLUGINS_BASE_DIR）（2026-09-28，追加 → 非破坏）
+
+- **契约**：`AppContext.BuildBackendEnvironment` 在 `plugins.json` 存在时注入
+  `ZIV_AI_PLUGINS_BASE_DIR = System.AppContext.BaseDirectory`（与 C#
+  `PluginRegistry.ResolveDirectory` 的基准一致）；Python `config.PLUGINS_BASE_DIR` 读取该 env
+  （缺省回退 `REPO_ROOT`），`plugins.loader.resolve_dir` 相对路径以此为基准。
+- **无签名变更**；无新 NuGet；不改 TE-Speed / WD14。
+- **验证**：build 0/0；非 GPU 全量 **728 通过 / 0 失败**（不回归）；
+  `test_plugins.py` 24 通过 / 0 失败（含 base-dir 用例）。

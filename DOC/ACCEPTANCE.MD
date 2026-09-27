@@ -4502,3 +4502,20 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 1. 真机 1–5 通过后，在「验收记录」追加“预览自由平移通过，日期：____”（待签）。
 2. 已知测试缺口（沿用 B12 注记）：`ImagePreview.axaml.cs` 的 `_canvas.Offset` 无单测；
    本次已由 `PanZoomCanvas.ComputeDrawRect` 纯函数覆盖渲染公式，但 Offset 传递仍建议真机确认。
+
+## 统一插件架构（batch 1）验收（2026-09-28，只增）
+
+**目标**：建立统一插件「壳」+ 设置窗口插件 TAB；不集成任何具体插件。
+
+| 编号 | 验收点 | 验证方式 | 结果 |
+|---|---|---|---|
+| PL.1 | 注册表数据 | 读 `Template/plugins.json`（`version` + `plugins[]`） | ✅ |
+| PL.2 | Python 加载器 | `plugins/loader.py`（注册表 / 目录 / 依赖 / 加载；失败非致命） | ✅（单测已写，按约束未跑 Python） |
+| PL.3 | 开关链路 | `[plugins]` → `PluginStates` → `ZIV_AI_PLUGIN_<ID>` env | ✅（C# 单测） |
+| PL.4 | Writer 非路径化 | `WritePluginStates` 写 `1`/`0`，非 `Path.GetFullPath` | ✅ |
+| PL.5 | env 名一致 | C# `PluginEnvName` 样例断言（与 Python 同组样例） | ✅ |
+| PL.6 | UI TAB | `TabControl` 2 页 + `PART_PluginList` + 行渲染 + 开关回写 `settings.ini` | ✅（headless：4 例） |
+| PL.7 | build | `dotnet build src\ZIV.AI.sln -c Release` | 0 错误 0 警告 |
+| PL.8 | 非 GPU 全量 | 排除 `Ipc*` GPU 类 / `PythonProcessManagerTests` / `BackendTimeoutTests` | 727 通过 / 0 失败（基线 707 + 20） |
+
+- **不做**：不集成具体插件；不动 TE-Speed / WD14；无新 NuGet；未跑 GPU/Python/真实 App；未 commit。

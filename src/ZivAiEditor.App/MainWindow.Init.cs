@@ -64,7 +64,7 @@ public partial class MainWindow
         if (this.FindControl<Button>("PART_BtnSettings") is { } settingsButton)
         {
             WindowDecorationProperties.SetElementRole(settingsButton, WindowDecorationsElementRole.User);
-            settingsButton.Click += async (_, _) => await new SettingsWindow(_shell).ShowDialog(this);
+            settingsButton.Click += async (_, _) => await new SettingsWindow(_shell, _plugins).ShowDialog(this);
         }
 
         // Resolution tier picker (Step 6.5 logic, first UI): selection feeds the plan.

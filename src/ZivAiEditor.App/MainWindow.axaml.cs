@@ -60,6 +60,7 @@ public partial class MainWindow : Window
     private IImagingService _imaging = null!;
     private ShellService _shell = null!;
     private IModelProfileRegistry _modelProfiles = null!;
+    private readonly PluginRegistry? _plugins;
     private IEditSession _session = null!;
     private IEditSessionWriter _writer = null!;
     private readonly IReadOnlyList<CommandDefinition> _commands = Array.Empty<CommandDefinition>();
@@ -112,7 +113,8 @@ public partial class MainWindow : Window
         IReadOnlyList<CommandDefinition>? commands = null,
         IPromptExpander? promptExpander = null,
         ILlmPreflight? llmPreflight = null,
-        Func<IEditSession, IEditSessionWriter, IExecutor>? createExecutor = null)
+        Func<IEditSession, IEditSessionWriter, IExecutor>? createExecutor = null,
+        PluginRegistry? plugins = null)
     {
         _store = sessionStore ?? throw new ArgumentNullException(nameof(sessionStore));
         _projects = projects ?? throw new ArgumentNullException(nameof(projects));
@@ -126,6 +128,7 @@ public partial class MainWindow : Window
         _llmPreflight = llmPreflight;
         _parser = commandParser;
         _createExecutor = createExecutor;
+        _plugins = plugins;
 
         // Step 9C.5: the same session instance is passed as both the read-only view and the
         // writer (it implements IEditSession / IEditSessionWriter); the UI view model never

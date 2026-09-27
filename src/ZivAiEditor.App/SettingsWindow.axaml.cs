@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input;
+using ZivAiEditor.Backend;
 
 namespace ZivAiEditor.App;
 
@@ -15,6 +16,7 @@ public partial class SettingsWindow : Window
 {
     private readonly IShellContext _shell = null!;
     private readonly string _settingsPath = null!;
+    private readonly PluginRegistry _plugins = null!;
 
     public SettingsWindow()
     {
@@ -22,10 +24,16 @@ public partial class SettingsWindow : Window
     }
 
     internal SettingsWindow(IShellContext shell)
+        : this(shell, plugins: null)
+    {
+    }
+
+    internal SettingsWindow(IShellContext shell, PluginRegistry? plugins)
         : this()
     {
         _shell = shell ?? throw new ArgumentNullException(nameof(shell));
         _settingsPath = Path.Combine(System.AppContext.BaseDirectory, SettingsLoader.FileName);
+        _plugins = plugins ?? new PluginRegistry(Path.Combine(shell.TemplateDirectory, "plugins.json"));
 
         if (this.FindControl<Border>("PART_Header") is { } header)
         {
@@ -44,6 +52,7 @@ public partial class SettingsWindow : Window
         WireFooter();
         Prefill();
         UpdateOpenEnabled();
+        InitPlugins();
     }
 
     private void WireBrowse(string buttonName, string textName, string title)

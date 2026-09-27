@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Xunit;
 using ZivAiEditor.App;
+using ZivAiEditor.Backend;
 
 namespace ZivAiEditor.Tests;
 
@@ -123,6 +125,32 @@ public class SettingsLoaderTests : IDisposable
 
         Assert.Null(SettingsLoader.Load(_directory).ComfyRoot);
     }
+
+    [Fact]
+    public void Load_Parses_Plugins_Section()
+    {
+        File.WriteAllLines(SettingsPath, new[]
+        {
+            "[plugins]",
+            "pose-map = 1",
+            "sdpose.ood = 0",
+            "ignored = maybe",
+        });
+
+        var states = SettingsLoader.Load(_directory).PluginStates;
+
+        Assert.True(states["pose-map"]);
+        Assert.False(states["sdpose.ood"]);
+        Assert.False(states.ContainsKey("ignored"));
+    }
+
+    [Fact]
+    public void Load_Defaults_PluginStates_To_Empty()
+    {
+        File.WriteAllLines(SettingsPath, new[] { "[backend]", "pipe_name = x" });
+
+        Assert.Empty(SettingsLoader.Load(_directory).PluginStates);
+    }
 }
 
 /// <summary>B3 / T1: the AppContext backend environment assembly is pure and unit-testable.</summary>
@@ -227,5 +255,85 @@ public class BackendEnvironmentTests : IDisposable
         var environment = ZivAiEditor.App.AppContext.BuildBackendEnvironment(settings, _directory);
 
         Assert.False(environment.ContainsKey("ZIV_AI_COMFY_ROOT"));
+    }
+
+    [Fact]
+    public void BuildBackendEnvironment_Skips_Plugin_Keys_When_Registry_Null()
+    {
+        // Batch 1: the 2-arg overload injects no per-plugin key, even if plugins.json exists.
+        File.WriteAllText(
+            Path.Combine(_directory, "plugins.json"),
+            "{ \"version\": \"1\", \"plugins\": [ { \"id\": \"pose-map\", \"enabled_by_default\": true } ] }");
+
+        var environment = ZivAiEditor.App.AppContext.BuildBackendEnvironment(new BackendSettings(), _directory);
+
+        Assert.Equal(Path.Combine(_directory, "plugins.json"), environment["ZIV_AI_PLUGINS_REGISTRY"]);
+        Assert.DoesNotContain("ZIV_AI_PLUGIN_POSE_MAP", environment.Keys);
+    }
+
+    [Fact]
+    public void BuildBackendEnvironment_Injects_Plugin_States_From_Registry_And_Settings()
+    {
+        File.WriteAllText(
+            Path.Combine(_directory, "plugins.json"),
+            "{ \"version\": \"1\", \"plugins\": ["
+            + " { \"id\": \"pose-map\", \"dir\": \"plugins/pose-map\", \"enabled_by_default\": false },"
+            + " { \"id\": \"tagger\", \"dir\": \"plugins/tagger\", \"enabled_by_default\": true } ] }");
+        var registry = new PluginRegistry(Path.Combine(_directory, "plugins.json"));
+        var settings = new BackendSettings
+        {
+            PluginStates = new Dictionary<string, bool> { ["pose-map"] = true },
+        };
+
+        var environment = ZivAiEditor.App.AppContext.BuildBackendEnvironment(settings, _directory, registry);
+
+        Assert.Equal("1", environment["ZIV_AI_PLUGIN_POSE_MAP"]);
+        Assert.Equal("1", environment["ZIV_AI_PLUGIN_TAGGER"]);
+    }
+
+    [Fact]
+    public void BuildBackendEnvironment_Disables_Plugin_When_Settings_Says_So()
+    {
+        File.WriteAllText(
+            Path.Combine(_directory, "plugins.json"),
+            "{ \"version\": \"1\", \"plugins\": [ { \"id\": \"pose-map\", \"enabled_by_default\": true } ] }");
+        var registry = new PluginRegistry(Path.Combine(_directory, "plugins.json"));
+        var settings = new BackendSettings
+        {
+            PluginStates = new Dictionary<string, bool> { ["pose-map"] = false },
+        };
+
+        var environment = ZivAiEditor.App.AppContext.BuildBackendEnvironment(settings, _directory, registry);
+
+        Assert.Equal("0", environment["ZIV_AI_PLUGIN_POSE_MAP"]);
+    }
+
+    [Fact]
+    public void PluginEnvName_Normalizes_Ids()
+    {
+        Assert.Equal("ZIV_AI_PLUGIN_POSE_MAP", ZivAiEditor.App.AppContext.PluginEnvName("pose-map"));
+        Assert.Equal("ZIV_AI_PLUGIN_SDPOSE_OOD", ZivAiEditor.App.AppContext.PluginEnvName("sdpose.ood"));
+        Assert.Equal("ZIV_AI_PLUGIN_A_B9", ZivAiEditor.App.AppContext.PluginEnvName("A b9"));
+        Assert.Equal("ZIV_AI_PLUGIN_X_1", ZivAiEditor.App.AppContext.PluginEnvName("x_1"));
+    }
+
+    [Fact]
+    public void BuildBackendEnvironment_Plugins_Registry_Is_The_File_PluginRegistry_Reads()
+    {
+        // The injected path (consumed by Python's config.PLUGINS_REGISTRY_PATH) must be exactly
+        // the file the C# registry object reads, so both sides share one registry.
+        File.WriteAllText(
+            Path.Combine(_directory, "plugins.json"),
+            "{ \"version\": \"1\", \"plugins\": [ { \"id\": \"pose-map\", \"dir\": \"plugins/pose-map\" } ] }");
+        var registry = new PluginRegistry(Path.Combine(_directory, "plugins.json"));
+
+        var environment = ZivAiEditor.App.AppContext.BuildBackendEnvironment(
+            new BackendSettings(), _directory, registry);
+
+        var injected = environment["ZIV_AI_PLUGINS_REGISTRY"];
+        Assert.Equal(Path.Combine(_directory, "plugins.json"), injected);
+        Assert.NotNull(new PluginRegistry(injected).Get("pose-map"));
+        // Relative plugin dirs use the program directory (same base as C# ResolveDirectory).
+        Assert.Equal(System.AppContext.BaseDirectory, environment["ZIV_AI_PLUGINS_BASE_DIR"]);
     }
 }

@@ -27,6 +27,13 @@ internal sealed class BackendSettings
     /// <summary>ComfyUI source-tree path (<c>[backend] comfy_root</c>); null when unset / cleared.</summary>
     public string? ComfyRoot { get; init; }
 
+    /// <summary>
+    /// Plugin enable state from <c>[plugins]</c> (batch 1), keyed by the raw plugin id. An id
+    /// absent here falls back to the registry's <c>enabled_by_default</c>.
+    /// </summary>
+    public IReadOnlyDictionary<string, bool> PluginStates { get; init; } =
+        new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
     public LlmPlannerSettings LlmPlanner { get; init; } = new();
 
     public LlmRewriterSettings LlmRewriter { get; init; } = new();
@@ -94,6 +101,7 @@ internal static class SettingsLoader
         var sections = ParseSections(File.Exists(path) ? path : null);
         var backend = Section(sections, "backend");
         var models = Section(sections, "models");
+        var plugins = Section(sections, "plugins");
         var planner = Section(sections, "llm.planner");
         var rewriter = Section(sections, "llm.rewriter");
 
@@ -115,6 +123,7 @@ internal static class SettingsLoader
             TePath = GetOptional(models, "te_path"),
             VaePath = GetOptional(models, "vae_path"),
             ComfyRoot = GetOptional(backend, "comfy_root"),
+            PluginStates = ParsePluginStates(plugins),
             LlmPlanner = new LlmPlannerSettings
             {
                 Endpoint = Get(planner, "endpoint", plannerDefaults.Endpoint),
@@ -276,5 +285,29 @@ internal static class SettingsLoader
             "0" or "false" or "no" or "off" => false,
             _ => fallback,
         };
+    }
+
+    /// <summary>
+    /// Parses <c>[plugins]</c> into id -&gt; enabled. Keys are raw plugin ids; an unrecognized
+    /// value is skipped (the registry default still applies) rather than forced to a bool.
+    /// </summary>
+    private static IReadOnlyDictionary<string, bool> ParsePluginStates(
+        Dictionary<string, string> values)
+    {
+        var states = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in values)
+        {
+            switch (pair.Value.Trim().ToLowerInvariant())
+            {
+                case "1" or "true" or "yes" or "on":
+                    states[pair.Key] = true;
+                    break;
+                case "0" or "false" or "no" or "off":
+                    states[pair.Key] = false;
+                    break;
+            }
+        }
+
+        return states;
     }
 }

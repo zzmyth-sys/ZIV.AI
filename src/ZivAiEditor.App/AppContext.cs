@@ -52,7 +52,8 @@ internal sealed class AppContext : IDisposable
         IImagingService imaging,
         LocalLlmClient rewriterLlm,
         IPromptExpander promptExpander,
-        ILlmPreflight llmPreflight)
+        ILlmPreflight llmPreflight,
+        PluginRegistry pluginRegistry)
     {
         _backend = backend;
         Client = client;
@@ -79,6 +80,7 @@ internal sealed class AppContext : IDisposable
         _rewriterLlm = rewriterLlm;
         PromptExpander = promptExpander;
         LlmPreflight = llmPreflight;
+        PluginRegistry = pluginRegistry;
     }
 
     private readonly HttpClient _llmHttp;
@@ -102,6 +104,12 @@ internal sealed class AppContext : IDisposable
 
     /// <summary>Model resolution profiles (Step 6.5); the UI maps a tier via <see cref="ResolutionTier"/>.</summary>
     public IModelProfileRegistry ModelProfiles { get; }
+
+    /// <summary>
+    /// Plugin registry loaded from <c>Template/plugins.json</c> (batch 1). Feeds the backend env
+    /// injection and the settings-window plugin tab; empty when the file is missing.
+    /// </summary>
+    public PluginRegistry PluginRegistry { get; }
 
     /// <summary>Deterministic slash-command / prompt parser (Step 8).</summary>
     public ICommandParser CommandParser => _commandParser;
@@ -162,8 +170,12 @@ internal sealed class AppContext : IDisposable
     {
         var settings = shell.LoadSettings();
 
+        // Batch 1: the plugin registry is data next to commands.json; it feeds both the backend
+        // env injection (below) and the settings-window plugin tab.
+        var pluginRegistry = new PluginRegistry(Path.Combine(shell.TemplateDirectory, "plugins.json"));
+
         // R-4: grouped by domain (backend → tools → agent → llm → persistence → imaging).
-        var (backend, client) = BuildBackend(settings, shell.TemplateDirectory);
+        var (backend, client) = BuildBackend(settings, shell.TemplateDirectory, pluginRegistry);
         var (tools, executionQueue) = BuildTools(client);
         var (commandParser, commandTemplates, session, executor, modelProfiles) =
             BuildAgent(shell.TemplateDirectory, tools, executionQueue);
@@ -174,13 +186,14 @@ internal sealed class AppContext : IDisposable
         return new AppContext(
             backend, client, llm.Http, llm.PlannerLlm, llm.Planner, tools, executor, executionQueue,
             modelProfiles, commandParser, commandTemplates, session, session, sessionStore, projects, imaging,
-            llm.RewriterLlm, llm.PromptExpander, llm.LlmPreflight);
+            llm.RewriterLlm, llm.PromptExpander, llm.LlmPreflight, pluginRegistry);
     }
 
     /// <summary>Backend domain: the Python process manager and the IPC client over it.</summary>
     private static (PythonProcessManager Backend, IpcInferenceClient Client) BuildBackend(
         BackendSettings settings,
-        string templateDirectory)
+        string templateDirectory,
+        PluginRegistry pluginRegistry)
     {
         var options = new PythonBackendOptions
         {
@@ -188,7 +201,7 @@ internal sealed class AppContext : IDisposable
             PythonExe = settings.PythonExe,
             Script = settings.Script,
             AutoRestartEnabled = true,
-            Environment = BuildBackendEnvironment(settings, templateDirectory),
+            Environment = BuildBackendEnvironment(settings, templateDirectory, pluginRegistry),
             // Step 9C.6-D diagnostic: persist the backend log under the program directory
             // (Z14) so the submit resolution / errors survive the in-memory capture.
             LogFilePath = Path.Combine(System.AppContext.BaseDirectory, "_cache", "backend.log"),
@@ -209,6 +222,19 @@ internal sealed class AppContext : IDisposable
     internal static IReadOnlyDictionary<string, string> BuildBackendEnvironment(
         BackendSettings settings,
         string templateDirectory)
+        => BuildBackendEnvironment(settings, templateDirectory, plugins: null);
+
+    /// <summary>
+    /// Same as the 2-arg overload plus plugin env injection (batch 1): the
+    /// <c>ZIV_AI_PLUGINS_REGISTRY</c> path (only when <c>plugins.json</c> exists, mirroring
+    /// models / loras) and one <c>ZIV_AI_PLUGIN_&lt;ID&gt;</c> flag per known plugin. When
+    /// <paramref name="plugins"/> is null / empty, no plugin key is added — the environment
+    /// stays minimal.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> BuildBackendEnvironment(
+        BackendSettings settings,
+        string templateDirectory,
+        PluginRegistry? plugins)
     {
         var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         AddIfSet(environment, "ZIV_AI_DIT_PATH", settings.DitPath);
@@ -222,9 +248,41 @@ internal sealed class AppContext : IDisposable
             environment,
             "ZIV_AI_LORA_REGISTRY",
             Path.Combine(templateDirectory, "loras.json"));
+        AddRegistryIfPresent(
+            environment,
+            "ZIV_AI_PLUGINS_REGISTRY",
+            Path.Combine(templateDirectory, "plugins.json"));
+
+        // Relative plugin `dir` resolves against the program directory. Inject the same value C#
+        // PluginRegistry.ResolveDirectory uses (System.AppContext.BaseDirectory) so both sides
+        // resolve an identical directory; only when the registry ships, keeping the env minimal.
+        if (File.Exists(Path.Combine(templateDirectory, "plugins.json")))
+        {
+            environment["ZIV_AI_PLUGINS_BASE_DIR"] = System.AppContext.BaseDirectory;
+        }
+
         AddDirectoryIfPresent(environment, "ZIV_AI_COMFY_ROOT", settings.ComfyRoot);
+
+        // settings.ini [plugins] wins; otherwise the registry's enabled_by_default.
+        if (plugins is { } registry)
+        {
+            foreach (var plugin in registry.All)
+            {
+                var enabled = settings.PluginStates.TryGetValue(plugin.Id, out var state)
+                    ? state
+                    : plugin.EnabledByDefault;
+                environment[PluginEnvName(plugin.Id)] = enabled ? "1" : "0";
+            }
+        }
+
         return environment;
     }
+
+    /// <summary>
+    /// Env var name for a plugin id (batch 1); delegates to <see cref="PluginRegistry.EnvName"/>
+    /// so C# and Python share exactly one normalization rule.
+    /// </summary>
+    internal static string PluginEnvName(string pluginId) => PluginRegistry.EnvName(pluginId);
 
     private static void AddIfSet(Dictionary<string, string> environment, string key, string? value)
     {

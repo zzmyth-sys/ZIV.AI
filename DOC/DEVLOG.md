@@ -7245,3 +7245,119 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 
 ### F · 不做
 - 不改 IPC / 命令集 / Python；无新 NuGet；未跑 GPU/Python/真实 App；未 commit/推送。
+
+---
+
+## 统一插件架构 + 设置窗口插件 TAB（batch 1）（2026-09-28，只增）
+
+> 目标：建立统一插件「壳」（注册表 / 加载器 / 开关 / UI），**不集成任何具体插件**（SDPose /
+> BodyRatioMapper 留 DEMO + 批 3）。**不改 TE-Speed / WD14**；无新 NuGet；未跑 GPU/Python/真实 App。
+
+### A · 数据层
+- 新增 `Template/plugins.json`（`version` + 空 `plugins`）；`ZivAiEditor.App.csproj` 追加其 `None`
+  条目（发布 / 测试 bin 均随 `Template/` 拷贝）。
+
+### B · Python 侧
+- `python/server/config.py`：新增 `PLUGINS_REGISTRY_PATH`（env `ZIV_AI_PLUGINS_REGISTRY`）、
+  `plugin_env_name(id)`（非 `[A-Za-z0-9]` → `_`，大写）、`plugin_enabled(id, entry)`（env 优先，
+  否则 `enabled_by_default`）；`PROTOCOL_VERSION` 不动。
+- 新增 `python/server/plugins/loader.py`（`load_registry` / `resolve_dir` / `enabled` /
+  `check_deps` / `load_plugin`；`spec_from_file_location` 唯一包名 `zivai_plugin_<id>`；失败降级
+  `(None, reason)`，永不抛）与 `plugins/__init__.py`。
+
+### C · C# 机制
+- Backend 新增 `PluginFileDto`（source-gen `SnakeCaseLower`）+ `PluginRegistry`（读
+  `Template/plugins.json`，缺失 / 损坏 → 空；`EnvName` / `ResolveDirectory`）。
+- `SettingsLoader`：`[plugins]` → `BackendSettings.PluginStates`（原始 id → bool，未知值跳过）。
+- `SettingsWriter`：新增 `WritePluginStates`（**不做路径规范化**；私有 `WriteSectionValues` 增
+  `normalizePaths` 开关）。
+- `AppContext`：构造并暴露 `PluginRegistry`；`BuildBackendEnvironment` 新增 3 参重载（原 2 参保留），
+  注入 `ZIV_AI_PLUGINS_REGISTRY` + 每插件 `ZIV_AI_PLUGIN_<ID>`（null / 空注册表 → 零插件键）。
+
+### D · UI
+- `SettingsWindow.axaml`：Row=1 改 `TabControl`（TAB1「环境」= 原三段；TAB2「插件」= `ItemsControl`）。
+- 新增 `SettingsWindow.Plugins.cs`：列插件 + 状态（未安装 / 已安装未启用 / 已启用）+ 启用 / 禁用
+  （写 `[plugins]`）+ 打开目录；「检查依赖」置灰（待批 3）。
+
+### E · 验证
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量（排除 `Ipc*` GPU 类 / `PythonProcessManagerTests` / `BackendTimeoutTests`）→
+  **727 通过 / 0 失败**（基线 707 + 新增 20）。
+- Python 单测 `python/server/test_plugins.py` 已写入但**按约束未执行**（禁启 Python）。
+
+### F · 不做
+- 不集成具体插件；不动 TE-Speed / WD14；无新 NuGet；未跑 GPU/Python/真实 App；未 commit/推送。
+
+---
+
+## 插件注册表路径对齐（C# 权威 + env 注入）（2026-09-28，只增）
+
+> 背景：C# `PluginRegistry` 读 `<TemplateDirectory>/plugins.json`（开发期 = bin/Template），Python
+> `config.PLUGINS_REGISTRY_PATH` 默认回退 `REPO_ROOT/Template/plugins.json`（开发期 = 仓库根）。
+> 批 1 已按方案 A（与 `models.json` 同模式）让 C# 把同一路径写进 env，本轮把它锁定并实测。
+
+### A · 结论
+- **无产品代码改动**：批 1 已在 `AppContext.BuildBackendEnvironment`（`AppContext.cs:251-254`）注入
+  `ZIV_AI_PLUGINS_REGISTRY = <templateDirectory>/plugins.json`，并只在该文件存在时注入（与
+  models / loras 一致）；`config.PLUGINS_REGISTRY_PATH`（`config.py:167-170`）已读该 env。
+- C# 读取与 env 注入同用一个 `shell.TemplateDirectory`（`AppContext.cs:175` / `:204`），故二者恒指
+  同一文件；`config.PLUGINS_REGISTRY_PATH` 为 Python 唯一读取入口。
+
+### B · 修复前后对照（两端读的文件）
+- 修复前 / Python 独立运行（无 env）：C# 读 `bin/Template/plugins.json`；Python 读
+  `REPO_ROOT/Template/plugins.json`（开发期 = 仓库根，可能是另一份）。
+- App 启动后端（批 1 起）：env `ZIV_AI_PLUGINS_REGISTRY` 指向 C# 同一文件 → 两端一致。
+- 发布期：`REPO_ROOT == BaseDirectory == 程序目录`，两端天然一致。
+
+### C · 测试
+- C# 新增 `BuildBackendEnvironment_Plugins_Registry_Is_The_File_PluginRegistry_Reads`：断言注入路径
+  等于 C# 读取的文件，且 `new PluginRegistry(injected)` 能取到条目。
+- Python `test_plugins.PluginRegistryPathTests`：默认路径 = `REPO_ROOT/Template/plugins.json`；env
+  `ZIV_AI_PLUGINS_REGISTRY` 覆盖生效；`load_registry()` 走 `config.PLUGINS_REGISTRY_PATH`。
+
+### D · 验证
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU 全量（排除 `Ipc*` GPU 类 / `PythonProcessManagerTests` / `BackendTimeoutTests`）→
+  **728 通过 / 0 失败**（批 1 基线 727 + 1）。
+- Python：`python -m unittest test_plugins`（纯 CPU）→ 通过。
+
+### E · 不做
+- 不做批 3（capability 调度 / DEMO 接入）；不动 TE-Speed / WD14；无新 NuGet；未跑 GPU/真实 App；未 commit。
+
+---
+
+## 插件目录解析基准对齐（ZIV_AI_PLUGINS_BASE_DIR）（2026-09-28，只增）
+
+> 背景：注册表文件已对齐，但插件**相对目录** `entry['dir']` 的基准仍分叉——C#
+> `PluginRegistry.ResolveDirectory` 用 `AppContext.BaseDirectory`（开发期 = bin/…/win-x64），
+> Python `loader.resolve_dir` 用 `config.REPO_ROOT`（开发期 = 仓库根）。DEMO 填 `dir` 前先对齐。
+
+### A · 实现（与 plugins.json 同模式）
+- `AppContext.BuildBackendEnvironment`：`plugins.json` 存在时注入
+  `ZIV_AI_PLUGINS_BASE_DIR = System.AppContext.BaseDirectory`（= C# `ResolveDirectory` 的基准；
+  `AppContext.cs:255-262`）。
+- `config.py`：`PLUGINS_BASE_DIR = os.environ.get("ZIV_AI_PLUGINS_BASE_DIR") or REPO_ROOT`
+  （`config.py:172-175`）。
+- `plugins/loader.py`：`resolve_dir` 相对路径基准改为 `config.PLUGINS_BASE_DIR`
+  （`loader.py:73`）；每插件 `ZIV_AI_PLUGIN_<ID>_DIR` 绝对覆盖不变。
+
+### B · 修复前后对照
+| 场景 | C# 相对 dir 基准 | Python 相对 dir 基准 |
+|---|---|---|
+| 修复前·开发期 App | `bin/.../win-x64` | `REPO_ROOT`（仓库根）❌ |
+| 修复后·App 启动后端 | `bin/.../win-x64` | 同值（env 注入）✅ |
+| 发布期（无 env） | 程序目录 | `REPO_ROOT` = 程序目录 ✅ |
+
+### C · 测试
+- C#：`BuildBackendEnvironment_Plugins_Registry_Is_The_File_PluginRegistry_Reads` 追加断言
+  `ZIV_AI_PLUGINS_BASE_DIR == System.AppContext.BaseDirectory`。
+- Python：`resolve_dir` 相对用例改用 `PLUGINS_BASE_DIR`；新增 `PLUGINS_BASE_DIR` 覆盖用例
+  （默认 = REPO_ROOT / env 覆盖生效）。
+
+### D · 验证
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- 非 GPU filter 全量 → **728 通过 / 0 失败**（不回归；测试为既有用例追加断言，未新增 C# 用例）。
+- Python `test_plugins.py`（纯 CPU）→ **24 通过 / 0 失败**（上轮 21 + 3）。
+
+### E · 不做
+- 不做批 3；不动 TE-Speed / WD14；无新 NuGet；未跑 GPU/真实 App；未 commit。

@@ -36,6 +36,7 @@
     <None Include="..\..\Template\commands.json" Link="Template\commands.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Template\loras.json" Link="Template\loras.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Template\models.json" Link="Template\models.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Template\plugins.json" Link="Template\plugins.json" CopyToOutputDirectory="PreserveNewest" />
 
     <!-- ZIV.AI's own backend pipeline ships with the app (first-party, ~125 KB). ComfyUI /
          python_embeded / model weights are third-party and supplied by the user (RELEASE §2);

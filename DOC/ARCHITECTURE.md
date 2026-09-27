@@ -623,3 +623,14 @@ ZIV.AI.sln
    （`FlowRunner`；§2 核心分工）。
 5. **B 类遗留登记**：Z-007（UI 正名 / 拆视图）、Z-008（UI 层 / MainWindow 重构），见
    `FROZEN.md`「妥协/挂账清单」。
+
+## 插件层定位（batch 1）（2026-09-28，只增）
+
+- **定位**：可选「可执行插件」是数据驱动的外置模块（`Template/plugins.json` 登记 + `<dir>` 放置），
+  与既有 TE-Speed / WD14「外置模块」同语义，但由统一 `plugins.loader` 加载（唯一包名 import-by-file），
+  开关经 `settings.ini [plugins]` → env `ZIV_AI_PLUGIN_<ID>`。
+- **分层**：Python 加载器在被推理后端进程内（`python/server/plugins/`，纯 CPU）；C# 侧
+  `PluginRegistry` 在 **Backend** 层（机制），设置窗口在 **App** 层（视图）；契约不新增。
+- **边界**：批 1 只做「发现 / 加载 / 依赖探测 / 开关」，capability 调度（姿态转换等）留批 3；
+  Python 侧姿态图注入沿用 `additional_images`，不改 IPC。
+- **不做**：不改既有分层依赖方向；无新 NuGet。
