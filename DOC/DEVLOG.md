@@ -6886,3 +6886,15 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - `IpcSubmitMapperTests`（含 D4 新测试）→ 11 通过 / 0 失败。
 - Z8：改动文件最大 `SingleInstance.cs` ≈ 215 行，均 < 600。
 - 未跑 GPU / 未启动 Python / 未启动 App。
+
+## 批次：WD 实验链退役 + 全仓清洁（2026-09-27，只追加）
+
+### 批 1 · WD14 A/B 实验链退役
+
+- **退役范围**：删除 `_test_step2` 的 WD14 A/B 实验**源图 + 缓存 + 产物**。
+  - tracked 删除（60 文件）：`wd_ab_src/*`(4, fig1–4)、`wd_ab3_src/*`(3, ab3_*)、`WD/360.jpg`、`danbooru_groups/*.json`(41)、`360_*`(10)、`scene_filter.py`。
+  - untracked 删除（24 文件 / 53.8 MB）：`wd_ab*` / `wd_ab3*` / `360_ab*` 的 `_A`/`_B`/`_sheet`/`_warmup` PNG。
+- **保留**：`python/server/tagger.py` + `config.py` 的 `TAGGER_*`（L1 能力代码）、`DOC/WD+模板系统.md`（历史，§10 追加「源图清理说明」）、`_test_step2/wd_ab*.py`、`wd_ab_llm.py`、`wd_ab*_result/metrics/tags/prompts.json`（结论）。
+- **源图**：`wd_ab_src/*`、`wd_ab3_src/*`、`WD/360.jpg` 已清理；重现实验需自备类似尺寸图片（参考 `DOC/WD+模板系统.md` §3 实验描述）。
+- **360 场景词表链登记（DOC 无其它备份，删除前登记）**：`360_fetch_vocab.py` 是**一次性开发工具**，从 Danbooru wiki tag-group（缓存目录 `danbooru_groups/`）+ 本地 WD14 `selected_tags.csv` 构建 `360_scene_vocab.json`（场景词表）；`scene_filter.py` 在运行时**只读**该 JSON 做场景过滤（不联网）。本次随退役一并删除（tracked `360_*` 10 + `scene_filter.py`）；如需重建，重跑 `360_fetch_vocab.py`（需联网 + `Comfyui/.../comfyui-wd14-tagger/models/wd-vit-tagger-v3.csv`）。
+- **停点登记（WD 源图被保留脚本按名引用）**：`wd_ab.py` / `wd_ab_tags.py` / `wd_ab_prompts.py(.json)` / `wd_ab3_analyze.py` / `wd_ab3_prompts.py(.json)` / `wd_ab3_tags.json` 仍按 `wd_ab_src` / `wd_ab3_src` 目录名引用源图；因源图退役，这些脚本需自备图片方可重跑。无 src/ 生产代码或 python/ 后端引用。

@@ -255,7 +255,7 @@ Blend the lighting and shadows naturally between the person and the background.
 
 **第三轮主实验**
 
-- `wd_ab3_src/{ab3_person_3.jpg, ab3_outfit_1.jpg, ab3_scene_2.jpg}` 源图
+- `wd_ab3_src/{ab3_person_3.jpg, ab3_outfit_1.jpg, ab3_scene_2.jpg}` 源图（**已清理**，见文末「源图清理说明」）
 - `wd_ab3_tags.py` / `.json`，`wd_ab3_prompts.py` / `.json`
 - `wd_ab3.py`（GPU）/ `wd_ab3_result.json`
 - `wd_ab3_{A,B}.png` / `wd_ab3_sheet.png` / `wd_ab3_metrics.json` / `wd_ab3_analyze.py`
@@ -269,3 +269,12 @@ Blend the lighting and shadows naturally between the person and the background.
 - `wd_ab_tags.py` / `.json`，`wd_ab_prompts.py` / `.json`，`wd_ab_llm.py`
 - `wd_ab.py` / `wd_ab_result.json`，`wd_ab_analyze.py` / `wd_ab_metrics.json`
 - `wd_ab_sheet_{batch1,batch1b,batch2}.png` 及各变体输出
+
+---
+
+## 10. 源图清理说明（2026-09-27，只增）
+
+- **已清理**（WD 实验链退役）：`_test_step2/wd_ab_src/*`（fig1–4）、`_test_step2/wd_ab3_src/*`（ab3_*）、`_test_step2/WD/360.jpg` 源图，以及 `wd_ab*` / `wd_ab3*` / `360_ab*` 的 `_A`/`_B`/`_sheet`/`_warmup` 输出 PNG 与 `danbooru_groups/` 缓存、`360_*` 词表链。
+- **本文 §3 引用的图名**（fig1_stage / fig2_garden_v / fig3_garden_h / fig4_grass、ab3_outfit_1 / ab3_scene_2 / ab3_person_3）与 **§9 产物图**（`wd_ab3_{A,B}.png` / `*_sheet.png` 等）对应文件已删除。
+- **重现**：保留的脚本（`wd_ab*.py` / `wd_ab3*.py` / `wd_ab_llm.py`）与结论 JSON（`*_result/metrics/tags/prompts.json`）仍在 `_test_step2/`；重现时需**自备类似尺寸图片**（源图描述见 §3 实验记录）。
+- **未删**：`python/server/tagger.py` + `config.py` 的 `TAGGER_*`（L1 能力代码）与本文档（历史记录）保留。
