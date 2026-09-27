@@ -7029,3 +7029,12 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **`python/server/config.py`**：删除 `VRAM_MODE = "auto"` 块（3 行）——**0 代码引用**（仅 `DEVLOG.md:311` 历史提及，豁免）。
 - **`src/ZivAiEditor.UI/ZivAiEditor.UI.csproj`**：删除过时注释句「ZIV.Core flows transitively through Contracts …」（`Contracts.csproj` 已无任何 ProjectReference）。
 - **验证**：`py_compile ipc.py config.py` OK；`write_binary` 全仓 0 命中；build `0/0`。
+
+### C · 重复代码抽取（4 组，纯重构）
+
+- **C1（Tools）**：新增 `Tools/ToolParameters.cs`（`GetString/GetInt/GetLong/GetDouble`，internal static）+ `Tools/StepProgressAdapter.cs`（internal sealed；`using Contracts.Tools` 取 `StepProgress`）。`QwenImage21EditTool`（214→173）与 `QwenImage21OutpaintTool`（182→141）删除私有副本，改调 `ToolParameters.GetXxx` / 共享 `StepProgressAdapter`。
+- **C2（UI/App）**：新增 `UI/Editing/CommandText.cs`（`public static string? FirstToken(string?)`）；`CommandRequirements` 与 `MainWindow.Generate` 改调并删私有。
+- **C3（App）**：新增 `App/ResolutionTierText.cs`（`internal static ResolutionPolicy? Resolve(string? tier, ModelProfile profile)`）；`QuickRunHost.ResolveResolution` 与 `MainWindow.ResolveTier` 改调并把各自 profile 作参数传入。
+- **C4（Imaging）**：新增 `Imaging/DirectoryCleanup.cs`（internal static：`CleanupSession(root,sessionId,tag)` / `CleanupAll(root,tag)` / `DeleteDirectorySafe(dir,tag)`）；`ImageCropper`（190→137）与 `MaskExporter`（219→166）删除私有 `DeleteDirectorySafe`，`CleanupSession/CleanupAll` 改转调（公开签名不变；tag 保持 `crop`/`mask` 日志前缀）。
+- **行为不变**：逐字等价，仅去重；无签名变更。
+- **验证**：build `0/0`；受影响类 **60/60**（`QwenImage21*` 31 + `ImageCropper*`/`MaskExporter*`/`Imaging*`/`CommandRequirements*` 等）；所有改动文件 <600。

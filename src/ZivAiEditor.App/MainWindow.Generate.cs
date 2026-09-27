@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using ZivAiEditor.App.Flows;
 using ZivAiEditor.Contracts.Execution;
+using ZivAiEditor.UI.Editing;
 
 namespace ZivAiEditor.App;
 
@@ -18,16 +19,10 @@ public partial class MainWindow
     /// <summary>Whether <paramref name="text"/> starts with a command whose <c>T2i</c> is set.</summary>
     private bool IsGenerateCommand(string text)
     {
-        var name = FirstToken(text);
+        var name = CommandText.FirstToken(text);
         return name is { Length: > 0 }
             && _commands.Any(command =>
                 command.T2i && string.Equals(command.Name, name, StringComparison.Ordinal));
-    }
-
-    private static string? FirstToken(string? text)
-    {
-        var parts = (text ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        return parts.Length > 0 ? parts[0] : null;
     }
 
     /// <summary>

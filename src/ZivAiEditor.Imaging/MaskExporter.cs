@@ -155,65 +155,12 @@ public static class MaskExporter
     /// and each file delete is guarded individually (a locked file cannot abort the rest).
     /// </summary>
     public static void CleanupSession(string? sessionId)
-    {
-        if (string.IsNullOrWhiteSpace(sessionId))
-        {
-            return;
-        }
-
-        DeleteDirectorySafe(Path.Combine(MasksRootDirectory, sessionId));
-    }
+        => DirectoryCleanup.CleanupSession(MasksRootDirectory, sessionId, "mask");
 
     /// <summary>
     /// Deletes every mask session directory (orphans from a previous run). Safe to call at
     /// startup: the app is single-instance, so no live session can exist. Never throws.
     /// </summary>
     public static void CleanupAll()
-    {
-        try
-        {
-            if (!Directory.Exists(MasksRootDirectory))
-            {
-                return;
-            }
-
-            foreach (var directory in Directory.GetDirectories(MasksRootDirectory))
-            {
-                DeleteDirectorySafe(directory);
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[mask] cleanup-all failed: {ex.Message}");
-        }
-    }
-
-    private static void DeleteDirectorySafe(string directory)
-    {
-        try
-        {
-            if (!Directory.Exists(directory))
-            {
-                return;
-            }
-
-            foreach (var file in Directory.GetFiles(directory))
-            {
-                try
-                {
-                    File.Delete(file);
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[mask] delete failed '{file}': {ex.Message}");
-                }
-            }
-
-            Directory.Delete(directory, recursive: true);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[mask] cleanup failed '{directory}': {ex.Message}");
-        }
-    }
+        => DirectoryCleanup.CleanupAll(MasksRootDirectory, "mask");
 }

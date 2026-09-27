@@ -67,7 +67,7 @@ public sealed class QwenImage21EditTool : IEditTool
         var started = Stopwatch.StartNew();
         var parameters = input.Parameters;
 
-        var prompt = GetString(parameters, "prompt") ?? "";
+        var prompt = ToolParameters.GetString(parameters, "prompt") ?? "";
         if (string.IsNullOrWhiteSpace(prompt))
         {
             return Failure(input.StepId, "QW21edit requires a non-empty 'prompt' parameter.", started.Elapsed);
@@ -86,9 +86,9 @@ public sealed class QwenImage21EditTool : IEditTool
             ImagePath = op == EditOps.T2I ? null : input.MainImagePath,
             MaskPath = op == EditOps.Inpaint ? input.Mask?.MaskImagePath : null,
             Prompt = prompt,
-            Steps = GetInt(parameters, "steps", int.Parse(DefaultSteps, CultureInfo.InvariantCulture)),
-            Seed = GetLong(parameters, "seed", long.Parse(DefaultSeed, CultureInfo.InvariantCulture)),
-            Denoise = GetDouble(parameters, "denoise", double.Parse(DefaultDenoise, CultureInfo.InvariantCulture)),
+            Steps = ToolParameters.GetInt(parameters, "steps", int.Parse(DefaultSteps, CultureInfo.InvariantCulture)),
+            Seed = ToolParameters.GetLong(parameters, "seed", long.Parse(DefaultSeed, CultureInfo.InvariantCulture)),
+            Denoise = ToolParameters.GetDouble(parameters, "denoise", double.Parse(DefaultDenoise, CultureInfo.InvariantCulture)),
             OutputPath = outputPath,
             Resolution = input.Resolution,
             // R3 (Step 9C.5-D): the legacy reference slot is image2, followed by the
@@ -170,45 +170,4 @@ public sealed class QwenImage21EditTool : IEditTool
             Duration = duration,
         };
 
-    private static string? GetString(IReadOnlyDictionary<string, string> parameters, string key)
-        => parameters.TryGetValue(key, out var value) ? value : null;
-
-    private static int GetInt(IReadOnlyDictionary<string, string> parameters, string key, int fallback)
-        => parameters.TryGetValue(key, out var value)
-            && int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
-                ? parsed
-                : fallback;
-
-    private static long GetLong(IReadOnlyDictionary<string, string> parameters, string key, long fallback)
-        => parameters.TryGetValue(key, out var value)
-            && long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
-                ? parsed
-                : fallback;
-
-    private static double GetDouble(IReadOnlyDictionary<string, string> parameters, string key, double fallback)
-        => parameters.TryGetValue(key, out var value)
-            && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
-                ? parsed
-                : fallback;
-
-    /// <summary>Forwards <see cref="InferenceProgress"/> as <see cref="StepProgress"/> synchronously.</summary>
-    private sealed class StepProgressAdapter : IProgress<InferenceProgress>
-    {
-        private readonly IProgress<StepProgress> _inner;
-        private readonly string _stepId;
-
-        public StepProgressAdapter(IProgress<StepProgress> inner, string stepId)
-        {
-            _inner = inner;
-            _stepId = stepId;
-        }
-
-        public void Report(InferenceProgress value)
-            => _inner.Report(new StepProgress
-            {
-                StepId = _stepId,
-                Fraction = value.Fraction,
-                Message = value.Message,
-            });
-    }
 }

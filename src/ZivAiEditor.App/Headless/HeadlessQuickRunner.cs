@@ -50,16 +50,7 @@ internal sealed class QuickRunHost : IQuickRunHost
     public void SetRoot(string imagePath) => _context.SessionWriter.SetRoot(imagePath);
 
     public ResolutionPolicy? ResolveResolution(string? tier)
-    {
-        if (string.IsNullOrWhiteSpace(tier)
-            || !Enum.TryParse<ResolutionTier>(tier, ignoreCase: true, out var parsed)
-            || parsed == ResolutionTier.Custom)
-        {
-            return null;
-        }
-
-        return ResolutionResolver.FromTier(parsed, _context.ModelProfiles.Default);
-    }
+        => ResolutionTierText.Resolve(tier, _context.ModelProfiles.Default);
 
     public Task<ParseResult> ParseAsync(
         string template,

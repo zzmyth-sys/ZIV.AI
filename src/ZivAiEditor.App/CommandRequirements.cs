@@ -1,5 +1,6 @@
 using System;
 using ZivAiEditor.Contracts.Execution;
+using ZivAiEditor.UI.Editing;
 
 namespace ZivAiEditor.App;
 
@@ -80,7 +81,7 @@ internal static class CommandRequirements
     /// <summary>The command named by the first token of <paramref name="text"/>, or <c>null</c>.</summary>
     private static CommandDefinition? Find(IReadOnlyList<CommandDefinition> commands, string? text)
     {
-        var name = FirstToken(text);
+        var name = CommandText.FirstToken(text);
         if (name is null || name.Length == 0 || name[0] != '/')
         {
             return null;
@@ -95,11 +96,5 @@ internal static class CommandRequirements
         }
 
         return null;
-    }
-
-    private static string? FirstToken(string? text)
-    {
-        var parts = (text ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        return parts.Length > 0 ? parts[0] : null;
     }
 }

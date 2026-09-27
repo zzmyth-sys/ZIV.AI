@@ -137,16 +137,7 @@ public partial class MainWindow
     /// Returns <c>null</c> for a missing / invalid / custom tier (backend default).
     /// </summary>
     private ResolutionPolicy? ResolveTier(string? tier)
-    {
-        if (string.IsNullOrWhiteSpace(tier)
-            || !Enum.TryParse<ResolutionTier>(tier, ignoreCase: true, out var parsed)
-            || parsed == ResolutionTier.Custom)
-        {
-            return null;
-        }
-
-        return ResolutionResolver.FromTier(parsed, _modelProfiles.Default);
-    }
+        => ResolutionTierText.Resolve(tier, _modelProfiles.Default);
 
     /// <summary>
     /// Takes the engine lock for an editor manual task (bridge §7.3): while held, the viewer's
