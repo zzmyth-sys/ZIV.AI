@@ -6898,3 +6898,18 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **源图**：`wd_ab_src/*`、`wd_ab3_src/*`、`WD/360.jpg` 已清理；重现实验需自备类似尺寸图片（参考 `DOC/WD+模板系统.md` §3 实验描述）。
 - **360 场景词表链登记（DOC 无其它备份，删除前登记）**：`360_fetch_vocab.py` 是**一次性开发工具**，从 Danbooru wiki tag-group（缓存目录 `danbooru_groups/`）+ 本地 WD14 `selected_tags.csv` 构建 `360_scene_vocab.json`（场景词表）；`scene_filter.py` 在运行时**只读**该 JSON 做场景过滤（不联网）。本次随退役一并删除（tracked `360_*` 10 + `scene_filter.py`）；如需重建，重跑 `360_fetch_vocab.py`（需联网 + `Comfyui/.../comfyui-wd14-tagger/models/wd-vit-tagger-v3.csv`）。
 - **停点登记（WD 源图被保留脚本按名引用）**：`wd_ab.py` / `wd_ab_tags.py` / `wd_ab_prompts.py(.json)` / `wd_ab3_analyze.py` / `wd_ab3_prompts.py(.json)` / `wd_ab3_tags.json` 仍按 `wd_ab_src` / `wd_ab3_src` 目录名引用源图；因源图退役，这些脚本需自备图片方可重跑。无 src/ 生产代码或 python/ 后端引用。
+
+### 批 2 · 其它 tracked 清洁
+
+- **删除（32 tracked）**：
+  - `_test_step2/_sections/{_summary.md, t1–t11.md}`（12）：已被 `_test_step2/REPORT.md` 完整覆盖（t1–t11 各对应 REPORT.md 一节，`_summary` 为 REPORT §摘要副本）。
+  - `_test_step2/_sections/_findings.md`（1）：内容已在 `DOC/DEVLOG.md`（§Step 2 关键发现，243–272 行）与 `DOC/FROZEN.md`（458–494 行），且 `REPORT.md` §关键发现/建议/附录另有副本 → 无唯一知识，直接删。
+  - `_test_step2/prompt_optimize_result/{rewrite*.json(6), vision_compare*.json(2), rewritten*.txt(3), orig_prompt.txt, test_vision_compare.py}`（13）：一次性 LLM 原始 I/O，结论在保留的 `RESULT.md`。
+  - `temp/system_prompt.txt` + `temp/system_prompt_i2v.txt`（2）：生产代码零引用。
+  - `_test_step2/csharp_{pipe,shm}_{out,err}.txt`（4）：基准 stdout/stderr 残留。
+- **保留**：`_test_step2/REPORT.md`、`prompt_optimize_result/RESULT.md`、`prompt_optimize_result/runner/`、`diagnose/DIAGNOSIS.md` 等报告/脚本。
+- **悬空引用登记（只增不改，供未来读者）**：以下**保留文件**引用了本次被删的文件，重跑/引用时需注意：
+  - `_test_step2/prompt_optimize_result/RESULT.md` → `optimized_prompt_output.png`(:51)、`vision_compare_raw.json`(:70,122,205)、`test_vision_compare.py`(:122)、`vision_compare_i2v_raw.json`(:178,205)。
+  - `_test_step2/REPORT.md:448` → `csharp_pipe_out.txt` / `csharp_shm_out.txt`。
+  - `_test_step2/test_prompt_optimize.py:18`、`_test_step2/test_prompt_optimize_i2v.py:18` → `temp/system_prompt.txt` / `temp/system_prompt_i2v.txt`。
+  - `_test_step2/_findings.md`（本批删除）曾引用 `csharp_*`；其内容已迁存于 DEVLOG/FROZEN/REPORT。
