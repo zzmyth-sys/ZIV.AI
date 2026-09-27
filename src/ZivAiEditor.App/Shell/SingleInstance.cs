@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
@@ -19,6 +20,13 @@ namespace ZivAiEditor.App;
 /// </summary>
 internal sealed class SingleInstance : IDisposable
 {
+    /// <summary>
+    /// Upper bound on a single hand-off line (chars). A normal <see cref="LaunchOptions"/>
+    /// is a few hundred bytes; anything larger is discarded without buffering it unboundedly
+    /// (Batch 2A / D3 hardening against a malicious oversized pipe write).
+    /// </summary>
+    private const int MaxPayloadChars = 64 * 1024;
+
     private readonly Mutex _mutex;
     private readonly string _pipeName;
     private readonly CancellationTokenSource _cts = new();
@@ -84,13 +92,12 @@ internal sealed class SingleInstance : IDisposable
         {
             try
             {
-                using var server = new NamedPipeServerStream(
-                    _pipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                using var server = CreateSecureServer(_pipeName);
                 using var reader = new StreamReader(server, Encoding.UTF8);
 
                 await server.WaitForConnectionAsync(token).ConfigureAwait(false);
 
-                var line = await reader.ReadLineAsync(token).ConfigureAwait(false);
+                var line = await ReadBoundedLineAsync(reader, token).ConfigureAwait(false);
                 if (!string.IsNullOrWhiteSpace(line))
                 {
                     var options = JsonSerializer.Deserialize(line, LaunchOptionsJsonContext.Default.LaunchOptions);
@@ -107,6 +114,66 @@ internal sealed class SingleInstance : IDisposable
             catch
             {
                 // A broken connection must not kill the listener; wait for the next one.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Creates the listening pipe with a DACL restricted to the current user (Batch 2A / D3,
+    /// mirrors <c>PythonProcessManager.CreateSecurePipeServer</c>): another local user cannot
+    /// connect and inject <see cref="LaunchOptions"/>.
+    /// </summary>
+    private static NamedPipeServerStream CreateSecureServer(string pipeName)
+    {
+        var security = new PipeSecurity();
+        using var identity = WindowsIdentity.GetCurrent();
+        var user = identity.User ?? throw new InvalidOperationException("Unable to resolve the current user SID.");
+        security.AddAccessRule(new PipeAccessRule(user, PipeAccessRights.FullControl, AccessControlType.Allow));
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+
+        return NamedPipeServerStreamAcl.Create(
+            pipeName,
+            PipeDirection.In,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous,
+            inBufferSize: 0,
+            outBufferSize: 0,
+            pipeSecurity: security);
+    }
+
+    /// <summary>
+    /// Reads one UTF-8 line up to <see cref="MaxPayloadChars"/> chars (Batch 2A / D3). Returns
+    /// <c>null</c> on EOF-before-newline or when the line exceeds the cap (the oversized line is
+    /// discarded, not buffered). Cancellation propagates to the caller's catch.
+    /// </summary>
+    private static async Task<string?> ReadBoundedLineAsync(StreamReader reader, CancellationToken token)
+    {
+        var builder = new StringBuilder();
+        var buffer = new char[4096];
+        while (true)
+        {
+            var read = await reader.ReadAsync(buffer.AsMemory(0, buffer.Length), token).ConfigureAwait(false);
+            if (read == 0)
+            {
+                // Client closed before a newline; treat a partial line as the line, else EOF.
+                return builder.Length > 0 ? builder.ToString() : null;
+            }
+
+            for (var i = 0; i < read; i++)
+            {
+                var ch = buffer[i];
+                if (ch == '\n')
+                {
+                    return builder.ToString().TrimEnd('\r');
+                }
+
+                if (builder.Length >= MaxPayloadChars)
+                {
+                    return null; // oversized: discard rather than grow without bound
+                }
+
+                builder.Append(ch);
             }
         }
     }

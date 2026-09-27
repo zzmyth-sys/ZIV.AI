@@ -4342,3 +4342,7 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 ### D2 结果补充
 
 - 删除三处零使用引用后 `dotnet build src\ZIV.AI.sln -c Release --no-incremental` → 0 错误 0 警告；`ZIV.Imaging` 仅存于 `Imaging.csproj`。传递链无破（D2 停点未触发）。
+
+### D3 结果补充
+
+- `SingleInstanceTests` 3/3 绿：同用户转发正常（ACL 不挡自身，停点未触发）+ 超长（>64K 字符）行被丢弃且监听器存活。ACL「他用户被拒」仍属真机多账户验证项。

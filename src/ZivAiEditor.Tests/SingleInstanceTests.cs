@@ -43,4 +43,46 @@ public class SingleInstanceTests
 
         Assert.False(single.SendToExistingInstance(new LaunchOptions()));
     }
+
+    [Fact]
+    public async Task Oversized_Payload_Is_Discarded_And_Listener_Survives()
+    {
+        // Batch 2A / D3: a line above the 64K-char cap must be discarded (no forward, no
+        // crash) and the listener must keep accepting normal hand-offs. The ACL itself
+        // (other users rejected) needs real-machine multi-user validation — see ACCEPTANCE.
+        var name = UniqueName();
+        using var first = new SingleInstance(name);
+        Assert.True(first.IsFirstInstance);
+
+        const int cap = 64 * 1024;
+        var oversized = new TaskCompletionSource<LaunchOptions>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var normal = new TaskCompletionSource<LaunchOptions>(TaskCreationOptions.RunContinuationsAsynchronously);
+        first.PathReceived += options =>
+        {
+            if ((options.Prompt?.Length ?? 0) > cap)
+            {
+                oversized.TrySetResult(options);
+            }
+            else
+            {
+                normal.TrySetResult(options);
+            }
+        };
+
+        await Task.Delay(200);
+
+        using var second = new SingleInstance(name);
+        Assert.False(second.IsFirstInstance);
+
+        // > cap chars: the listener discards the line.
+        second.SendToExistingInstance(new LaunchOptions { Prompt = new string('x', cap + 1000) });
+        var racer = await Task.WhenAny(oversized.Task, Task.Delay(700));
+        Assert.NotSame(oversized.Task, racer);
+
+        // The listener survives and still accepts a normal payload.
+        Assert.True(second.SendToExistingInstance(
+            new LaunchOptions { ImagePath = @"C:\img\ok.png", Prompt = "换背景" }));
+        var result = await normal.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(@"C:\img\ok.png", result.ImagePath);
+    }
 }

@@ -6855,3 +6855,15 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
   - `Imaging.csproj`：删 `ZIV.Core`（经 `ZIV.Imaging` 传递可用）；**保留** `ZIV.Imaging`（`ImageCropper.cs:7` 用 `ZIV.Imaging.Codecs.Skia`）。
 - **验证**：`dotnet build src\ZIV.AI.sln -c Release`（含 `--no-incremental`）→ `0/0`；grep 确认全仓仅 `Imaging.csproj` 保留 `ZIV.Imaging` 引用。
 - **不改**：不动外部 ZIV 仓库依赖本身（submodule/vendor 属 2B）。`UI.csproj:13` 的「ZIV.Core flows transitively through Contracts」注释已过时（条件句，实际无契约类型需要），留待 2B 一并清理。
+
+### D3 · 单实例管道加固（ACL + 长度上限）
+
+- **问题**：`SingleInstance.ListenAsync` 用无 ACL 的 `NamedPipeServerStream`，且 `ReadLineAsync` 无长度上限 → 本机任意用户可向可猜测管道名注入 `LaunchOptions`；超长行可拖垮内存。
+- **改动**（`src/ZivAiEditor.App/Shell/SingleInstance.cs`）：
+  - 新增 `CreateSecureServer`：`PipeSecurity`（当前用户 `FullControl`）+ `SetAccessRuleProtection(true, false)`（禁继承）+ `NamedPipeServerStreamAcl.Create(PipeDirection.In, maxInstances:1, Byte, Asynchronous, in/outBuffer:0, pipeSecurity)`（镜像 `PythonProcessManager.CreateSecurePipeServer`）。
+  - 新增 `MaxPayloadChars = 64*1024` 与 `ReadBoundedLineAsync`（`StreamReader.ReadAsync(Memory<char>, token)` 累加到 `\n`；超限丢弃返回 `null`；EOF 返回 null；取消冒泡）。
+  - `ListenAsync` 改用 `CreateSecureServer` + `ReadBoundedLineAsync`；`SendToExistingInstance`/管道名/Mutex 逻辑不变。
+- **测试**（`SingleInstanceTests.cs`）：新增 `Oversized_Payload_Is_Discarded_And_Listener_Survives`（>64K 行不转发 + 监听器存活后仍转发正常 payload）；既有 `Second_Instance_Forwards_Payload_To_First` 继续通过（证明 ACL 不挡同用户）。
+- **真机待验证**：ACL「他用户被拒」无法单进程单用户断言，需多账户真机验证（见 ACCEPTANCE）。
+- **验证**：build `0/0`；`SingleInstanceTests` 3/3 绿。
+- **不改**：管道名（SID+session）、Mutex 语义、`SendToExistingInstance` 行为。
