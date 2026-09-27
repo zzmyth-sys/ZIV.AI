@@ -467,3 +467,15 @@
 - **`ZivAiEditor.App.MainWindow.Chat`**：遮罩叠加尺寸校验改用 `DisplayImage.DisplayPixelSize`（App 内部）。
 - **不改**：`SessionStore` / `SessionLoader` / `SessionFileDto` 签名；项目格式 v2；`CropSpec` 语义（仍原图坐标）。
 - **不做**：不改 IPC / 命令集 / Python；无新 NuGet。
+
+## 36. 图像预览平移改为自由平移（PS 式 5% 留边）（2026-09-27，只增）
+
+- **Contracts 签名**：无变化。
+- **`ZivAiEditor.UI.Imaging.ImageViewModel`**（语义修订，非签名变更）：
+  - 平移模型改为自由平移（无视图锁定）：`Origin = (Viewport - Scaled)/2 - Offset`，`Offset=0` 居中。
+  - 新增 `public const double KeepVisibleRatio = 0.05`、`public static double MaxPanOffset(double viewport, double scaled)`。
+  - `ClampOffset()` 每轴钳制 `|Offset| <= MaxPanOffset`（每轴至少 5% 图像可见，无回弹；取代旧 `[-Viewport, Scaled]`）。
+  - `SetZoomAt` 锚点保持改用 post-zoom 尺寸。
+- **`ZivAiEditor.App.Controls.PanZoomCanvas.ComputeDrawRect`**：改为居中 − offset；**签名不变**。
+- **行为**：适应窗口 / 小图可拖动；溢出轴默认居中；拖到极限保留 5% 可见（**取代** B12 的整视图锁定与全白范围）。
+- **不做**：不改 IPC / 命令集 / Python；无新 NuGet。

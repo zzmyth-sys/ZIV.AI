@@ -4468,3 +4468,37 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 3. `fix(mask): 遮罩缓冲统一 2.5K；brush/feather 按 displayScale 缩放；MaskSpec.W/H 语义修订`
 4. `test: 单坐标/裁切换算/遮罩缩放用例（+6）`
 5. `docs: DEVLOG/FROZEN/INTERFACES/ACCEPTANCE 追加单层 2.5K 记录`
+
+## 图像预览平移改为自由平移（PS 式 5% 留边 + 无回弹）（2026-09-27，待真机验收）
+
+> **取代**上方 B12「露白极限 `[−v, s]`」（B12 真机清单第 1/2 条、B12 收尾第 2/4 条）与
+> 「完全小图居中锁定、不可拖」的行为描述。旧行按「只增不改」保留，以本节为准。
+
+### 自动化（已通过，非 GPU）
+
+| 条目 | 验证方式 | 结果 |
+| --- | --- | --- |
+| 小图/适应窗口可拖动 | `Fitting_Image_Can_Be_Panned_And_Stays_Where_Released` | ✅ |
+| 每轴保留 5% 可见 | `MaxPanOffset_Leaves_Five_Percent_Visible` | ✅ |
+| 每轴对称钳制 | `Pan_Clamp_Is_Symmetric_Around_Center` | ✅ |
+| 小图拖到极限 | `Both_Axes_Fit_Still_Pans_Up_To_The_Sliver` | ✅ |
+| 单轴溢出两轴可拖 | `Single_Axis_Overflow_Pans_Both_Axes_Freely` | ✅ |
+| 溢出端点保留 5% | `Pan_Reaches_KeepVisible_Endpoints_With_Five_Percent_Sliver` | ✅ |
+| 渲染居中 − offset | `Fitting_Image_Draws_Centered_Minus_Offset` / `Overflow_Draws_Centered_Minus_Offset` | ✅ |
+| 平移不被滚轮/resize 清除 | `Pan_Survives_A_Same_Size_Viewport_Update` / `Pan_Survives_A_Viewport_Resize` | ✅ |
+| 构建 | `dotnet build src\ZIV.AI.sln -c Release` | 0 错误 0 警告 |
+| 非 GPU 全量 | `dotnet test ... --filter "FullyQualifiedName!~Ipc"` | **707 通过 / 0 失败** |
+
+### 真机验收清单（用户执行）
+
+1. 图片「适应窗口」或小于窗口 → 可拖动；松手停在原地（不回弹）；拖动后再滚轮缩放或改变窗口大小 → 仍不回到居中。
+2. 拖动到极限 → 每轴至少保留约 5% 图像可见，不能完全拖出视口。
+3. 放大（溢出轴）→ 默认居中（非左上）；两轴均可拖。
+4. 双击回适配 / 缩放锚点 / 100% 切换 → 行为正常。
+5. 拖动后裁剪 / 遮罩 / 对比分割线与图像对齐（同一坐标系）。
+
+### 验收后动作
+
+1. 真机 1–5 通过后，在「验收记录」追加“预览自由平移通过，日期：____”（待签）。
+2. 已知测试缺口（沿用 B12 注记）：`ImagePreview.axaml.cs` 的 `_canvas.Offset` 无单测；
+   本次已由 `PanZoomCanvas.ComputeDrawRect` 纯函数覆盖渲染公式，但 Offset 传递仍建议真机确认。

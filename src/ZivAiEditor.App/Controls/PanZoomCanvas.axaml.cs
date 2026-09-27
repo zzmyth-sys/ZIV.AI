@@ -13,10 +13,10 @@ namespace ZivAiEditor.App.Controls;
 /// and is pushed here by <see cref="ImagePreview"/>, which also routes pointer input via
 /// <c>AddHandler</c> on this control (so none of the input semantics live here).
 ///
-/// <para><b>Render rule</b> mirrors <c>ImageViewModel.OriginX/OriginY</c> exactly, and the
-/// lock is decided per <b>view</b>, not per axis (B12-follow): when <b>either</b> axis
-/// overflows, <b>both</b> axes draw at <c>-Offset</c>; only when <b>both</b> scaled axes fit
-/// is the bitmap centered on both.</para>
+/// <para><b>Render rule</b> mirrors <c>ImageViewModel.OriginX/OriginY</c> exactly: the image
+/// rests <b>centered</b> (<c>(Viewport - Scaled) / 2</c>) at <c>Offset = 0</c> and is drawn at
+/// the centered rest position minus the pan offset on <b>each</b> axis. There is no view-level
+/// lock — a fitting / smaller-than-viewport image pans just like an overflowing one.</para>
 /// </summary>
 public partial class PanZoomCanvas : UserControl
 {
@@ -55,7 +55,7 @@ public partial class PanZoomCanvas : UserControl
     /// <summary>Zoom as an integer percentage (100 = actual size).</summary>
     public int Zoom { get; set; } = 100;
 
-    /// <summary>Pan offset in device pixels; meaningful only on an overflowing axis.</summary>
+    /// <summary>Pan displacement in device pixels from the centered rest position.</summary>
     public Vector Offset { get; set; }
 
     /// <summary>
@@ -92,19 +92,18 @@ public partial class PanZoomCanvas : UserControl
 
     /// <summary>
     /// Pure geometry for one draw: the destination rect the <b>source-sized</b> image occupies at
-    /// the given integer <paramref name="zoomPercent"/>. Mirrors
-    /// <c>ImageViewModel.OriginX/OriginY</c> exactly (lock per view, not per axis, B12-follow):
-    /// when <b>either</b> scaled axis overflows, both axes draw at <c>-offset</c>; only a both-fit
-    /// (locked) view is centered. Exposed for unit testing the renderer math without a GPU.
+    /// the given integer <paramref name="zoomPercent"/>. Mirrors <c>ImageViewModel.OriginX/OriginY</c>
+    /// exactly (free pan, ZIV parity): each axis draws at its centered rest position
+    /// <c>(viewport - scaled) / 2</c> minus the pan offset. Exposed for unit testing the renderer
+    /// math without a GPU.
     /// </summary>
     public static Rect ComputeDrawRect(Size sourceSize, int zoomPercent, Size viewport, Vector offset)
     {
         var zw = zoomPercent / 100.0;
         var sw = sourceSize.Width * zw;
         var sh = sourceSize.Height * zw;
-        var unlocked = sw > viewport.Width || sh > viewport.Height;
-        var x = unlocked ? -offset.X : (viewport.Width - sw) / 2.0;
-        var y = unlocked ? -offset.Y : (viewport.Height - sh) / 2.0;
+        var x = (viewport.Width - sw) / 2.0 - offset.X;
+        var y = (viewport.Height - sh) / 2.0 - offset.Y;
         return new Rect(x, y, sw, sh);
     }
 }

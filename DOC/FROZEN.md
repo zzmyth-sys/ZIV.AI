@@ -5182,3 +5182,23 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **兼容**：改动前保存的遮罩 `feather_px`（原图语义）重开时按缓冲像素解释（8K 上视觉约 ×1/3）——**接受，不迁移**（开发期）。
 - **验证**：build 0/0；非 GPU 全量 702，0 失败。
 - **不做**：不改裁切 / IPC / 命令集 / Python；无新 NuGet；未 commit / 未推送。
+
+## 图像预览平移改为自由平移（PS 式 5% 留边 + 无回弹）（2026-09-27，只增）
+
+- **行为语义修订（非签名变更）**：`ZivAiEditor.UI.Imaging.ImageViewModel` 的平移模型由
+  「整视图锁定 + 溢出 `[-Viewport, Scaled]`（允许全白）」改为 **自由平移**：
+  `Origin = (Viewport - Scaled)/2 - Offset`（`Offset=0` 居中），每轴 `|Offset| <= MaxPanOffset`，
+  其中 `KeepVisibleRatio=0.05`、`MaxPanOffset(viewport, scaled) = (viewport + 0.9·scaled)/2`
+  （每轴至少 5% 可见，无回弹）。删除 `IsViewLocked`。
+- **新增成员（无既有签名变更）**：`ImageViewModel.KeepVisibleRatio`（`public const double = 0.05`）、
+  `ImageViewModel.MaxPanOffset(double, double)`（`public static`）。
+- **`SetZoomAt` 锚点保持**改用 post-zoom 尺寸：`Offset = CenteredOrigin - viewportP + imageP·Zoom`。
+- **新增私有守卫 `_userAdjusted`（非签名变更）**：用户手动平移/缩放后，`SetViewport` 不再 re-fit
+  （仅 re-clamp），避免滚轮 / 窗口 resize 使已平移的适应图回弹居中。
+- **渲染**：`App.Controls.PanZoomCanvas.ComputeDrawRect` 去 `unlocked` 分支，改为居中 − offset
+  （**签名不变**）。
+- **溢出轴默认位置变化**：由左上对齐改为居中（有意，简化 B12-follow；非 ZIV 溢出轴对齐移植）。
+- **覆盖 B12 记录**：本条**取代**上方向前 B12「整视图锁定」「露白极限 `[−v, s]`」「完全小图居中锁定
+  不可拖」的行为描述；旧行按「只增不改」保留。
+- **验证**：build 0/0；非 GPU 全量 **707 通过 / 0 失败**。
+- **不做**：不改 IPC / 命令集 / Contracts 签名；无新 NuGet；未 commit/推送。

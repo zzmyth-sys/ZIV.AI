@@ -36,7 +36,7 @@ public class ImageViewModelTests
     public void Fit_Tall_8K_Image_Is_Not_Floored_To_MinZoom_And_Centers()
     {
         // 8K portrait left-align regression: the fit (~4%) must NOT be floored to MinZoomPercent,
-        // which would overflow the viewport, unlock panning and left/top-align the image.
+        // which would overflow the viewport and break the fit-to-view centering.
         var vm = new ImageViewModel();
         vm.SetViewport(1000, 700);
         vm.SetImage(8192, 16384); // fit = 700 / 16384 ≈ 4.3% -> 4%
@@ -45,7 +45,7 @@ public class ImageViewModelTests
         Assert.True(vm.ZoomPercent < ImageViewModel.MinZoomPercent);
         Assert.True(vm.IsAtFit);
 
-        // Both scaled axes fit, so the view is locked and centered: origin X is positive.
+        // Fitting image: the origin rests centered (offset 0), so origin X and Y are positive.
         var (x, y) = vm.ImageToViewport(0, 0);
         Assert.Equal((1000 - 8192 * 0.04) / 2.0, x, 3);
         Assert.Equal((700 - 16384 * 0.04) / 2.0, y, 3);
@@ -157,15 +157,15 @@ public class ImageViewModelTests
     }
 
     [Fact]
-    public void ZoomAt_Unlocks_Both_Axes_On_Single_Axis_Overflow()
+    public void ZoomAt_Keeps_The_Anchor_On_A_Single_Axis_Overflow()
     {
-        // B12-follow: lock is per view, not per axis — a single overflowing axis unlocks both.
+        // Free pan: a single overflowing axis does not lock the other; the anchor is kept on both.
         var vm = new ImageViewModel();
         vm.SetViewport(400, 400);
         vm.SetImage(800, 600); // fit 50% -> 400x300, both visible
         vm.Fit();
 
-        // 60% -> 480x360: only the horizontal axis overflows, but both unlock.
+        // 60% -> 480x360: only the horizontal axis overflows.
         const double cursorX = 300;
         const double cursorY = 100;
         var beforeX = vm.ViewportToImage(cursorX, cursorY).X;
@@ -174,95 +174,128 @@ public class ImageViewModelTests
 
         Assert.True(vm.HasHorizontalScroll);
         Assert.False(vm.HasVerticalScroll);
-        // The anchor is kept on both axes (the fitted axis is no longer forced to zero).
+        // The anchor is kept on both axes (the fitted axis is not forced to zero).
         Assert.Equal(beforeX, vm.ViewportToImage(cursorX, cursorY).X, 6);
         Assert.Equal(beforeY, vm.ViewportToImage(cursorX, cursorY).Y, 6);
         Assert.NotEqual(0, vm.OffsetY);
     }
 
     [Fact]
-    public void Pan_Clamps_To_Extended_Bounds_Allowing_White_Gap()
+    public void Pan_Clamps_To_KeepVisible_Bounds()
     {
-        // B12: the extended bounds (fully off-viewport allowed) — viewport 400, scaled 1000
-        // -> offset range [-400, 1000].
+        // Free pan (ZIV parity): viewport 400, scaled 1000 -> |offset| <= (400 + 0.9*1000)/2 = 650,
+        // leaving a 5% (50 px) sliver at the extreme.
         var vm = new ImageViewModel();
         vm.SetViewport(400, 400);
         vm.SetImage(1000, 1000);
-        vm.ActualSize(); // 100% -> scaled 1000x1000; offset range [-400, 1000]
+        vm.ActualSize(); // 100% -> scaled 1000x1000, centered at offset 0
 
         Assert.Equal(0, vm.OffsetX);
         Assert.Equal(0, vm.OffsetY);
 
-        vm.PanBy(10_000, 10_000); // drag far right/down -> clamp at -Viewport
-        Assert.Equal(-400, vm.OffsetX);
-        Assert.Equal(-400, vm.OffsetY);
+        vm.PanBy(10_000, 10_000); // drag far right/down -> clamp at -maxPan
+        Assert.Equal(-650, vm.OffsetX, 6);
+        Assert.Equal(-650, vm.OffsetY, 6);
 
-        vm.PanBy(-10_000, -10_000); // drag far left/up -> clamp at Scaled
-        Assert.Equal(1000, vm.OffsetX);
-        Assert.Equal(1000, vm.OffsetY);
+        vm.PanBy(-10_000, -10_000); // drag far left/up -> clamp at +maxPan
+        Assert.Equal(650, vm.OffsetX, 6);
+        Assert.Equal(650, vm.OffsetY, 6);
 
         vm.PanBy(-100, -100); // already at max, stays
-        Assert.Equal(1000, vm.OffsetX);
-        Assert.Equal(1000, vm.OffsetY);
+        Assert.Equal(650, vm.OffsetX, 6);
+        Assert.Equal(650, vm.OffsetY, 6);
 
         vm.PanBy(100, 100);
-        Assert.Equal(900, vm.OffsetX);
-        Assert.Equal(900, vm.OffsetY);
+        Assert.Equal(550, vm.OffsetX, 6);
+        Assert.Equal(550, vm.OffsetY, 6);
     }
 
     [Fact]
-    public void Pan_Allows_Negative_Offset_And_Exceeding_Scaled_Minus_Viewport()
+    public void Pan_Clamp_Is_Symmetric_Around_Center()
     {
-        // B12: dragging the image fully off the viewport is allowed on both sides.
+        // Free pan: the clamp is symmetric (+/- maxPan), not the old asymmetric [-v, s] range.
         var vm = new ImageViewModel();
         vm.SetViewport(400, 400);
         vm.SetImage(1000, 1000);
         vm.ActualSize();
 
-        vm.PanBy(1000, 1000); // beyond the old lower bound (-300)
-        Assert.Equal(-400, vm.OffsetX, 6);
-        Assert.Equal(-400, vm.OffsetY, 6);
+        vm.PanBy(1000, 1000); // -1000 requested -> clamp at -650
+        Assert.Equal(-650, vm.OffsetX, 6);
+        Assert.Equal(-650, vm.OffsetY, 6);
 
-        vm.PanBy(-1000, -1000); // beyond the old upper bound (900)
-        Assert.Equal(600, vm.OffsetX, 6);
-        Assert.Equal(600, vm.OffsetY, 6);
+        vm.PanBy(-2000, -2000); // back past center -> +650 (not the old asymmetric 600)
+        Assert.Equal(650, vm.OffsetX, 6);
+        Assert.Equal(650, vm.OffsetY, 6);
     }
 
     [Fact]
-    public void Pan_Does_Nothing_When_The_Image_Fits()
+    public void Fitting_Image_Can_Be_Panned_And_Stays_Where_Released()
     {
+        // Regression: a fully fitting image used to be locked (offset forced to 0) and could not
+        // be dragged. Free pan allows it, and there is no snap-back: the offset is retained.
         var vm = new ImageViewModel();
         vm.SetViewport(400, 400);
-        vm.SetImage(100, 100); // fit 400% -> 400x400, fully visible
+        vm.SetImage(100, 100); // fit 400% -> 400x400, exactly filling the viewport
 
         vm.PanBy(120, -80);
 
-        Assert.Equal(0, vm.OffsetX);
-        Assert.Equal(0, vm.OffsetY);
+        Assert.Equal(-120, vm.OffsetX, 6);
+        Assert.Equal(80, vm.OffsetY, 6);
     }
 
     [Fact]
-    public void Pan_Clamp_Is_Per_Axis_On_Extended_Bounds()
+    public void Pan_Survives_A_Same_Size_Viewport_Update()
+    {
+        // A wheel tick re-asserts the (unchanged) viewport size; once the user has panned a fitted
+        // image the view must NOT re-fit — otherwise the pan snaps back to center.
+        var vm = new ImageViewModel();
+        vm.SetViewport(400, 400);
+        vm.SetImage(100, 100); // fit 400%
+        vm.PanBy(120, -80);
+
+        vm.SetViewport(400, 400); // same size (e.g. OnWheel re-assert)
+
+        Assert.Equal(-120, vm.OffsetX, 6);
+        Assert.Equal(80, vm.OffsetY, 6);
+    }
+
+    [Fact]
+    public void Pan_Survives_A_Viewport_Resize()
+    {
+        // A resize of a manually panned view only re-clamps; it must not recenter (no snap-back).
+        var vm = new ImageViewModel();
+        vm.SetViewport(400, 400);
+        vm.SetImage(100, 100); // fit 400%
+        vm.PanBy(120, -80);
+
+        vm.SetViewport(500, 400);
+
+        Assert.Equal(-120, vm.OffsetX, 6); // still within the new bound
+        Assert.Equal(80, vm.OffsetY, 6);
+    }
+
+    [Fact]
+    public void Pan_Clamp_Is_Per_Axis_With_Per_Axis_Bounds()
     {
         var vm = new ImageViewModel();
         vm.SetViewport(400, 400);
         vm.SetImage(2000, 500);
-        vm.ActualSize(); // 100% -> 2000x500, both axes overflow with different bounds
+        vm.ActualSize(); // 100% -> 2000x500; maxX=(400+1800)/2=1100, maxY=(400+450)/2=425
 
         vm.PanBy(10_000, 10_000); // drag right/down -> minimum offsets
-        Assert.Equal(-400, vm.OffsetX, 6); // -ViewportWidth
-        Assert.Equal(-400, vm.OffsetY, 6); // -ViewportHeight
+        Assert.Equal(-1100, vm.OffsetX, 6);
+        Assert.Equal(-425, vm.OffsetY, 6);
 
         vm.PanBy(-10_000, -10_000); // drag left/up -> maximum offsets
-        Assert.Equal(2000, vm.OffsetX, 6); // ScaledWidth
-        Assert.Equal(500, vm.OffsetY, 6);  // ScaledHeight
+        Assert.Equal(1100, vm.OffsetX, 6);
+        Assert.Equal(425, vm.OffsetY, 6);
     }
 
     [Fact]
-    public void Single_Axis_Overflow_Unlocks_Both_Axes()
+    public void Single_Axis_Overflow_Pans_Both_Axes_Freely()
     {
-        // Acceptance scenario: 2000x500 image / 800x600 viewport. At 50% -> 1000x250 only X
-        // overflows, yet both axes must pan over [-v, s] (B12-follow).
+        // 2000x500 image / 800x600 viewport. At 50% -> 1000x250 only X overflows, yet both axes
+        // pan freely with their own keep-visible bounds: maxX=(800+900)/2=850, maxY=(600+225)/2=412.5.
         var vm = new ImageViewModel();
         vm.SetViewport(800, 600);
         vm.SetImage(2000, 500);
@@ -272,18 +305,18 @@ public class ImageViewModelTests
         Assert.False(vm.HasVerticalScroll);
 
         vm.PanBy(10_000, 10_000);
-        Assert.Equal(-800, vm.OffsetX, 6); // -ViewportWidth
-        Assert.Equal(-600, vm.OffsetY, 6); // -ViewportHeight: the fitted axis is unlocked too
+        Assert.Equal(-850, vm.OffsetX, 6);
+        Assert.Equal(-412.5, vm.OffsetY, 6); // the fitted axis pans too
 
         vm.PanBy(-10_000, -10_000);
-        Assert.Equal(1000, vm.OffsetX, 6); // ScaledWidth
-        Assert.Equal(250, vm.OffsetY, 6);  // ScaledHeight
+        Assert.Equal(850, vm.OffsetX, 6);
+        Assert.Equal(412.5, vm.OffsetY, 6);
     }
 
     [Fact]
-    public void Both_Axes_Fit_Keeps_View_Locked_And_Centered()
+    public void Both_Axes_Fit_Still_Pans_Up_To_The_Sliver()
     {
-        // B12-follow: lock only when NEITHER axis overflows — panning is a no-op.
+        // Free pan: a both-fit image is no longer locked; it pans until only 5% stays visible.
         var vm = new ImageViewModel();
         vm.SetViewport(800, 600);
         vm.SetImage(400, 300); // fit 200% -> 800x600: both fit exactly
@@ -291,9 +324,9 @@ public class ImageViewModelTests
         Assert.False(vm.HasHorizontalScroll);
         Assert.False(vm.HasVerticalScroll);
 
-        vm.PanBy(10_000, 10_000);
-        Assert.Equal(0, vm.OffsetX, 6);
-        Assert.Equal(0, vm.OffsetY, 6);
+        vm.PanBy(10_000, 10_000); // maxX=(800+720)/2=760, maxY=(600+540)/2=570
+        Assert.Equal(-760, vm.OffsetX, 6);
+        Assert.Equal(-570, vm.OffsetY, 6);
     }
 
     [Fact]
@@ -387,21 +420,40 @@ public class ImageViewModelTests
     }
 
     [Fact]
-    public void Pan_Reaches_Exact_Full_Off_Viewport_Endpoints()
+    public void Pan_Reaches_KeepVisible_Endpoints_With_Five_Percent_Sliver()
     {
-        // B12: both extended endpoints are reachable exactly (0% visible).
+        // Free pan: the extreme endpoints leave a 5% sliver visible (5% * 1000 = 50 px), never 0%.
         var vm = new ImageViewModel();
         vm.SetViewport(400, 300);
         vm.SetImage(1000, 1000);
-        vm.ActualSize(); // scaled 1000x1000 -> X,Y range [-Viewport, Scaled]
+        vm.ActualSize(); // scaled 1000x1000; maxX=(400+900)/2=650, maxY=(300+900)/2=600
 
-        vm.PanBy(10_000, 10_000); // image fully off to the right / bottom
-        Assert.Equal(-400, vm.OffsetX, 6);
-        Assert.Equal(-300, vm.OffsetY, 6);
+        vm.PanBy(10_000, 10_000); // image pushed right / down
+        Assert.Equal(-650, vm.OffsetX, 6);
+        Assert.Equal(-600, vm.OffsetY, 6);
 
-        vm.PanBy(-10_000, -10_000); // image fully off to the left / top
-        Assert.Equal(1000, vm.OffsetX, 6);
-        Assert.Equal(1000, vm.OffsetY, 6);
+        vm.PanBy(-10_000, -10_000); // image pushed left / up
+        Assert.Equal(650, vm.OffsetX, 6);
+        Assert.Equal(600, vm.OffsetY, 6);
+    }
+
+    [Fact]
+    public void MaxPanOffset_Leaves_Five_Percent_Visible()
+    {
+        // The keep-visible bound leaves exactly KeepVisibleRatio of the scaled axis on screen.
+        const double viewport = 400;
+        const double scaled = 1000;
+        Assert.Equal((viewport + 0.9 * scaled) / 2.0, ImageViewModel.MaxPanOffset(viewport, scaled), 6);
+
+        var vm = new ImageViewModel();
+        vm.SetViewport(400, 400);
+        vm.SetImage(1000, 1000);
+        vm.ActualSize();
+        vm.PanBy(double.MaxValue / 2, 0); // pin to the extreme
+
+        var (originX, _) = vm.ImageToViewport(0, 0);
+        var visible = Math.Min(originX + scaled, viewport) - Math.Max(originX, 0);
+        Assert.Equal(ImageViewModel.KeepVisibleRatio * scaled, visible, 6);
     }
 
     [Fact]
@@ -413,8 +465,8 @@ public class ImageViewModelTests
 
         vm.RestoreView(100, 99999, -99999);
 
-        // B12 extended bounds: X: [-400, 1000]; Y: [-300, 1000].
-        Assert.Equal(1000, vm.OffsetX, 6);
-        Assert.Equal(-300, vm.OffsetY, 6);
+        // Keep-visible bounds: X: [-650, 650]; Y: [-600, 600].
+        Assert.Equal(650, vm.OffsetX, 6);
+        Assert.Equal(-600, vm.OffsetY, 6);
     }
 }

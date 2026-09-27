@@ -25,26 +25,29 @@ public sealed class PanZoomCanvasGeometryTests
     }
 
     [Fact]
-    public void Overflow_Unlocks_Both_Axes_At_Negative_Offset()
+    public void Overflow_Draws_Centered_Minus_Offset()
     {
+        // Free pan: an overflowing axis draws at its centered rest minus the offset.
         var rect = PanZoomCanvas.ComputeDrawRect(
             new Size(1000, 1000), zoomPercent: 100, viewport: new Size(400, 400), offset: new Vector(10, 20));
 
-        Assert.Equal(-10, rect.X, 3);
-        Assert.Equal(-20, rect.Y, 3);
+        Assert.Equal((400 - 1000) / 2.0 - 10, rect.X, 3); // -310
+        Assert.Equal((400 - 1000) / 2.0 - 20, rect.Y, 3); // -320
         Assert.Equal(1000, rect.Width, 3);
         Assert.Equal(1000, rect.Height, 3);
     }
 
     [Fact]
-    public void Single_Axis_Overflow_Unlocks_Both()
+    public void Fitting_Image_Draws_Centered_Minus_Offset()
     {
-        // Source 2000x500 at 50% -> 1000x250: only X overflows, yet both draw at -offset.
+        // A smaller-than-viewport image rests centered and follows the pan offset.
         var rect = PanZoomCanvas.ComputeDrawRect(
-            new Size(2000, 500), zoomPercent: 50, viewport: new Size(800, 600), offset: new Vector(30, 40));
+            new Size(100, 100), zoomPercent: 100, viewport: new Size(400, 400), offset: new Vector(50, -25));
 
-        Assert.Equal(-30, rect.X, 3);
-        Assert.Equal(-40, rect.Y, 3);
+        Assert.Equal((400 - 100) / 2.0 - 50, rect.X, 3); // 100
+        Assert.Equal((400 - 100) / 2.0 + 25, rect.Y, 3); // 175
+        Assert.Equal(100, rect.Width, 3);
+        Assert.Equal(100, rect.Height, 3);
     }
 
     [Fact]

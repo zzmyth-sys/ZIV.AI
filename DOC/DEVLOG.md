@@ -7200,3 +7200,48 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - 非 GPU 全量 → **702**（+3−3，净 0），0 失败。
 - 新增/改写用例：`Brush_And_Feather_Are_Buffer_Pixels_Unchanged` · `Brush_Stamps_At_The_Unscaled_Diameter` · `Stroke_Is_Continuous_With_No_Gaps` · headless 大图落笔连续。
 - **不做**：未改裁切路径签名/逻辑；未改 IPC/命令集/Python；无新 NuGet；未 commit/推送；未跑 GPU/Python/App。
+
+## 图像预览平移改为自由平移（PS 式 5% 留边 + 无回弹）（2026-09-27，只追加）
+
+> 用户反馈：图片「适应窗口」或比窗口小时无法拖动。参照 ZIV 的 `ZIV.Viewer.PanGeometry` /
+> `CalculateDrawingRegion`（ZIV DEVLOG「查看器平移：PS 式 5% 留边 + 取消回弹」2026-09-27），
+> 把预览平移从「整视图锁定」改为自由平移。**取代** B12 的整视图锁定行为。
+
+### A · 根因
+- `ImageViewModel.IsViewLocked`（两轴都适配即 true）在 `ClampOffset` 中把 `OffsetX/Y` 强制归零，
+  `OriginX/Y` 也走居中分支 → 适应窗口 / 小图完全拖不动。
+- 解锁时旧范围 `[-ViewportSize, ScaledSize]` 允许把图完全拖出（全白），与 ZIV 的「每轴至少保留 5%」不同。
+
+### B · 改动
+- `src/ZivAiEditor.UI/Imaging/ImageViewModel.cs`：删除 `IsViewLocked`；统一
+  `Origin = (Viewport - Scaled)/2 - Offset`（`Offset=0` 即居中）；新增 `KeepVisibleRatio=0.05` 与
+  `MaxPanOffset(viewport, scaled) = (viewport + (1-2r)·scaled)/2`，`ClampOffset` 每轴按 `±MaxPanOffset`
+  钳制；`SetZoomAt` 去锁定分支，锚点保持改用 `Offset = CenteredOrigin - viewportP + imageP·Zoom`
+  （**post-zoom** 尺寸）。
+- `ImageViewModel` 新增 `_userAdjusted`：用户手动平移/缩放后，`SetViewport`（滚轮每帧重设同尺寸 /
+  窗口 resize）不再强制 re-fit，仅 re-clamp → 修复「拖动适应图后一次滚轮即回弹居中」（后审 P1）。
+- `src/ZivAiEditor.App/Controls/PanZoomCanvas.axaml.cs`：`ComputeDrawRect` 去 `unlocked` 分支，
+  一律 `x=(V-sw)/2 - offset.X`（Y 同理）。
+
+### C · 行为（有意的变化）
+- 适应窗口 / 小于窗口：**可拖动**，默认居中；可拖到每轴仅剩 5%（按显示尺寸）在视口。
+- 溢出轴：默认由「左上对齐」改为**居中**；拖到极限由「完全移出（0% 可见）」改为「保留 5% 可见」。
+- **无弹性回弹**（注：本项目此前已无回弹代码，Step 9C.11 已回退；本次不涉及删除）。
+- 缩放锚点、双击适配/100%、裁剪/遮罩/对比坐标（经 `ImageToViewport`）自动随新 Origin 一致。
+
+### D · 测试
+- 改写/新增 `ImageViewModelTests`：`Pan_Clamps_To_KeepVisible_Bounds`、
+  `Pan_Clamp_Is_Symmetric_Around_Center`、`Fitting_Image_Can_Be_Panned_And_Stays_Where_Released`、
+  `Pan_Clamp_Is_Per_Axis_With_Per_Axis_Bounds`、`Single_Axis_Overflow_Pans_Both_Axes_Freely`、
+  `Both_Axes_Fit_Still_Pans_Up_To_The_Sliver`、`Pan_Reaches_KeepVisible_Endpoints_With_Five_Percent_Sliver`、
+  `MaxPanOffset_Leaves_Five_Percent_Visible`、`RestoreView_Clamps_Offset_To_Bounds`、
+  `Pan_Survives_A_Same_Size_Viewport_Update`、`Pan_Survives_A_Viewport_Resize`（后二为 P1 回归）。
+- 改写/新增 `PanZoomCanvasGeometryTests`：`Overflow_Draws_Centered_Minus_Offset`、
+  `Fitting_Image_Draws_Centered_Minus_Offset`。
+
+### E · 验证
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `dotnet test --filter "FullyQualifiedName!~Ipc"` → **707 通过 / 0 失败**（非 GPU，排除 5 个 `Ipc*` GPU 类）。
+
+### F · 不做
+- 不改 IPC / 命令集 / Python；无新 NuGet；未跑 GPU/Python/真实 App；未 commit/推送。
