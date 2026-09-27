@@ -6956,3 +6956,14 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
   - `DurationMs` **不纳入**：运行指标非用户内容（纳入会使刚运行的会话立刻变脏）。
 - **测试**：新增 `SessionSignatureTests.cs`（7 例）：同内容重算相等；Command / ImagePaths / UsedImagePaths / Rerun（null↔present↔改 Side）/ SourceImage 改动均使签名变化且**旧前缀逐字不变**；ImagePath（旧字段对照）改动使旧前缀也变化。
 - **验证**：build `0/0`；`SessionSignatureTests` 7/7 绿。
+
+### P1-3 · B11 `async void` 无异常观察点（Mask.cs）
+
+- **问题**：`OnPreviewMaskCompleted`（`MainWindow.Mask.cs`）为 `async void`，异常无观察点 → 直接崩进程。
+- **改动**：主体包 `try/catch`（保持 `async void`，Avalonia 事件签名约束）；catch 内 `Debug.WriteLine` + `MaskDiagnostics.Log` + `_vm.AddHint("遮罩处理失败：…")`（不吞不崩）。复审要点：提示用 `_vm.AddHint`（`SessionViewModel.AddHint` 标 error）而非 `SetStatus`（空闲时静默）。
+- **全局 `async void` 清单（复审/实现核实，共 4 处）**：
+  - `MainWindow.Mask.cs:38` `OnPreviewMaskCompleted` → **本项已修**。
+  - `MainWindow.axaml.cs:499` `OnClosing` → **挂账**（未改）。
+  - `MainWindow.ProjectList.cs:56` `OnMainKeyDown` → **挂账**（未改）。
+  - `MainWindow.ProjectList.cs:161` `OnProjectOpenTick` → 已有 try/catch（复审确认），**无需改**。
+- **验证**：build `0/0`（UI 事件处理器无法单测，标「真机验证」——按 Z29/Z30 不在本批执行）。

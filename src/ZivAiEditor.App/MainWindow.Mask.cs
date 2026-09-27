@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading.Tasks;
 using ZivAiEditor.App.Controls;
 
@@ -37,14 +38,27 @@ public partial class MainWindow
     /// </summary>
     private async void OnPreviewMaskCompleted(object? sender, MaskCompletedEventArgs e)
     {
-        MaskDiagnostics.Log(
-            $"[mask] completed node={e.NodeId} spec={e.Mask?.MaskImagePath ?? "null"} current={_vm.Session.CurrentNodeId}");
+        // B11: an `async void` handler has no caller to observe its exceptions — an unhandled
+        // one crashes the process. Keep the `async void` signature (Avalonia event contract) but
+        // observe failures here: log + surface a hint instead of throwing on the UI thread.
+        // (The other MainWindow `async void` handlers are tracked in DEVLOG for a later pass.)
+        try
+        {
+            MaskDiagnostics.Log(
+                $"[mask] completed node={e.NodeId} spec={e.Mask?.MaskImagePath ?? "null"} current={_vm.Session.CurrentNodeId}");
 
-        _vm.SetNodeMask(e.NodeId, e.Mask);
-        _maskEditedInPreview = true;
+            _vm.SetNodeMask(e.NodeId, e.Mask);
+            _maskEditedInPreview = true;
 
-        // Chain behind earlier strokes so the PNG is on disk before the close-time refresh.
-        await FlushPendingMaskAsync();
+            // Chain behind earlier strokes so the PNG is on disk before the close-time refresh.
+            await FlushPendingMaskAsync();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[mask] OnPreviewMaskCompleted failed: {ex}");
+            MaskDiagnostics.Log($"[mask] OnPreviewMaskCompleted failed: {ex.GetType().Name}: {ex.Message}");
+            _vm.AddHint($"遮罩处理失败：{ex.Message}");
+        }
     }
 
     /// <summary>Keeps the latest chained export at window level so a flush can always await it (S2).</summary>
