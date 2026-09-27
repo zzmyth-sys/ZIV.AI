@@ -5111,3 +5111,13 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 
 - `Contracts/Inference/OptimizationOptions.MagCache` / `MagCacheThresh` 追加 `[JsonPropertyName("magcache")]` / `[JsonPropertyName("magcache_thresh")]`。属性名/类型/默认值 **不变**（非签名变更）；仅 C# 序列化键由 `mag_cache` / `mag_cache_thresh` 修正为契约文档既有的 `magcache` / `magcache_thresh`，与 Python `handlers.py` 读取一致。
 - **不做**：不改 Python、不改 `contracts/ipc-protocol.md`（C# 端向文档对齐）。
+
+## P1 批次：六项代码健康修复（2026-09-27，只增）
+
+- **P1-1（Agent 内部）**：`CommandParser.ApplyResolution` 重建 `EditPlan` 补拷贝 `ModelId`。无契约签名变更；当前解析链不设 ModelId（潜伏防御）。
+- **P1-2（行为变更）**：`SessionSignature.Compute` 追加独立尾块覆盖 `SourceImage` / `Command` / `ImagePaths` / `UsedImagePaths` / `Rerun`（全 7 `ResolutionPolicy` 字段 + `AdditionalImages`）。`Compute(IEditSession)` 签名不变；旧签名字节不变（严格前缀）。`DurationMs` 不纳入。
+- **P1-3（App 内部）**：`MainWindow.Mask.cs` 的 `OnPreviewMaskCompleted`（`async void`）加 try/catch（`AddHint`）。签名不变。其余 3 处 `async void` 登记挂账（`OnClosing` / `OnMainKeyDown`；`OnProjectOpenTick` 已有 try/catch）。
+- **P1-4（Backend 内部行为）**：无 `task_id` 的 `error` 帧由「静默丢弃」改为「回退当前单槽在飞任务并失败」（Z18）。新增 `internal static ResolveErrorTargetTaskId`。`IpcInferenceClient` 公共签名不变；不改 IPC 帧格式契约。
+- **P1-5（重新定位，见下条）**：`PythonProcessManager` 泄漏修复（`BuildStartInfo` 构造前置于管道创建）。
+- **P1-6（文本/路径）**：`config.py` COMFY_ROOT 开发默认改为仓库相对；`MODEL_ROOT` 硬编码**不动**（A10）；TablerIcons 注释通用化；`PlannerIntegrationTests` 相对路径；`python/server/README.md` 通用占位；`ipc-protocol.md` 尾部勘误（不改既有行）。
+- **不做**：不改 csproj 路径 / 不加 submodule / 不改 IPC 契约 / 不跑 GPU · Python · App。

@@ -6967,3 +6967,13 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
   - `MainWindow.ProjectList.cs:56` `OnMainKeyDown` → **挂账**（未改）。
   - `MainWindow.ProjectList.cs:161` `OnProjectOpenTick` → 已有 try/catch（复审确认），**无需改**。
 - **验证**：build `0/0`（UI 事件处理器无法单测，标「真机验证」——按 Z29/Z30 不在本批执行）。
+
+### P1-4 · B8 无 task_id 的 error 帧不再静默丢弃
+
+- **问题**：`IpcInferenceClient.Receive.cs` 中无 `task_id` 的 `error` 帧被静默丢弃 → submit 一直等到超时（最多 `ModelLoadTimeoutMs`）才失败。
+- **决策**：**候选 B（修行为）+ 日志**。Z18 单槽已由 `_submitGate` + `_activeTaskId` 证实 → 恒单任务在飞，B 更准确。
+- **改动**：
+  - 新增纯函数 `internal static string? ResolveErrorTargetTaskId(string? frameTaskId, string? activeTaskId)`：带 task_id 的帧保持自身 id（未跟踪=late，仍丢弃，不误伤）；无 task_id → 回退 `ActiveTaskId`。
+  - error 分支：先 ping 匹配（不变）；否则用该函数取目标任务，命中则 `Completion.TrySetException(new InferenceBackendException(code, message))`（与既有 `case "error"` :271-284 语义一致）；未命中则 `Debug.WriteLine` 记录（可观测）。
+- **测试**：新增 `InferenceErrorRoutingTests.cs`（类名**不含 "Ipc"** → 进非 GPU 基线；3 例：带 id 保持、无 id 回退 active、无 active 不可路由）。
+- **验证**：build `0/0`；`InferenceErrorRoutingTests` 3/3 绿。

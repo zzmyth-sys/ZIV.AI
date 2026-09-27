@@ -199,7 +199,22 @@ public sealed partial class IpcInferenceClient
                 {
                     pingCompletion.TrySetException(
                         new InvalidOperationException(ReadString(root, "message") ?? "Inference backend returned an error."));
+                    return;
                 }
+
+                // B8: an error frame without a task_id used to be dropped silently, so the
+                // submit then waited out its full budget (up to ModelLoadTimeoutMs) before
+                // failing. Z18 is single-slot, so attribute it to the one in-flight task.
+                var targetTaskId = ResolveErrorTargetTaskId(taskId, ActiveTaskId);
+                if (targetTaskId is not null && _tasks.TryGetValue(targetTaskId, out var errorTask))
+                {
+                    var code = ReadString(root, "code") ?? "backend_error";
+                    var message = ReadString(root, "message") ?? "Inference backend returned an error.";
+                    errorTask.Completion.TrySetException(new InferenceBackendException(code, message));
+                    return;
+                }
+
+                Debug.WriteLine($"[ipc] dropping unroutable '{messageType}' frame (task_id={taskId ?? "null"})");
             }
             else if (taskId is not null)
             {
@@ -401,6 +416,14 @@ public sealed partial class IpcInferenceClient
             Models = models,
         };
     }
+
+    /// <summary>
+    /// B8: resolves the task a task_id-less <c>error</c> frame belongs to. A frame that carries a
+    /// task_id is left alone (an id not in the table is a late/unknown frame and stays dropped);
+    /// a task_id-less frame falls back to the single in-flight task (Z18 single-slot).
+    /// </summary>
+    internal static string? ResolveErrorTargetTaskId(string? frameTaskId, string? activeTaskId)
+        => frameTaskId ?? activeTaskId;
 
     private static string? ReadString(JsonElement element, string name)
         => element.ValueKind == JsonValueKind.Object
