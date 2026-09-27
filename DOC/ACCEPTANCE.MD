@@ -4380,3 +4380,18 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 ### P1 未决（停点）
 
 - **P1-6 · `config.py:33 MODEL_ROOT`**：硬编码 `C:\AI\ComfyUI_PIC` **未改**（A10 明示「不动」，改动会破默认模型源）。需用户裁决：维持 A10，或改为 env-only / 占位（需同步修订 A10）。
+
+---
+
+## Z-008 铺垫验收（Headless 测试基建 + MainWindow 冒烟，2026-09-27，只追加）
+
+| 项 | 验收方式 | 判据 | 状态 |
+|---|---|---|---|
+| Z8-0.1 构建 | `dotnet build src\ZIV.AI.sln -c Release` | 0 错误 0 警告 | ✅ |
+| Z8-0.2 冒烟用例 | `dotnet test --filter FullyQualifiedName~MainWindowSmokeTests` | 1/1 通过 | ✅ |
+| Z8-0.3 非 GPU 全量 | 排除 `Ipc*` / `PlannerIntegration` | 670 → 671，0 失败 | ✅ |
+| Z8-0.4 副作用 | 代码审查 | 未起 Python / 无真实窗口；`new ShellService()` 起 Mutex+命名管道（已裁决接受） | ✅（代码审查） |
+| Z8-0.5 不改产品代码 | git diff | 仅测试文件 + 包版本（`Directory.Packages.props` / `Tests.csproj`） | ✅ |
+
+- **包回退记录**：`Avalonia.Headless.XUnit` 12.1.1 依赖 xUnit v3，与本仓 xUnit v2 不兼容 → 回退 `Avalonia.Headless` 12.1.1 + 自写 fixture。
+- **未做**：未拆 MainWindow / 未抽 `IShellService` / 未写完整 UI 覆盖。

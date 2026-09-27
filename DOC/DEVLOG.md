@@ -7045,3 +7045,30 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **`python/server/config.py`**：`TAGGER_*` 块顶部加注释「WD14 Tagger 配置（L1 seam；未接 IPC。见 tagger.py 顶部说明）」。
 - **背景（前批）**：WD 实验链（源图/缓存/产物）已退役；本次**不删** `tagger.py`、不改 `TAGGER_*` 默认值。
 - **验证**：`py_compile tagger.py config.py` OK。
+
+## Z-008 铺垫：Avalonia.Headless 测试基建 + MainWindow 冒烟（2026-09-27，只追加）
+
+> 说明：Z-008（MainWindow 上帝类）拆分的前置条件——先建立 UI 测试网（无测试网=拆分赌博）。本步**不改产品代码**、不拆 MainWindow，仅加测试基建 + 1 个冒烟用例；无 GPU / 无 Python / 无真实窗口（Z29/Z30）。
+
+### A · 依赖与包决策
+- **目标路径**：`Avalonia.Headless.XUnit` 12.1.1。探测 nuget 有 12.1.1，但其 `nuspec` 依赖 `xunit.v3.extensibility.core` 3.2.2（**xUnit v3**），与本仓 `xunit` **2.9.3（v2）** 不兼容（`[AvaloniaFact]` 无法被 v2 runner 发现）。
+- **处置（D2 回退）**：改用基础包 `Avalonia.Headless` 12.1.1（本机缓存已有，`lib/net8.0` 与 Tests `net8.0-windows` 兼容），自写最小 fixture 驱动 `HeadlessUnitTestSession`。
+- `Directory.Packages.props`：+`<PackageVersion Include="Avalonia.Headless" Version="12.1.1" />`。
+- `ZivAiEditor.Tests.csproj`：+`<PackageReference Include="Avalonia.Headless" />`。
+
+### B · 测试基建（新增，均测试侧）
+- `src/ZivAiEditor.Tests/UI/TestApplication.cs`：测试专用 `Application`，镜像 `App.axaml` 的 4 项资源/样式（顺序同 App.axaml：先 `ZivColors`+`TablerIcons`，后 `FluentTheme`+`ChromeStyles`）。**不用产品 `App`**（其 `OnFrameworkInitializationCompleted` 会以 `Shell=null` 进 `AppContext.Create`）。顶部 `[assembly: AvaloniaTestApplication(typeof(TestApplication))]`。
+- `src/ZivAiEditor.Tests/UI/HeadlessTest.cs`：`HeadlessUnitTestSession.GetOrStartForAssembly` + `Dispatch(action, CancellationToken.None)`（阻塞到 UI 线程完成）。
+- `src/ZivAiEditor.Tests/UI/MainWindowSmokeTests.cs`：1 个 `[Fact]`。
+
+### C · 冒烟用例（构造路径）
+- 依赖复用真实内存实现（D6）：`EditSession`（IEditSession+IEditSessionWriter）、`CommandParser(new List<CommandDefinition>())`、`Executor(new ToolRegistry(), new ExecutionQueue(), session, session, parser)`、`SessionStore(tempRoot)`、`ProjectService(store)`、`ImagingService()`、`ModelProfileRegistry(modelsFilePath: null)`、`new ShellService()`（D1：接受其 Mutex+命名管道；不 Dispose，D7）。
+- 断言：`MainWindow` 构造不崩 + `window.Show()` + 3 控件存在（`PART_Input` / `PART_ChatScroll` / `PART_HistoryList`）+ `Close()` 不崩（空 session → `hasContent=false`，不弹保存框）。
+- 首跑失败（`Static resource 'ZivButtonHoverBrush' not found`）根因=测试 App 先加 Styles 后加 Resources；按 `App.axaml` 顺序改为**先 Resources 后 Styles**后通过。
+
+### D · 验收（Z29/Z30）
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**。
+- `MainWindowSmokeTests` → **1/1 通过**。
+- 非 GPU 全量（`--filter "FullyQualifiedName!~Ipc&FullyQualifiedName!~PlannerIntegration"`）：**670 → 671**（+1 冒烟），0 失败。
+  - 注：本步实测基线为 **670**；DEVLOG P1-6 记「671」、本步任务书写「672」，相差 1（未查因，以本步实测为准）。
+- **不改产品代码**；未跑 GPU / 未启动 Python / 未打开真实窗口。

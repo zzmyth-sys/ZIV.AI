@@ -433,3 +433,10 @@
 - **兼容性**：新签名 = 旧签名 + 独立尾块（`||src=…|`）；**旧签名字节不变**（严格前缀）→ 同一会话在升级前后不会因算法变化被判「脏」。
 - **`DurationMs` 不纳入**（运行指标，非用户内容）。
 - **不改**：`IEditSession` / `IEditNode` 契约成员；无签名变更。
+
+## 33. Z-008 铺垫：Headless 测试宿主（2026-09-27）
+
+- **契约**：无变化（未改 Contracts / 未改产品接口 / 未改 `MainWindow` 构造签名）。
+- **测试侧宿主**：`ZivAiEditor.Tests/UI/TestApplication`（继承 `Application`）经 `[assembly: AvaloniaTestApplication]` 注册；`HeadlessTest.Run(Action)` 经 `Avalonia.Headless.HeadlessUnitTestSession` 在 UI 线程执行测试体。
+- **依赖**：`Avalonia.Headless` 12.1.1（仅测试项目）。**不用** `Avalonia.Headless.XUnit`（其依赖 xUnit v3，与本仓 xUnit v2 不兼容）。
+- **不改**：`ShellService` 仍为 `internal sealed` 具体类（测试用真实实例，接受其 Mutex+命名管道副作用）。
