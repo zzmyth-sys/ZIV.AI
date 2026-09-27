@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using ZivAiEditor.Contracts.Diagnostics;
+using ZivAiEditor.Diagnostics;
 using ZivAiEditor.Contracts.Enums;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Session;

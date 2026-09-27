@@ -5089,3 +5089,12 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **A6（不改契约签名）**：`IEditSessionWriter.RemoveSubtree` / `RemoveNodeAndSubtree` 签名不变；`EditSession.RemoveSubtree(nodeId)` 新增不变式——current 若在被删后代中，重定向到保留的 `nodeId`（此前悬空）。`RemoveNodeAndSubtree` 语义不变（仍重定向到父）。`FlowRunner.Rerun.cs` 既有补偿 **保留**（覆盖 `currentBefore == nodeId` 情形）。
 - **B12（不改契约签名）**：`ImageViewModel.ClampOffset()`（public，签名不变）语义变更——溢出轴钳制范围由「每轴至少 10% 可见」`[−(v−0.1s), 0.9s]` 放宽为「允许完全露白」`[−v, s]`。缩态（`scaled ≤ viewport`）行为不变（居中、offset 0）。`HasHorizontalScroll` / `HasVerticalScroll` / `OriginX` / `OriginY` 判定不变。
 - **不做**：不改 IPC / 命令集 / 其它 Contracts 类型；不改缩放锚点 / 双击 / resize 逻辑。
+
+## 批次 2A：代码级清洁度修复（2026-09-27，只增）
+
+### D1 · DiagLog 移出 Contracts（新增程序集）
+
+- **新增程序集**：`src/ZivAiEditor.Diagnostics/ZivAiEditor.Diagnostics.csproj`（net8.0，无 NuGet）。`DiagLog` 由 `ZivAiEditor.Contracts.Diagnostics`（Contracts 程序集）迁至 `ZivAiEditor.Diagnostics`（Diagnostics 程序集），类型名/成员/语义（`ZIV_AI_DIAG` 门控、`_cache/diag.log`）**不变**。
+- **依赖方向**：`Diagnostics → Contracts`（单向，`DescribeCrop` 需 `Contracts.Session.CropSpec`）；`Agent` / `Backend` / `App → Diagnostics`。**Contracts 不再引用 DiagLog / Diagnostics**。
+- **契约**：无 Contracts 类型签名变更；仅类型所在程序集与命名空间改变（消费者改 using）。
+- **不改**：DiagLog 行为、日志路径、env 门控。

@@ -2,7 +2,7 @@ using System.Globalization;
 using System.IO;
 using ZivAiEditor.Contracts.Session;
 
-namespace ZivAiEditor.Contracts.Diagnostics;
+namespace ZivAiEditor.Diagnostics;
 
 /// <summary>
 /// Temporary, opt-in diagnostics log for the <c>/扩图</c> re-run investigation (hooks D1–D7).
@@ -10,10 +10,10 @@ namespace ZivAiEditor.Contracts.Diagnostics;
 /// never blocks and never changes control flow (callers log and continue). Production stays
 /// silent unless the process is started with <c>ZIV_AI_DIAG=1</c>.
 ///
-/// <para><b>Diagnostics-only, to be removed with the hooks.</b> It adds no contract type and
-/// changes no existing signature; it lives in the Contracts assembly solely because that is the
-/// one assembly reachable from the Agent, App and Backend hook sites (Z8: one helper, not
-/// scattered per assembly).</para>
+/// <para><b>Diagnostics-only, to be removed with the hooks.</b> Batch 2A / D1 moved it out of
+/// Contracts into this dedicated assembly so the contract layer stays behavior-free (Contracts
+/// never references Diagnostics). Agent / App / Backend reference this assembly directly (Z8:
+/// one helper, not scattered per assembly).</para>
 /// </summary>
 public static class DiagLog
 {

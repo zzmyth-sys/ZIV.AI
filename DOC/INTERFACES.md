@@ -413,3 +413,9 @@
 - **`EditSession.RemoveSubtree(string)`**：签名不变；新增不变式「current 在被删后代中 → 重定向到保留的 `nodeId`」。
 - **`ImageViewModel.ClampOffset()`**：签名不变；溢出轴范围改为 `[−ViewportSize, ScaledSize]`（允许完全露白）；缩态行为不变。
 - **不做**：不改 IPC / 命令集 / 其它 Contracts 类型；不改缩放锚点 / 双击 / resize 逻辑。
+
+## 30. 追加说明：批次 2A 清洁度修复（2026-09-27）
+
+- **`DiagLog` 迁址（D1）**：`public static class DiagLog` 由程序集 `ZivAiEditor.Contracts`（命名空间 `ZivAiEditor.Contracts.Diagnostics`）迁到新程序集 `ZivAiEditor.Diagnostics`（命名空间 `ZivAiEditor.Diagnostics`）。成员 `IsEnabled` / `Log(string)` / `Exists(string?)` / `DescribeCrop(CropSpec?)` **签名不变**。消费者（Agent/Backend/App）改为 `using ZivAiEditor.Diagnostics;`。Contracts 不再包含诊断类型。
+- **`OptimizationOptions` 线格式（D4）**：见下条批次 2A 记录 —— `MagCache` / `MagCacheThresh` 追加 `[JsonPropertyName("magcache")]` / `[JsonPropertyName("magcache_thresh")]`（注解，API 形状不变）。
+- **不做**：不改 IPC 帧格式 / 命令集 / 其它 Contracts 类型。

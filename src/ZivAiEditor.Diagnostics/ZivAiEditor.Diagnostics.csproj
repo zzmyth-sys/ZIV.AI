@@ -5,16 +5,14 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>ZivAiEditor.Backend</RootNamespace>
+    <RootNamespace>ZivAiEditor.Diagnostics</RootNamespace>
   </PropertyGroup>
 
+  <!-- Batch 2A / D1: opt-in diagnostics split out of Contracts to keep the contract layer
+       behavior-free. It needs Contracts only for CropSpec (DescribeCrop); the dependency is
+       one-way (Contracts never references Diagnostics). -->
   <ItemGroup>
     <ProjectReference Include="..\ZivAiEditor.Contracts\ZivAiEditor.Contracts.csproj" />
-    <ProjectReference Include="..\ZivAiEditor.Diagnostics\ZivAiEditor.Diagnostics.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <InternalsVisibleTo Include="ZivAiEditor.Tests" />
   </ItemGroup>
 
 </Project>

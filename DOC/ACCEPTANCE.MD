@@ -4311,3 +4311,30 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 ### 验收后动作
 
 1. 真机 1–5 通过后，在「验收记录」追加“B12 收尾（整视图锁定）通过，日期：____”（待签）。
+
+## 批次 2A：代码级清洁度修复（2026-09-27，待真机验收）
+
+四项：D1 DiagLog 下沉 / D2 冗余引用删除 / D3 单实例管道加固 / D4 MagCache 字段名对齐。不含文件级清洁度与外部 ZIV 仓库依赖。
+
+### 自动化（已通过，非 GPU）
+
+| 条目 | 验证方式 | 结果 |
+| --- | --- | --- |
+| D1 Contracts 零诊断引用 | grep `Contracts/` 无 `DiagLog` / `Diagnostics` 命名空间 | 通过 |
+| D1 依赖无环 | Diagnostics → Contracts 单向；build | 通过 |
+| D1 回归 | 非 GPU 全量 | 659 通过 / 0 失败 |
+| D2 冗余引用 | 删 Contracts/App/Imaging 的 ZIV.* 零使用引用 | 通过（见下） |
+| D3 单实例 | `SingleInstanceTests`（同用户转发 + 超长不转发） | 通过 |
+| D4 键名 | `IpcSubmitMapperTests` 序列化断言 `magcache` / `magcache_thresh` | 通过 |
+| 构建 | `dotnet build src/ZIV.AI.sln -c Release` | 0 错误 0 警告 |
+| 全量 | `dotnet test ... --filter "FullyQualifiedName!~Ipc"` | D1 阶段 659 通过 / 0 失败（最终值见 D4 收尾） |
+
+### 真机验收清单（用户执行）
+
+**D3（单实例管道，ACL 无法单测）**
+1. 双击 exe 两次 → 第二次正常转发到第一个窗口（同用户可连，ACL 不挡自身）。
+2. 多用户 / 多会话环境下，另一用户无法连接本用户的单实例管道（需真机多账户验证）。
+
+### 验收后动作
+
+1. 真机 D3 通过后，在「验收记录」追加“批次 2A 通过，日期：____”（待签）。

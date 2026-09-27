@@ -6828,3 +6828,20 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - `dotnet test ... --filter "FullyQualifiedName!~Ipc"` → **659 通过 / 0 失败**（658 基线 + 1 新增，无回归）。
 - Z8：改动文件最大 `ImageViewModel.cs` 325 行，均 < 600。
 - 未改契约；未改拖动范围数值（仍 `[−v, s]`）；未改双击回适配；缩态（两轴都不溢出）居中行为不变。
+
+## 批次 2A：代码级清洁度修复（2026-09-27，只追加）
+
+四项：D1 DiagLog 下沉 / D2 冗余引用删除 / D3 单实例管道加固 / D4 MagCache 字段名对齐。不含文件级清洁度（LICENSE / .gitignore / _test_step2）与外部 ZIV 仓库依赖。
+
+### D1 · DiagLog 下沉到独立 Diagnostics 程序集
+
+- **问题**：`DiagLog` 位于 `Contracts/Diagnostics/DiagLog.cs`，违反「Contracts = kernel/端口+值对象（无行为）」。原注释自述「放 Contracts 仅因其是 Agent/App/Backend 唯一可达程序集」。
+- **改动**：
+  - 新增 `src/ZivAiEditor.Diagnostics/ZivAiEditor.Diagnostics.csproj`（net8.0，无 NuGet，`ProjectReference → Contracts`，因 `DescribeCrop` 需 `Contracts.Session.CropSpec`）；加入 `ZIV.AI.sln`。
+  - `git mv` `Contracts/Diagnostics/DiagLog.cs` → `src/ZivAiEditor.Diagnostics/DiagLog.cs`；namespace `ZivAiEditor.Contracts.Diagnostics` → `ZivAiEditor.Diagnostics`；更新过时注释。
+  - `Agent` / `Backend` / `App` 三 csproj 加 `ProjectReference → Diagnostics`。
+  - 5 文件 using 改：`CommandParser.cs:3`、`Executor.cs:3`、`EditSession.cs:1`、`FlowRunner.Rerun.cs:6`、`IpcSubmitMapper.cs:1`（覆盖 21 调用点）。
+  - 删空目录 `Contracts/Diagnostics/`。
+- **依赖方向**：Contracts ← Diagnostics ← {Agent, Backend, App}，**无环**（Contracts 零 `DiagLog`/`Diagnostics` 引用）。
+- **验证**：build `0/0`；非 GPU 全量 **659 通过 / 0 失败**（无回归）。
+- **不改**：DiagLog 逻辑/语义/env 门控（`ZIV_AI_DIAG=1`）不变；仅位置与命名空间。

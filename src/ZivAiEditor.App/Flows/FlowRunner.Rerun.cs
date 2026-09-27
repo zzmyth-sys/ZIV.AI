@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using ZivAiEditor.Contracts.Diagnostics;
+using ZivAiEditor.Diagnostics;
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.UI.Chat;
 

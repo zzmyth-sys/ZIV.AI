@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using ZivAiEditor.Contracts.Diagnostics;
+using ZivAiEditor.Diagnostics;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Inference;
 using ZivAiEditor.Contracts.Execution;

@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ZivAiEditor.Contracts\ZivAiEditor.Contracts.csproj" />
+    <ProjectReference Include="..\ZivAiEditor.Diagnostics\ZivAiEditor.Diagnostics.csproj" />
   </ItemGroup>
 
   <!-- Bridge §4.2 / §7.3: the editor App consumes the internal PathNormalizer for the

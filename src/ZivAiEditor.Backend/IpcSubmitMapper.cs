@@ -1,4 +1,4 @@
-using ZivAiEditor.Contracts.Diagnostics;
+using ZivAiEditor.Diagnostics;
 using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Inference;
 
