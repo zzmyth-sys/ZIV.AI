@@ -41,8 +41,8 @@ public class PlannerIntegrationTests
 
         var request = new PlanRequest
         {
-            MainImagePath = @"D:\devlop\ZIV.AI\_test_step2\user_input_1024.png",
-            Prompt = "把背景替换为古代中式茶肆，保留人物与前景",
+            MainImagePath = Path.Combine(FindRepositoryRoot(), "_test_step2", "user_input_1024.png"),
+            Prompt = "�ѱ����滻Ϊ�Ŵ���ʽ����������������ǰ��",
         };
 
         await PrintRawLlmOutputAsync(llm, request);
@@ -90,7 +90,7 @@ public class PlannerIntegrationTests
 
         var request = new PlanRequest
         {
-            MainImagePath = @"D:\devlop\ZIV.AI\_test_step2\user_input_1024.png",
+            MainImagePath = Path.Combine(FindRepositoryRoot(), "_test_step2", "user_input_1024.png"),
             Prompt = "先把画面整体转成水墨画风格，再把背景替换成古代中式茶肆，保留前景人物不变",
         };
 
@@ -143,6 +143,26 @@ public class PlannerIntegrationTests
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Walks up from the test output directory to the repository root (marked by
+    /// <c>DOC/FROZEN.md</c>), so test inputs are addressed relatively (no dev-machine path).
+    /// </summary>
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "DOC", "FROZEN.md")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new InvalidOperationException("Could not locate the ZIV.AI repository root from " + AppContext.BaseDirectory);
     }
 
     private sealed class EmptyToolRegistry : IToolRegistry

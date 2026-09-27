@@ -25,7 +25,7 @@
 解释器使用 ComfyUI 便携版自带 Python：
 
 ```
-D:\devlop\ZIV.AI\Comfyui\python_embeded\python.exe
+<ComfyUI 便携版>/python_embeded/python.exe
 ```
 
 ## 启动
@@ -34,7 +34,7 @@ D:\devlop\ZIV.AI\Comfyui\python_embeded\python.exe
 
 ```powershell
 # 先由 C# 侧创建管道并监听，再运行：
-D:\devlop\ZIV.AI\Comfyui\python_embeded\python.exe -s D:\devlop\ZIV.AI\python\server\main.py `
+<ComfyUI 便携版>\python_embeded\python.exe -s <ZIV.AI 根>\python\server\main.py `
   --pipe-name "\\.\pipe\zivai.infer.v1" --log-level DEBUG
 ```
 

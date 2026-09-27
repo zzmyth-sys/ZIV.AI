@@ -8,7 +8,12 @@ import sys
 #   2) 开发默认路径（GitHub 收尾步统一清理）。
 #   3) 从 python_exe（= 正在运行的解释器 sys.executable）反推 <exe 目录>/../ComfyUI。
 # 三者都无效时返回配置值 / 默认值；由 model_loader.prepare_environment 抛可读异常。
-_COMFY_ROOT_DEV_DEFAULT = r"D:\devlop\ZIV.AI\Comfyui\ComfyUI"
+# 开发默认值：由本文件位置推导（<repo>/Comfyui/ComfyUI），不含机器绝对路径；
+# 保持 A10 优先级链 env → 默认 → 反推 不变（开发机解析到同一目录）。
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_COMFY_ROOT_DEV_DEFAULT = os.path.abspath(
+    os.path.join(_HERE, os.pardir, os.pardir, "Comfyui", "ComfyUI")
+)
 
 
 def _resolve_comfy_root():

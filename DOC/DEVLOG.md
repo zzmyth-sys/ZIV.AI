@@ -6986,3 +6986,16 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **残余（登记）**：`process.Start()` **抛**（非返回 false，如 `PythonExe` 不存在）时，管道仍会泄漏；受 Z8 行数所限本批未处理，记为已知缺口（后续可拆 partial / 申请 Z8 例外）。
 - **测试**：新增 `PythonProcessManagerTests.cs`（1 例：invalid script → 抛 + `ProcessId==null` + `IsPipeConnected==false`）。**弱 oracle**：`ProcessId`/`IsPipeConnected` 在修复前后均成立（管道释放不可直接观测），此测试为结构确认而非回归判别。
 - **验证**：build `0/0`；`PythonProcessManagerTests` 1/1 绿；文件仍 599 行。
+
+### P1-6 · 开发机路径残留
+
+逐项处理（`src/...` 前缀实为 `src/ZivAiEditor.*`）：
+
+1. **`python/server/config.py:11`** `_COMFY_ROOT_DEV_DEFAULT`：由绝对字面量 `D:\devlop\...` 改为**仓库相对推导**（`os.path.dirname(os.path.abspath(__file__))` 上溯两层 + `Comfyui/ComfyUI`）。**保持 A10 优先级链 env → 默认 → 反推 不变**；开发机解析到同一目录，非开发机同旧行为（不存在→落回反推）。`py_compile` OK。
+2. **`python/server/config.py:33`** `MODEL_ROOT = r"C:\AI\ComfyUI_PIC\ComfyUI\models"` → **未改（停点）**：A10 明示「MODEL_ROOT 不动」，改动会破默认模型源。见未决问题。
+3. **`src/ZivAiEditor.App/Assets/Icons/TablerIcons.axaml:3`**：注释 `D:\devlop\ZIV\...` → 通用描述「ZIV project's icon set」。
+4. **`src/ZivAiEditor.Tests/PlannerIntegrationTests.cs:44,93`**：绝对路径 → `Path.Combine(FindRepositoryRoot(), "_test_step2", "user_input_1024.png")`；新增私有 `FindRepositoryRoot()`（照 `IpcAutoRestartTests` 样例，走 `DOC/FROZEN.md` 上溯）。无需新建测试资产。
+5. **`python/server/README.md:28,37`**：示例命令 `D:\devlop\...` → 通用占位 `<ComfyUI 便携版>\python_embeded\python.exe` / `<ZIV.AI 根>\python\server\main.py`。
+6. **`contracts/ipc-protocol.md:321-322`**：属契约文件 → **不改既有行**，在**尾部追加「勘误」**说明 §6 路径为开发机示例。
+
+- **验证**：build `0/0`；`config.py` `py_compile` OK；非 GPU 全量 **671 通过 / 0 失败**。

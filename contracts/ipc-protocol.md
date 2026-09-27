@@ -388,3 +388,11 @@ C#(server)                                              Python(client)
 > **遗留**：`preview` 二进制帧（`0x02`）的**端到端收发**尚未单独实测（`latent_preview` 预览器
 > 与 `decode_latent_to_preview_image` 路径待 Step 2 实现时补测）；本契约按实测到的 `callback`
 > 能力与 ComfyUI 预览器接口先行冻结设计。
+
+---
+
+## 勘误（P1-6，2026-09-27，只追加）
+
+- §6「模型加载（参考契约与实现参考）」中的 `D:\devlop\ZIV.AI\Comfyui` 与 `C:\AI\ComfyUI_PIC`
+  为**开发机示例路径**，非契约要求；实际路径由 `python/server/config.py`（`ZIV_AI_COMFY_ROOT` /
+  `settings.ini [backend]`）与部署环境决定。本节为只追加勘误，§6 原文不改。

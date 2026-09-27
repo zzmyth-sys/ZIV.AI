@@ -1,6 +1,6 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- Tabler Icons (MIT). Path data copied from https://github.com/tabler/tabler-icons (outline, 24x24, stroke 2).
-         Same icon set and rendering convention as ZIV (D:\devlop\ZIV\src\ZIV.App\Assets\Icons\TablerIcons.axaml). -->
+         Same icon set and rendering convention as the ZIV project's icon set (see its TablerIcons.axaml). -->
     <StreamGeometry x:Key="IconCrop">M8 5v10a1 1 0 0 0 1 1h10 M5 8h10a1 1 0 0 1 1 1v10</StreamGeometry>
     <StreamGeometry x:Key="IconBrush">M3 21v-4a4 4 0 1 1 4 4h-4 M21 3a16 16 0 0 0 -12.8 10.2 M21 3a16 16 0 0 1 -10.2 12.8 M10.6 9a9 9 0 0 1 4.4 4.4</StreamGeometry>
     <StreamGeometry x:Key="IconEraser">M19 20h-10.5l-4.21 -4.3a1 1 0 0 1 0 -1.41l10 -10a1 1 0 0 1 1.41 0l5 5a1 1 0 0 1 0 1.41l-9.2 9.3 M18 13.3l-6.3 -6.3</StreamGeometry>
