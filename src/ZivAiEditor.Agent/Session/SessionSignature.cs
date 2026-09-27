@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text;
+using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Session;
 
 namespace ZivAiEditor.Agent.Session;
@@ -42,7 +43,60 @@ public static class SessionSignature
             builder.Append(';');
         }
 
+        // B13: the fields above are the legacy signature; the ones below are appended as a
+        // SEPARATE tail block so the legacy portion stays a strict prefix (adding fields never
+        // changes the bytes of the legacy part; a re-open is not falsely dirty). These cover the
+        // node/session fields whose in-place edits previously did not mark the session dirty:
+        // Command, ImagePaths, UsedImagePaths, Rerun, SourceImage. DurationMs is deliberately
+        // excluded — it is a runtime metric, not user content (including it would mark a session
+        // dirty right after a run).
+        builder.Append("||src=").Append(session.SourceImage ?? "").Append('|');
+        foreach (var node in session.GetHistory())
+        {
+            builder.Append(node.NodeId).Append(':').Append(node.Command).Append(':');
+            AppendList(builder, node.ImagePaths);
+            builder.Append(':');
+            AppendList(builder, node.UsedImagePaths);
+            builder.Append(':');
+            if (node.Rerun is { } rerun)
+            {
+                // 'R' distinguishes a present-but-empty rerun snapshot from "no snapshot".
+                builder.Append('R');
+                AppendResolution(builder, rerun.Resolution);
+                builder.Append(':');
+                AppendList(builder, rerun.AdditionalImages);
+            }
+
+            builder.Append(';');
+        }
+
         return builder.ToString();
+    }
+
+    private static void AppendList(StringBuilder builder, IReadOnlyList<string> values)
+    {
+        foreach (var value in values)
+        {
+            builder.Append(value).Append(',');
+        }
+    }
+
+    /// <summary>
+    /// Appends every <see cref="ResolutionPolicy"/> field (all 7), or <c>null</c> for an absent
+    /// policy, so a change to any resolution dimension dirties the session.
+    /// </summary>
+    private static void AppendResolution(StringBuilder builder, ResolutionPolicy? policy)
+    {
+        if (policy is null)
+        {
+            builder.Append("null");
+            return;
+        }
+
+        builder.Append(policy.Mode).Append(',').Append(policy.Side).Append(',')
+               .Append(policy.Area).Append(',').Append(policy.Scale).Append(',')
+               .Append(policy.Width).Append(',').Append(policy.Height).Append(',')
+               .Append(policy.MaxPixels);
     }
 
     /// <summary>

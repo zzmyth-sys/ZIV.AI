@@ -426,3 +426,10 @@
 - **原因**：`IpcJsonContext` 的 `SnakeCaseLower` 策略会把 `MagCache` 渲染为 `mag_cache`，与 `contracts/ipc-protocol.md` 及 Python `handlers.py` 不一致；显式 `JsonPropertyName` 优先于命名策略。
 - **锁定**：`IpcSubmitMapperTests.OptimizationOptions_Serialize_To_Documented_Keys` 经真实 `IpcJsonContext` 断言键名。
 - **不做**：不改 Python / 不改 `ipc-protocol.md`。
+
+## 32. P1-2 行为说明：SessionSignature 覆盖范围（2026-09-27）
+
+- **`SessionSignature.Compute(IEditSession)`**：签名不变（`public static string Compute(IEditSession)`）。**语义变更**：新增覆盖 `SourceImage` 与每节点的 `Command` / `ImagePaths` / `UsedImagePaths` / `Rerun`（含 `ResolutionPolicy` 全 7 字段 + `AdditionalImages`）。
+- **兼容性**：新签名 = 旧签名 + 独立尾块（`||src=…|`）；**旧签名字节不变**（严格前缀）→ 同一会话在升级前后不会因算法变化被判「脏」。
+- **`DurationMs` 不纳入**（运行指标，非用户内容）。
+- **不改**：`IEditSession` / `IEditNode` 契约成员；无签名变更。

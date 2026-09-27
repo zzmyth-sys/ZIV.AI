@@ -6947,3 +6947,12 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 - **覆盖核实**：`new EditPlan` 共 3 处重建/拷贝——`ApplyResolution`（本次修）、`ChatFlowRules.WithAdditionalImages`（已有）、`Executor.WithAdditionalImages`（已有）；创建点 `LlmPlanner.cs:134` / `FallbackPlanner.cs:54` 已设 `request.ModelId`。
 - **可达性（复审确认）**：`CommandParser` **从不设置 ModelId**（grep 0 命中）→ 当前该字段在解析链恒为 null，本次为**防御性/潜伏修复**，无法构造 `ParseAsync` 级测试；不加测试 seam。
 - **验证**：build `0/0`。
+
+### P1-2 · B13 脏标记补全字段
+
+- **问题**：`SessionSignature.Compute`（`SessionSignature.cs`）遗漏 `Command` / `ImagePaths` / `UsedImagePaths` / `Rerun` / `SourceImage` → 这些字段原地改动不触发关窗保存提示。
+- **改动**：在**既有签名之后追加独立尾块**（`||src=<SourceImage>|` + 每节点 `nodeId:command:imagePaths:usedImagePaths:rerun;`）。既有循环与既有字段编码**逐字不变**（旧签名是新签名的严格前缀）→ 重开项目不会误判「脏」。
+  - `Rerun`：非 null 时前缀 `R` 区分「有快照但空」与「无快照」；`ResolutionPolicy` **全 7 字段**（Mode/Side/Area/Scale/Width/Height/MaxPixels）+ AdditionalImages 全序列化。
+  - `DurationMs` **不纳入**：运行指标非用户内容（纳入会使刚运行的会话立刻变脏）。
+- **测试**：新增 `SessionSignatureTests.cs`（7 例）：同内容重算相等；Command / ImagePaths / UsedImagePaths / Rerun（null↔present↔改 Side）/ SourceImage 改动均使签名变化且**旧前缀逐字不变**；ImagePath（旧字段对照）改动使旧前缀也变化。
+- **验证**：build `0/0`；`SessionSignatureTests` 7/7 绿。
