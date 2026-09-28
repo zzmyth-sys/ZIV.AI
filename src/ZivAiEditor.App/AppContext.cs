@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Threading.Tasks;
 using ZivAiEditor.Agent.Execution;
 using ZivAiEditor.Agent.Project;
 using ZivAiEditor.Agent.Session;
@@ -183,10 +184,42 @@ internal sealed class AppContext : IDisposable
         var (sessionStore, projects) = BuildPersistence();
         var imaging = BuildImaging();
 
-        return new AppContext(
+        var context = new AppContext(
             backend, client, llm.Http, llm.PlannerLlm, llm.Planner, tools, executor, executionQueue,
             modelProfiles, commandParser, commandTemplates, session, session, sessionStore, projects, imaging,
             llm.RewriterLlm, llm.PromptExpander, llm.LlmPreflight, pluginRegistry);
+
+        // Optimization §10.2.1: start the Python backend now (background) so its ~4 s
+        // `import comfy` + DynamicVRAM init run while the user is still setting up,
+        // instead of stalling the first generate.
+        if (settings.Prewarm)
+        {
+            context.StartBackendPrewarm();
+        }
+
+        return context;
+    }
+
+    /// <summary>
+    /// Best-effort background backend warm-up (§10.2.1): start the Python process now so its
+    /// prewarm thread (<c>import comfy</c> / DynamicVRAM init) runs while the user is still
+    /// setting up. Only the process is started — no health round-trip, because the ~4 s import
+    /// holds the GIL and would make <c>CheckHealthAsync</c> (10 s budget) time out spuriously.
+    /// Never throws; the first submit starts the backend normally if this fails.
+    /// </summary>
+    internal void StartBackendPrewarm()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _backend.EnsureStartedAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignored — lazy start on first use remains the fallback
+            }
+        });
     }
 
     /// <summary>Backend domain: the Python process manager and the IPC client over it.</summary>

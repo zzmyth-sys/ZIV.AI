@@ -99,6 +99,10 @@ RESOLUTION_SIDE_FALLBACK = [
 AURAFLOW_SHIFT = float(os.environ.get("ZIV_AI_AURAFLOW_SHIFT", "3.1"))
 SAMPLER_NAME = os.environ.get("ZIV_AI_SAMPLER", "euler")
 SCHEDULER_NAME = os.environ.get("ZIV_AI_SCHEDULER", "simple")
+# cfg==1.0 时跳过负提示词 encode（优化 §10.2.2）：采样器在 cfg≈1 时丢弃 uncond
+# （comfy/samplers.py:610 `isclose(cond_scale,1.0) -> uncond_=None`），故负向条件编码
+# （含视觉塔处理）是纯浪费。默认开；置 0 / false 回退到旧行为。
+SKIP_NEGATIVE_AT_CFG1 = os.environ.get("ZIV_AI_SKIP_NEGATIVE", "1") not in ("", "0", "false", "False")
 # 仅供测试：置位时把首个候选分辨率伪装成 OOM，以验证降级路径（不影响生产）。
 FORCE_OOM = os.environ.get("ZIV_AI_FORCE_OOM", "") not in ("", "0", "false", "False")
 # 预览降频：1 = 每步发送，N>1 = 每 N 步发送一帧（契约 §3.5 允许降频）
@@ -218,6 +222,18 @@ SAGE_ATTENTION = os.environ.get("ZIV_AI_SAGE_ATTENTION", "1") not in ("", "0", "
 #   传统 ModelPatcher（粗粒度 offload、卸载不彻底），16GB 卡上高分辨率会冲顶（实测 side 1536）。
 #   启用后权重由 vbar 按需换入换出，与官方流一致。回退：设 ZIV_AI_DYNAMIC_VRAM=0（或 false）。
 DYNAMIC_VRAM = os.environ.get("ZIV_AI_DYNAMIC_VRAM", "1") not in ("", "0", "false", "False")
+# ---- 启动预热（优化 §10.2.1）----
+# 进程连上管道后，在后台线程 import comfy/torch + DynamicVRAM init（纯 CPU、不加载权重、不占显存），
+# 把首次 submit 的 ~4.1s 移出用户等待路径。C# 侧可在 App 启动时提前拉起本进程（[backend] prewarm）。
+# 默认开；置 0 / false 关闭。注意：C# 的 [backend] prewarm 与这里的 ZIV_AI_PREWARM 相互独立——
+# 前者控制「是否提前拉起进程」，后者控制「进程连上后是否预热」。
+PREWARM = os.environ.get("ZIV_AI_PREWARM", "1") not in ("", "0", "false", "False")
+# 预热深度：0 = 仅 prepare_environment（默认，安全）；1 = 再 ensure_loaded（读权重到 RAM，~0.8s）。
+# 警告：1 会在引擎锁内加载权重，若与首次 submit 并发会阻塞后者、可能触发加载超时——非默认，一般不必开。
+try:
+    PREWARM_LEVEL = int(os.environ.get("ZIV_AI_PREWARM_LEVEL", "0") or "0")
+except ValueError:
+    PREWARM_LEVEL = 0
 # 空闲卸载超时（秒，可配置，Z21）；可用环境变量覆盖以便测试
 IDLE_UNLOAD_SECONDS = float(os.environ.get("ZIV_AI_IDLE_UNLOAD_S", "300"))
 # idle_watcher 检查间隔（秒）

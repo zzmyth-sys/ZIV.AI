@@ -2,6 +2,7 @@ import argparse
 import gc
 import os
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -11,6 +12,7 @@ import handlers
 import heartbeat
 import idle_watcher
 import ipc
+import model_loader
 
 LOG = config.setup_logging("INFO")
 
@@ -117,11 +119,35 @@ def _decode_frame(frame):
     return message
 
 
+def _prewarm():
+    """Background warm-up (optimization §10.2.1): move the ~4 s `import comfy/torch`
+    off the first `submit` path. Pure CPU — never touches the GPU. Failures are
+    logged and ignored (the first submit will retry `prepare_environment`)."""
+    try:
+        LOG.info("prewarm: prepare_environment begin")
+        model_loader.prepare_environment()
+        LOG.info("prewarm: prepare_environment done")
+        if config.PREWARM_LEVEL >= 1:
+            handlers._ENGINE.ensure_loaded(None, None)
+            LOG.info("prewarm: model weights loaded into host RAM")
+    except Exception:
+        LOG.exception("prewarm failed (non-fatal; first submit will retry)")
+
+
+def _start_prewarm():
+    if not config.PREWARM:
+        return
+    threading.Thread(target=_prewarm, name="zivai-prewarm", daemon=True).start()
+
+
 def run(pipe_path, connect_timeout_s):
     LOG.info("connecting to %s", pipe_path)
     stream = _connect(pipe_path, connect_timeout_s)
     LOG.info("connected to backend pipe")
     frame_io = ipc.FrameIO(stream)
+
+    # Warm `comfy`/torch in the background while the process idles (before any submit).
+    _start_prewarm()
 
     pollable = frame_io.pollable
     sender = heartbeat.HeartbeatSender(

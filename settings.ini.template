@@ -7,6 +7,9 @@ pipe_name = zivai.infer.v1
 ; 由设置窗口填入绝对路径；留空表示未配置（A9：不再硬编码开发机路径）。
 python_exe =
 script =
+; 启动预热（优化 §10.2.1）：App 启动时后台拉起 Python 后端，让 import comfy/DynamicVRAM init
+; 在用户准备期间完成，首次生成可省 ~5 s。1=开（默认），0=改为首次使用时惰性启动。
+prewarm = 1
 
 [models]
 ; 模型三件套权重路径（A2）；由设置窗口填入绝对路径，留空表示回退 models.json / 内置默认。

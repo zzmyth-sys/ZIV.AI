@@ -7425,3 +7425,39 @@ invent a new identity.`
 
 ### D · 不做
 - 不改代码逻辑；不跑 GPU / 真实 App；未 commit。
+---
+
+## 冷启动优化落地（启动预热 + cfg=1.0 跳负向编码）（2026-09-28，只增）
+
+> 目标：削减首次生成的用户等待。两项均为纯后端改动，**不改 IPC 契约、不改分层方向**；各有
+> env / 设置回退。实测与调研见 `DOC/OPTIMIZATION.md` §9–§12。
+
+### A · §10.2.1 应用启动后台预热
+- Python：`config.PREWARM`（env `ZIV_AI_PREWARM`，默认 1）+ `PREWARM_LEVEL`（默认 0，容错解析）；
+  `main.py` 连上管道后 `_start_prewarm()` → 后台守护线程调 `model_loader.prepare_environment()`
+  （纯 CPU、不加载权重、不占显存）；`model_loader.prepare_environment()` 加**线程锁**，与首次
+  submit 并发时恰好执行一次。
+- C#：`[backend] prewarm` → `BackendSettings.Prewarm`（默认 1）；`AppContext.Create` 里
+  `StartBackendPrewarm()` 后台 `_backend.EnsureStartedAsync()`（**只起进程**，免健康往返——import
+  期间持 GIL 会让 10 s 健康检查误超时）。
+- 效果：首次 submit 的 `prepare_environment`（约 4.4 s）与后端模块导入（1.9 s）移到 App 启动后台。
+
+### B · §10.2.2 cfg==1.0 跳过负提示词 encode
+- `pipeline._run_once`：`math.isclose(cfg, 1.0)`（**与采样器同一谓词**，`comfy/samplers.py:610`）
+  且 `config.SKIP_NEGATIVE_AT_CFG1`（env `ZIV_AI_SKIP_NEGATIVE`，默认 1）时，调
+  `encode_prompt(..., need_negative=False)`；`_encode` 跳过负向 TE 前向（含视觉塔），复用
+  positive 作占位。
+- 采样器在 cfg≈1 丢弃 uncond，故语义不变。
+
+### C · 验证
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**；`dotnet test` → **753 通过 / 0 失败**；
+  `python -m py_compile`（config/main/model_loader/pipeline）通过。
+- **输出零变化**（cfg=1.0）：`SKIP_NEGATIVE` 1 vs 0 两图 MAD **0.0** / PSNR **inf** / SSIM **1.0**；
+  `clip.encode` 2→1 次。
+- **首次生成用户等待**（探针分段，int8 三件套 / 难提示词）：1024² 20.23→13.31 s；
+  1536² 44.66→34.22 s；2048² 87.67→73.89 s。
+- Python 预热直调：`prepare_environment` 冷态 6.17 s、二次 0.0000 s（幂等）。
+- 动态显存核查：2048×1280 对齐 §6.2（peak 12864 vs 12084 MiB），无回归。
+
+### D · 不做
+- 不改 IPC 契约 / 公开接口 / 命令集；不下模型；GUI 端到端首图待发布版复测。

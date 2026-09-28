@@ -28,6 +28,13 @@ internal sealed class BackendSettings
     public string? ComfyRoot { get; init; }
 
     /// <summary>
+    /// Start the Python backend at app start (<c>[backend] prewarm</c>, default on) so its
+    /// background <c>import comfy</c> + DynamicVRAM init finish before the first generate
+    /// (optimization §10.2.1). Set to <c>0</c> to start the backend lazily on first use.
+    /// </summary>
+    public bool Prewarm { get; init; } = true;
+
+    /// <summary>
     /// Plugin enable state from <c>[plugins]</c> (batch 1), keyed by the raw plugin id. An id
     /// absent here falls back to the registry's <c>enabled_by_default</c>.
     /// </summary>
@@ -123,6 +130,7 @@ internal static class SettingsLoader
             TePath = GetOptional(models, "te_path"),
             VaePath = GetOptional(models, "vae_path"),
             ComfyRoot = GetOptional(backend, "comfy_root"),
+            Prewarm = GetBool(backend, "prewarm", defaults.Prewarm),
             PluginStates = ParsePluginStates(plugins),
             LlmPlanner = new LlmPlannerSettings
             {

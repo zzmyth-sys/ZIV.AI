@@ -12,6 +12,7 @@ import importlib.util
 import logging
 import os
 import sys
+import threading
 import time
 
 import config
@@ -30,33 +31,40 @@ STAGE_FRACTIONS = {
 STAGES = ("dit", "te", "vae")
 
 _environment_ready = False
+_environment_lock = threading.Lock()
 
 
 def prepare_environment():
     """Make the ComfyUI source tree importable, then apply runtime defaults.
 
-    Idempotent. The smart-memory flag must be set before the first
+    Idempotent and **thread-safe**: the startup prewarm thread (§10.2.1) and the
+    first `submit` can call this concurrently; the lock ensures the heavy
+    `import comfy` / DynamicVRAM init runs exactly once, while callers block until
+    it is ready. The smart-memory flag must be set before the first
     `import comfy.model_management` (it reads the value into a module constant
     at import time), so it is applied here — before any `load_*` import.
     """
     global _environment_ready
     if _environment_ready:
         return
-    root = config.COMFY_ROOT
-    if not root or not os.path.isdir(root):
-        raise RuntimeError(
-            "ComfyUI 源码目录无效：%s。请在设置中配置（[backend] comfy_root）。" % (root,)
-        )
-    if root not in sys.path:
-        sys.path.insert(0, root)
-    try:
-        os.chdir(root)
-    except OSError:
-        pass
-    _apply_runtime_defaults()
-    _enable_dynamic_vram()
-    vram_probe.install()
-    _environment_ready = True
+    with _environment_lock:
+        if _environment_ready:
+            return
+        root = config.COMFY_ROOT
+        if not root or not os.path.isdir(root):
+            raise RuntimeError(
+                "ComfyUI 源码目录无效：%s。请在设置中配置（[backend] comfy_root）。" % (root,)
+            )
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        try:
+            os.chdir(root)
+        except OSError:
+            pass
+        _apply_runtime_defaults()
+        _enable_dynamic_vram()
+        vram_probe.install()
+        _environment_ready = True
 
 
 def _apply_runtime_defaults():

@@ -18,6 +18,7 @@ never touches the heavy stack.
 import gc
 import importlib.util
 import logging
+import math
 import os
 import random
 import sys
@@ -239,9 +240,15 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
         model = ModelSamplingAuraFlow().patch_aura(model, shift)[0]
 
     # Stage 2: encode the prompt + optional reference image (clip is patched).
+    # cfg==1.0 discards the negative conditioning in the sampler
+    # (comfy/samplers.py:610 `math.isclose(cond_scale, 1.0) -> uncond_=None`), so skip
+    # its encode entirely (optimization §10.2.2). Mirror the sampler's exact predicate
+    # (math.isclose, rel_tol=1e-9) so we never skip when the sampler would still use it.
+    cfg = float(sampler.get("cfg", 1.0))
+    need_negative = not (config.SKIP_NEGATIVE_AT_CFG1 and math.isclose(cfg, 1.0))
     positive, negative, latent_image, mask = encode_prompt(
         clip, vae, prompt, image_path, mask_path, spec=spec, mask_binary=mask_binary,
-        additional_images=additional_images,
+        additional_images=additional_images, need_negative=need_negative,
     )
 
     previewer = preview_module.get_previewer(model)
@@ -275,7 +282,7 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
         model, positive, negative, latent_image, noise, steps, denoise, mask, seed, callback,
         sampler_name=sampler.get("sampler_name"),
         scheduler=sampler.get("scheduler"),
-        cfg=float(sampler.get("cfg", 1.0)),
+        cfg=cfg,
     )
     vram_probe.stage("sample END")
 
@@ -302,7 +309,7 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
 
 
 def encode_prompt(clip, vae, prompt, image_path, mask_path, resolution=None, mode=None, spec=None,
-                  mask_binary=True, additional_images=None):
+                  mask_binary=True, additional_images=None, need_negative=True):
     """Pipeline stage: conditioning + latents from the prompt / reference.
 
     ``spec`` (Step 6.5) is a normalized resolution dict; when omitted the legacy
@@ -311,10 +318,12 @@ def encode_prompt(clip, vae, prompt, image_path, mask_path, resolution=None, mod
     mask to 0 / 1; ``False`` (handlers for user / C# masks, outpaint) keeps the
     soft 0..1 ramp.
     ``additional_images`` (Step 9C.5-D) are the ordered reference images after the main.
+    ``need_negative`` (optimization §10.2.2) skips the negative-prompt encode when
+    the sampler will discard it (cfg==1.0); the positive conditioning is reused.
     """
     return _encode(
         clip, vae, prompt, image_path, mask_path, resolution, mode, spec, mask_binary,
-        additional_images=additional_images,
+        additional_images=additional_images, need_negative=need_negative,
     )
 
 
@@ -400,12 +409,16 @@ def _free_vram():
 
 
 def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None, spec=None,
-            mask_binary=True, additional_images=None):
+            mask_binary=True, additional_images=None, need_negative=True):
     """Encode prompt + optional source image into conditioning / latents.
 
     Returns ``(positive, negative, latent_samples, denoise_mask)``. With a mask
     the target latent is the encoded source (proper inpaint); without one it is
     an empty latent and the source rides along as reference latents (edit).
+
+    ``need_negative`` (optimization §10.2.2): when ``False`` (cfg==1.0, the sampler
+    discards uncond) the negative-prompt encode is skipped and the positive
+    conditioning is reused for both slots.
 
     ``spec`` (Step 6.5) is a normalized dict ``{"mode": "side"|"area"|"explicit",
     "value": int}`` (or ``{"mode": "explicit", "width", "height"}``); when it is
@@ -469,9 +482,16 @@ def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None, spe
     positive = clip.encode_from_tokens_scheduled(
         clip.tokenize(prompt, images=images_vl, keep_vision=keep_vision, prevent_empty_text=True)
     )
-    negative = clip.encode_from_tokens_scheduled(
-        clip.tokenize("", images=images_vl, keep_vision=keep_vision, prevent_empty_text=True)
-    )
+    if need_negative:
+        negative = clip.encode_from_tokens_scheduled(
+            clip.tokenize("", images=images_vl, keep_vision=keep_vision, prevent_empty_text=True)
+        )
+    else:
+        # cfg==1.0: the sampler drops uncond, so skip its encode (vision tower included)
+        # and reuse the positive conditioning. With references, conditioning_set_values()
+        # returns a fresh list per call (no shared mutation); with none, the same object is
+        # passed for both slots — harmless because the sampler ignores uncond at cfg==1.0.
+        negative = positive
     if references:
         positive = node_helpers.conditioning_set_values(
             positive, {"reference_latents": references}, append=True
