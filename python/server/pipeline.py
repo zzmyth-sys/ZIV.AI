@@ -32,6 +32,7 @@ import pipeline_hooks
 import pipeline_io
 import plugin_sampling
 import preview as preview_module
+import seams
 import vram_probe
 from pipeline_io import (
     _emit,
@@ -256,26 +257,19 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
         additional_images=additional_images, need_negative=need_negative,
     )
 
-    # batch 3: an optional capability plugin may replace the model / schedule / sampler
-    # for a maskless image edit. Runs after `encode_prompt` because the plan needs the
-    # latent (schedule depends on its token count) and the mask (edit-only predicate).
-    # Disabled / declining plugins return None, leaving every step below unchanged.
-    plan = plugin_sampling.resolve_plan(plugin_sampling.build_context(
+    # batch 3 / S3: the plugin's ``before_sample`` force (model patch / sigmas / schedule /
+    # steps / skip_shift) is now applied through the seam system (``seams.apply``), replacing
+    # the old hardcoded ``plugin_sampling.resolve_plan`` + ``plan_*`` (behaviorally equivalent).
+    # Runs after ``encode_prompt`` because the plan needs the latent (schedule token count) and
+    # the mask (edit-only predicate); a declining / disabled plugin leaves every step unchanged.
+    sample_ctx = seams.apply("before_sample", plugin_sampling.build_context(
         op=op, model=model, clip=clip, vae=vae, latent=latent_image, mask=mask,
         prompt=prompt, image_path=image_path, mask_path=mask_path, steps=steps,
         denoise=denoise, seed=seed, cfg=cfg, sampler_preset=sampler, model_id=model_id,
     ))
-    plan_sigmas = plugin_sampling.plan_sigmas(plan)
-    if plan is not None:
-        model = plugin_sampling.plan_model(plan, model)
-        steps = plugin_sampling.plan_steps(plan, steps)
-
-    # Step 8-2: the schedule model + shift are data (models.json sampler block); AuraFlow
-    # remains the only supported schedule type. Patch a clone so the resident model is
-    # never mutated. A plan that ships its own sigmas defaults to skipping the shift.
-    if plugin_sampling.applies_shift(plan, plan_sigmas) and sampler.get("type", "auraflow") == "auraflow":
-        shift = float(sampler.get("shift", config.AURAFLOW_SHIFT))
-        model = ModelSamplingAuraFlow().patch_aura(model, shift)[0]
+    model = sample_ctx["model"]
+    steps = plugin_sampling.report_steps(sample_ctx, steps)
+    plan_sigmas = sample_ctx.get("sigmas")
 
     previewer = preview_module.get_previewer(model)
     preview_every = max(1, int(config.PREVIEW_EVERY))
@@ -305,17 +299,18 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
     noise = comfy.sample.prepare_noise(latent_image, seed)
     vram_probe.stage("sample BEG (first call loads weights)")
 
-    # batch 3: the plugin installs the LoRA side-branch (a MODEL clone / its hooks) during
-    # `sampling_plan`; its cleanup must run even on OOM because `run()` retries `_run_once`
-    # per resolution fallback and must not leak / double-apply hooks.
+    # S3: the plugin installs its LoRA side-branch during the `before_sample` seam; its
+    # cleanup must run even on OOM because `run()` retries `_run_once` per resolution
+    # fallback and must not leak / double-apply hooks. `cleanup_ctx` runs the ctx's cleanup
+    # (single `cleanup` key + aggregated `cleanups` list) and never raises.
     try:
-        samples = plugin_sampling.sample(
-            plan=plan, sigmas=plan_sigmas, model=model, noise=noise, positive=positive,
-            negative=negative, latent=latent_image, mask=mask, seed=seed, callback=callback,
-            steps=steps, denoise=denoise, cfg=cfg, sampler=sampler, legacy_sample=sample,
+        samples = plugin_sampling.sample_from(
+            sample_ctx, noise=noise, positive=positive, negative=negative,
+            latent=latent_image, mask=mask, seed=seed, callback=callback, steps=steps,
+            denoise=denoise, legacy_sample=sample,
         )
     finally:
-        plugin_sampling.cleanup(plan)
+        plugin_sampling.cleanup_ctx(sample_ctx)
     vram_probe.stage("sample END")
 
     # A cancel that lands after the last sampling step still aborts here; the

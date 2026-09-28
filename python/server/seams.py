@@ -4,8 +4,9 @@
 模块级可调用对象（如 ``before_encode(ctx)``），返回一个 **patch dict**；本模块的 reducer 把
 patch 按**白名单**并入 ctx，超出白名单的键被忽略，让插件无法把管线改乱。
 
-本批（S1）只建骨架：reducer 是**纯函数**，只做 patch 合并，**不做实际施力**（如 AuraFlow
-patch_aura、sampler_object 等留待 S3 从 ``pipeline.py`` 迁入）。``pipeline.py`` 本批零改。
+S1 建骨架：reducer 只做 patch 合并。S3 把 ``before_sample`` 的**施力**（AuraFlow ``patch_aura`` /
+``sigmas`` 直采）从 ``pipeline.py`` 迁入对应 reducer；其余 5 个接缝仍只合并（S4），且**不 import**
+torch / comfy（顶层保持 CPU-only，重型 import 延迟到函数内）。
 
 契约（权威见 ``DOC/INTERFACES.md`` 尾部「接缝系统」段）：
 
@@ -22,6 +23,8 @@ patch_aura、sampler_object 等留待 S3 从 ``pipeline.py`` 迁入）。``pipel
 """
 
 import logging
+
+import config
 
 _LOG = logging.getLogger("zivai.server")
 
@@ -81,9 +84,63 @@ def _apply_after_encode(ctx, patch):
     return _merge(ctx, patch, _WHITELIST["after_encode"])
 
 
+def _fit_sigmas(sigmas, steps):
+    """Plan sigmas 的 token 数须等于采样步数；不等则视为**某一方误读**并忽略 sigmas（等价旧行为）。
+
+    旧路径从不检查，误读的 sigmas 会在 ``sample_custom`` 里炸；这里安全降级到旧采样器路径。
+    """
+    if sigmas is None or not hasattr(sigmas, "shape") or len(sigmas.shape) != 1:
+        return sigmas
+    try:
+        if int(sigmas.shape[0]) == int(steps):
+            return sigmas
+    except (TypeError, ValueError):
+        return sigmas
+    _LOG.warning(
+        "before_sample: sigmas token count %s != steps %s; ignoring sigmas",
+        tuple(sigmas.shape), steps,
+    )
+    return None
+
+
 def _apply_before_sample(ctx, patch):
-    # S3 接入时补实际施力（AuraFlow patch_aura / sigmas→sample_custom）。本批只合并 patch。
-    return _merge(ctx, patch, _WHITELIST["before_sample"])
+    """S3：``before_sample`` reducer = 白名单合并 **+ 施力**（等价旧 ``pipeline`` 直调）。
+
+    施力归属（S3 迁移，逐项等价）：
+
+    - ``model``：插件已在本 ctx 上施力完毕，此处只归一（falsy → 施力前的 model）；
+    - ``steps``：归一（falsy / 非 int → 施力前的值），进度与采样共用；
+    - ``sigmas``：仅当 token 数 == steps 时保留（:func:`_fit_sigmas`）；
+    - ``skip_shift``：缺省 = 无 sigmas（旧 ``applies_shift`` 语义，sigmas 自带 schedule）；
+    - AuraFlow ``patch_aura``：``applies_shift`` 为真且 schedule 为 ``auraflow`` → 对模型克隆施力。
+
+    ``MODEL`` 符号延迟到函数内 import（顶层仍 CPU-only）；看护②：pipeline 不再持有 AuraFlow 类。
+    """
+    merged = _merge(ctx, patch, _WHITELIST["before_sample"])
+    base_model = ctx.get("model")
+    model = merged.get("model") or base_model
+
+    steps = merged.get("steps")
+    try:
+        steps = max(1, int(steps))
+    except (TypeError, ValueError):
+        steps = ctx.get("steps")
+
+    sigmas = _fit_sigmas(merged.get("sigmas"), steps)
+    if sigmas is None:
+        skip = bool(merged.get("skip_shift", True))
+    elif "skip_shift" in merged:
+        skip = bool(merged.get("skip_shift"))
+    else:
+        skip = False
+    if not skip and (ctx.get("sampler_preset") or {}).get("type", "auraflow") == "auraflow":
+        from comfy_extras.nodes_model_advanced import ModelSamplingAuraFlow
+
+        shift = float((ctx.get("sampler_preset") or {}).get("shift", config.AURAFLOW_SHIFT))
+        model = ModelSamplingAuraFlow().patch_aura(model, shift)[0]
+
+    merged["model"], merged["steps"], merged["sigmas"] = model, steps, sigmas
+    return merged
 
 
 def _apply_after_sample(ctx, patch):

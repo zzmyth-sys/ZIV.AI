@@ -18,6 +18,15 @@ import seams
 from plugins import dispatch
 
 
+def _comfy_available():
+    try:
+        import comfy_extras.nodes_model_advanced  # noqa: F401
+
+        return True
+    except Exception:  # noqa: BLE001 - missing heavy stack is a skip, not a failure
+        return False
+
+
 class SeamEnumTests(unittest.TestCase):
     def test_seams_exact_and_ordered(self):
         self.assertEqual(
@@ -218,6 +227,87 @@ class CleanupKeyConsistencyTests(unittest.TestCase):
     def test_aggregated_key_in_every_whitelist(self):
         for anchor in seams.SEAMS:
             self.assertIn(seams.CLEANUPS_KEY, seams._WHITELIST[anchor])
+
+
+class BeforeSampleForceTests(unittest.TestCase):
+    """S3：``before_sample`` reducer 的施力面（等价旧 ``pipeline.py`` 直调 ``plugin_sampling``）。
+
+    桩掉 ``dispatch.call_chain`` 注入 patch，只验证 reducer 的 AuraFlow 施力 / 归一。AuraFlow
+    分支内 import 真实 ``comfy_extras``（本机无重栈则跳过该分支用例）。
+    """
+
+    def _ctx(self, **overrides):
+        ctx = {
+            "model": "M0",
+            "steps": 40,
+            "sampler_preset": {"type": "auraflow", "shift": 3.1},
+        }
+        ctx.update(overrides)
+        return ctx
+
+    def _apply(self, ctx, patch):
+        with mock.patch.object(dispatch, "call_chain", return_value=dict(patch)):
+            return seams.apply("before_sample", ctx)
+
+    def test_no_patch_keeps_model_steps_sigmas_none(self):
+        out = self._apply(self._ctx(), {})
+        self.assertEqual(out["model"], "M0")
+        self.assertEqual(out["steps"], 40)
+        self.assertIsNone(out["sigmas"])
+
+    def test_explicit_sigmas_skip_shift_keeps_custom_model(self):
+        sigmas = [1.0, 0.0]
+        out = self._apply(self._ctx(), {"model": "MP", "sigmas": sigmas, "skip_shift": True})
+        self.assertEqual(out["model"], "MP")
+        self.assertIs(out["sigmas"], sigmas)
+
+    def test_steps_normalised_to_max1(self):
+        self.assertEqual(self._apply(self._ctx(), {"steps": 0})["steps"], 1)
+        self.assertEqual(self._apply(self._ctx(), {"steps": "6"})["steps"], 6)
+        self.assertEqual(self._apply(self._ctx(), {"steps": None})["steps"], 40)
+
+    def test_sigmas_token_count_mismatch_ignored(self):
+        sigmas = mock.Mock(shape=(3,))
+        out = self._apply(self._ctx(), {"sigmas": sigmas, "skip_shift": True})
+        self.assertIsNone(out["sigmas"])
+
+    def test_falsy_patch_model_keeps_base(self):
+        out = self._apply(self._ctx(), {"model": None})
+        self.assertEqual(out["model"], "M0")
+
+    def test_cleanups_survive_reducer(self):
+        fns = [lambda: None]
+        out = self._apply(self._ctx(), {seams.CLEANUPS_KEY: fns})
+        self.assertEqual(seams.collect_cleanup(out), fns)
+
+
+@unittest.skipUnless(_comfy_available(), "ComfyUI stack not available (CPU-only interpreter)")
+class BeforeSampleAuraFlowTests(unittest.TestCase):
+    """AuraFlow 施力分支：需真实 ``comfy_extras``（CPU 下单测跳过）。"""
+
+    def test_shift_applied_without_sigmas(self):
+        ctx = {"model": "M0", "steps": 40, "sampler_preset": {"type": "auraflow", "shift": 3.1}}
+        with mock.patch.object(dispatch, "call_chain", return_value={}), \
+                mock.patch.object(seams, "ModelSamplingAuraFlow") as fake:
+            fake.return_value.patch_aura.return_value = ["PATCHED"]
+            out = seams.apply("before_sample", ctx)
+        fake.return_value.patch_aura.assert_called_once_with("M0", 3.1)
+        self.assertEqual(out["model"], "PATCHED")
+
+    def test_shift_skipped_with_sigmas(self):
+        ctx = {"model": "M0", "steps": 2, "sampler_preset": {"type": "auraflow", "shift": 3.1}}
+        with mock.patch.object(dispatch, "call_chain", return_value={"sigmas": [1.0, 0.0]}), \
+                mock.patch.object(seams, "ModelSamplingAuraFlow") as fake:
+            out = seams.apply("before_sample", ctx)
+        fake.return_value.patch_aura.assert_not_called()
+        self.assertEqual(out["model"], "M0")
+
+    def test_shift_skipped_for_non_auraflow_preset(self):
+        ctx = {"model": "M0", "steps": 40, "sampler_preset": {"type": "other", "shift": 3.1}}
+        with mock.patch.object(dispatch, "call_chain", return_value={}), \
+                mock.patch.object(seams, "ModelSamplingAuraFlow") as fake:
+            seams.apply("before_sample", ctx)
+        fake.return_value.patch_aura.assert_not_called()
 
 
 if __name__ == "__main__":

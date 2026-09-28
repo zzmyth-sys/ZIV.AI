@@ -7643,3 +7643,52 @@ invent a new identity.`
 - 涉及文件：`python/server/handlers.py`、`src/ZivAiEditor.Backend/PluginFileDto.cs`、
   `Template/plugins.json`、`DOC/{ARCHITECTURE,INTERFACES}.md`。
 
+
+## 接缝系统接线 S3：`before_sample` → `seams.apply`（2026-09-29，只增）
+
+> 目标：把 `pipeline.py` 的 `before_sample` 接缝从「硬编码 `plugin_sampling` 调用」改为
+> `seams.apply("before_sample", ctx)`，**等价替换**（行为不变）。本批只接 `before_sample` 一个锚点，
+> 其余 5 个留 S4；不迁 Viggle（S6）、不碰 C# UI（S5）、不改数据层（批 A 冻结）、不 commit。
+
+### A · 契约（`DOC/INTERFACES.md` §42）
+- `seams.apply("before_sample", ctx)` 为唯一入口；施力（AuraFlow `patch_aura` / `model` / `steps` /
+  `sigmas` / `skip_shift` 归一）迁入 `_apply_before_sample`；`_fit_sigmas(sigmas, steps)` 做 token 数
+  校验（不等则忽略 sigmas）。
+- `plugin_sampling` 保留全部旧函数（legacy adapter），**追加** `sample_from(ctx, …)` /
+  `report_steps(ctx, default)` / `cleanup_ctx(ctx)` 三个 ctx 适配包装。
+
+### B · 改动
+- `python/server/seams.py`（+~55 行，213 行 < Z8）：
+  - 顶层 `import config`；`_fit_sigmas`；`_apply_before_sample` 迁入施力（`ModelSamplingAuraFlow`
+    延迟 import，顶层仍无 torch / comfy）。
+- `python/server/plugin_sampling.py`（164 行）：追加 `sample_from` / `report_steps` / `cleanup_ctx`
+  （`cleanup_ctx` 经 `seams.collect_cleanup` 聚合执行）；**既有函数零改**。
+- `python/server/pipeline.py`（536 行）：`import seams`；`_run_once` 的 `before_sample` 段替换为
+  `seams.apply`；AuraFlow 施力删除（迁走）；采样改 `sample_from`、收尾改 `cleanup_ctx`。
+- `python/server/test_seams.py`（+~70 行）：`BeforeSampleForceTests`（无重栈可跑）+ `BeforeSampleAuraFlowTests`
+  （需 `comfy_extras`，CPU 跳过）。
+
+### C · 等价性要点
+- 旧路径 `plan=None`（无插件）→ 新路径 `sample_ctx["sigmas"]=None` → `sample_from` 走 legacy
+  `comfy.sample.sample`；`model` / `steps` 归一等同旧 `plan_model` / `plan_steps` 缺省。
+- 旧插件 Viggle（`capabilities:["sampling_plan"]`，sigmas 6 节点）：`_seams_for` 映射 `before_sample`
+  → `_fn_for` 回退 `sampling_plan` → patch 经白名单合并 → `_fit_sigmas` 在 6 步下通过 → `sample_from`
+  走 `sample_custom`；`skip_shift=True` → 不施 AuraFlow。与旧路径完全一致。
+
+### D · 验证（Z29 / Z30：CPU-only，无 GPU、不启动后端 / App）
+- `python -m py_compile python/server/seams.py python/server/plugin_sampling.py python/server/pipeline.py
+  python/server/plugins/dispatch.py` → exit 0。
+- `python -m unittest test_seams test_dispatch`（cwd `python/server`）→ **76 通过 / 0 失败（3 skip）**。
+- `python -m unittest discover -p "test_*.py"`（cwd `python/server`）→ **185 通过 / 0 失败（9 skip）**。
+- `test_plugin_pipeline.py`（GPU 端到端，断言 OFF→`sample`+AuraFlow / ON→`sample_custom`）：本机无
+  重栈 → **跳过**；路由等价由该用例在 GPU host 覆盖（Z29/Z30 未跑 GPU）。
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 警告 / 0 错误**。
+- `dotnet test src\ZIV.AI.sln -c Release --no-build --filter "FullyQualifiedName!~Ipc"`（非 GPU 全量，
+  **未跑无过滤 dotnet test**）→ **747 通过 / 0 失败**。
+
+### E · 不做 / 遗留
+- 不接其余 5 锚点（S4）；不改 `seams.SEAMS` / `apply` 签名 / `dispatch.py`；不动 `plugin_sampling`
+  既有函数行为；不改 `pipeline_hooks`；不迁 Viggle 数据（S6）。
+- 「一个插件一条 registry entry + 单模块」的两条隐性不变量（**数组序**与 `seams` / `capabilities`
+  互斥）以断言形式记录，未加显式校验（避免把 valid 配置变成失败）。
+- 未 commit（用户决定）。

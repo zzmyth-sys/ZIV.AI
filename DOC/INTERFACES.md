@@ -564,3 +564,36 @@
 - **兼容性（双读）**：旧插件（`capabilities:["sampling_plan"]`，仅导出 `sampling_plan`）无需改动即被
   `call_chain("before_sample", …)` 路由；新插件用 `seams` 字段 + 与接缝同名函数。
 - **不做**：不改 IPC / 命令集；无新 NuGet / Python 依赖；`pipeline.py` 零改（S3 才接）。
+
+## 42. 接缝系统接线 S3：`before_sample` 从硬编码调用迁到 `seams.apply`（2026-09-29，只增）
+
+- **背景**：S1/S2 建好接缝骨架后，`pipeline.py` 仍硬编码 `plugin_sampling.resolve_plan` + `plan_*`
+  直调。S3 把 **`before_sample` 接缝**的「施力」迁到 `seams.apply("before_sample", ctx)`，**等价替换**
+  （行为不变）；其余 5 个锚点仍留 S4。
+- **改前 → 改后（`pipeline._run_once`）**：
+  - 改前：`plan = plugin_sampling.resolve_plan(build_context(...))` → `plan_sigmas` / `plan_model` /
+    `plan_steps`；AuraFlow `patch_aura` 直写在 `_run_once`；采样 `plugin_sampling.sample(plan=…)`；
+    收尾 `plugin_sampling.cleanup(plan)`。
+  - 改后：`sample_ctx = seams.apply("before_sample", plugin_sampling.build_context(...))`（内部经
+    `dispatch.call_chain` 调插件、reducer 白名单合并 + 施力）→ `model = sample_ctx["model"]` /
+    `steps = plugin_sampling.report_steps(sample_ctx, steps)` / `plan_sigmas = sample_ctx["sigmas"]`；
+    采样 `plugin_sampling.sample_from(sample_ctx, …)`；收尾 `plugin_sampling.cleanup_ctx(sample_ctx)`。
+- **施力归属**：AuraFlow `patch_aura`、`sigmas` / `steps` / `skip_shift` / `model` 归一迁入
+  `seams._apply_before_sample`（等价旧 `applies_shift` / `plan_*`）。`ModelSamplingAuraFlow` **延迟
+  import** 到函数内（顶层仍 CPU-only）。
+- **`seams._fit_sigmas(sigmas, steps)`**：plan sigmas 的 token 数须等于采样步数，不等则忽略 sigmas
+  （等价旧路径：旧代码从不检查，误读 sigmas 会在 `sample_custom` 抛错）。旧插件（Viggle）的 6-token
+  sigmas 在 6 步下通过；步数被覆盖时安全降级到旧采样器路径。
+- **`plugin_sampling` 新增包装**（不删旧函数，legacy adapter 保留）：
+  - `sample_from(ctx, …)`：`sample(plan=ctx if ctx["sigmas"] else None, sigmas=…, cfg=ctx["cfg"],
+    sampler=ctx["sampler_preset"] or {}, …)`；
+  - `report_steps(ctx, default)` = `plan_steps(ctx if sigmas else None, default)`；
+  - `cleanup_ctx(ctx)`：`seams.collect_cleanup(ctx)` 逆序执行（单个 `cleanup` + 聚合 `cleanups`），
+    永不抛；接缝引入后 cleanup 仍生效（OOM 重试不泄漏）。
+- **双路径一致性**：旧插件（`capabilities:["sampling_plan"]`、只导出 `sampling_plan`）→
+  `_seams_for` 映射到 `before_sample` → `_fn_for` 回退函数名 → 仍触发 `sample_custom`；新插件
+  （`seams:["before_sample"]` + 同名函数）走新路径。`dispatch.call`（legacy）/ `call_chain`（新）并存。
+- **等价性验证（关键）**：`test_plugin_pipeline.py`（GPU 端到端）桩插件 OFF / ON 路径断言不变；
+  本机无重栈 → **跳过**（GPU host 由既有用例覆盖）。
+- **不做**：不接其余 5 锚点（S4）；不动 `plugins.json`（批 A 冻结）；不改 `seams.SEAMS` / `apply` 签名
+  / `dispatch.py`；不迁 Viggle 数据（S6）；不改 `plugin_sampling` 既有函数行为 / `pipeline_hooks`。

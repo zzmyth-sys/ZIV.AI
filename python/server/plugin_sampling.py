@@ -129,3 +129,36 @@ def cleanup(plan):
         fn()
     except Exception as exc:  # noqa: BLE001 - cleanup must never fail the task
         _LOG.warning("plugin cleanup failed: %s", exc)
+
+
+def sample_from(ctx, noise, positive, negative, latent, mask, seed, callback, steps,
+                denoise, legacy_sample):
+    """S3：在接缝 ctx 上执行一次采样（``pipeline`` 的 ``before_sample`` 执行面）。
+
+    等价旧的 ``sample(plan=…, sigmas=…, cfg=cfg, sampler=sampler)``：ctx 已由 ``seams.apply`` 施力并
+    归一（``sigmas`` 合法或 None、``steps`` 归一），故这里只做 ``plan = ctx if sigmas else None`` 的
+    复自适应并转发 :func:`sample`。``cfg`` / ``sampler`` 取自 ctx（旧路径同源）。
+    """
+    sigmas = ctx.get("sigmas")
+    return sample(
+        plan=ctx if sigmas is not None else None, sigmas=sigmas, model=ctx.get("model"),
+        noise=noise, positive=positive, negative=negative, latent=latent, mask=mask,
+        seed=seed, callback=callback, steps=steps, denoise=denoise, cfg=ctx.get("cfg"),
+        sampler=ctx.get("sampler_preset") or {}, legacy_sample=legacy_sample,
+    )
+
+
+def report_steps(ctx, default):
+    """S3：接缝 ctx 的进度步数（旧 ``plan_steps(plan, steps)`` 的 ctx 版）。"""
+    return plan_steps(ctx if ctx.get("sigmas") is not None else None, default)
+
+
+def cleanup_ctx(ctx):
+    """S3：接缝 ctx 的收尾（旧 ``cleanup(plan)`` 的 ctx 版）：单个 ``cleanup`` + 聚合列表，永不抛。"""
+    from seams import collect_cleanup
+
+    for fn in collect_cleanup(ctx):
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001 - cleanup must never fail the task
+            _LOG.warning("plugin cleanup failed: %s", exc)
