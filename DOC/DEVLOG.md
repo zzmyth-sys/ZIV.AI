@@ -7605,3 +7605,41 @@ invent a new identity.`
 - `seams` 字段**尚未**写入 `plugins.json`（批 A 在改该文件）→ 目前所有接缝经 legacy 映射解析。
 - `call_chain` 返回「原始累积 ctx」**不含白名单**，契约调用必须经 `seams.apply`（已注明）。
 
+---
+
+## 提交 2272db3 逻辑分层（2026-09-29，只增）
+
+> 因**并发会话提交压在 `2272db3` 之上**（`ef1cccb` S2 / `4c48e96` S1），物理拆分须 `git rebase` 重写对方哈希，
+> 故**未物理拆分**；此处登记其**逻辑分层**，供评审 / 回溯。`2272db3` 共 **26 文件（+1170 / −24）**。
+
+### L1 · plugins.user.json 用户覆盖合并
+- 实现：`python/server/plugins/loader.py`、`src/ZivAiEditor.Backend/PluginRegistry.cs`
+- 测试：`python/server/test_plugins.py`、`src/ZivAiEditor.Tests/PluginRegistryTests.cs`
+- 文档：`DOC/FROZEN.md` / `DOC/ACCEPTANCE.MD` 尾部
+
+### L2 · 注销登记
+- 实现：`src/ZivAiEditor.Backend/PluginOverrideStore.cs`（新）、`src/ZivAiEditor.App/SettingsWindow.Plugins.cs`
+- 测试：`src/ZivAiEditor.Tests/PluginRegistryTests.cs`、`src/ZivAiEditor.Tests/UI/SettingsWindowSmokeTests.cs`
+
+### L3 · LoRA 根目录配置
+- Python：`python/server/config.py`（`LORA_ROOT`）、`python/server/loras.py`
+- C#：`App/Shell/SettingsLoader.cs`、`App/Shell/SettingsWriter.cs`、`App/AppContext.cs`、
+  `App/SettingsWindow.axaml`、`App/SettingsWindow.axaml.cs`
+- 测试：`python/server/test_loras.py`、`src/ZivAiEditor.Tests/SettingsLoaderTests.cs`、`SettingsWriterTests.cs`
+- 其它：`.gitignore`（忽略 `Template/plugins.user.json`）
+
+### 注 · `settings.ini.template`
+- **不在** `2272db3`（已核 `git show --name-only 2272db3`）：`lora_root` 键由设置窗口保存时写入，
+  模板**未**预置 → 是否补进模板 **待裁决**。
+
+### 未物理拆分原因
+- 并发提交（`ef1cccb` S2 / `4c48e96` S1）压在其上，`rebase` 会重写对方哈希、且对方仍在活动提交；
+- `python/server/loras.py` / `DOC/FROZEN.md` / `DOC/ACCEPTANCE.MD` **单 hunk 横跨两批**
+  （如 `resolve_path` 内 `validate` 与 `LORA_ROOT` 同函数），hunk 级拆分风险高、收益低。
+
+### 附 · `2272db3` 还含「小收尾批」内容（跨 L1–L3，无法归入单一 L）
+- Z-021 编号裁决；`loras.resolve_path(validate=True)` + `lora_unavailable` 错误帧；
+  插件 META 上浮（`capabilities`）；姿态转换（SDPose / BodyRatioMapper）废弃口径。
+- 涉及文件：`python/server/handlers.py`、`src/ZivAiEditor.Backend/PluginFileDto.cs`、
+  `Template/plugins.json`、`DOC/{ARCHITECTURE,INTERFACES}.md`。
+
