@@ -7487,7 +7487,7 @@ invent a new identity.`
   `plan_steps` / `applies_shift` / `sample` / `cleanup`；纯 CPU，torch / comfy 惰性导入）。
 - 复核修复：`resolve_plan` 把非 dict 的插件返回归一为 `None`（畸形插件不再在管线里抛）；
   `sampling_plan` 增加 `model_id` 白名单（非 `qwen-image-2.1` 直接放弃，避免对非 Qwen 模型挂错 LoRA）。
-- 新插件 `plugins/qwen21-viggle-6step/__init__.py`：`sampling_plan` 仅在
+- 新插件 `plugin_packs/qwen21-viggle-6step/__init__.py`：`sampling_plan` 仅在
   `op=="inpaint"` ∧ 有主图 ∧ 无 mask ∧ `denoise≈1.0` 时接管；LoRA 侧分支（`y = Wx + BAx`，
   含 int8 融合 MLP 的 `gate_up`/`out` 旁路、张量 device 迁移、`finally` 摘 hook）与 sigma 公式
   **忠实移植**自权威节点 `viggle_turbo.py`（见 `E:\Downloads\工作流\姿态编辑流\插件放custom_nodes根目录\`）。
@@ -7499,7 +7499,7 @@ invent a new identity.`
   4) 再取 previewer；5) 有 sigmas → `comfy.sample.sample_custom` + `sampler_object` + plan 步数；
   无 → 原 `comfy.sample.sample` 路径不变；6) install→sample 包 `try/finally` 保证 `cleanup` 必跑
   （OOM 降级会重跑 `_run_once`，plan 亦按构造重新解析）。plan 为 None 时参数与旧实现完全一致。
-- `Template/plugins.json`：登记 `qwen21-viggle-6step`（`dir` `plugins/qwen21-viggle-6step`，
+- `Template/plugins.json`：登记 `qwen21-viggle-6step`（`dir` `plugin_packs/qwen21-viggle-6step`，
   `enabled_by_default false`，`deps []`，`kind accel`）。`Template/loras.json`：新增
   id `qwen21-viggle-turbo-6step` → `E:\Downloads\工作流\姿态编辑流\lora\...-6step-lora-r256.safetensors`。
 - 发布：`ZivAiEditor.App.csproj` 增加 `plugins\**\*` 复制到程序目录；`publish.ps1` 强删清单加

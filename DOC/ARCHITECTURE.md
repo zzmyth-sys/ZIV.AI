@@ -644,5 +644,6 @@ ZIV.AI.sln
   （`python/server/plugins/` + `pipeline._run_once` 消费点）；C# 仍只管注册表与开关
   （`PluginRegistry` / `settings.ini [plugins]` → env），**契约不新增**。
 - **边界**：插件自带算力（LoRA 权重 / 调度）与降级策略；主图 / 掩码 / op 由 context 只读传入，
-  插件**不改 IPC、不改命令集、不改既有分层依赖方向**。默认关，关闭时禁用路径与改动前一致。
+  插件**不改 IPC、不改命令集、不改既有分层依赖方向**。默认关，关闭时**路由 / 参数与改动前一致**
+  （未做逐字节输出对比）。
 - **不做**：无新 NuGet；不新增 CLI / 公开签名。

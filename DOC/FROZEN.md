@@ -5286,7 +5286,7 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 |---|---|---|
 | `pipeline.run`（Python 内部） | 新增关键字 `op="inpaint"` | `run_outpaint` 传 `op="outpaint"`；`handlers._dispatch_op` 传真实 op。IPC 不变 |
 | `pipeline.py` | **Z8 拆分**：696 → **541 行** | 拆出 `pipeline_io.py`（IO / decode / 路径 / emit）与 `plugin_sampling.py`（capability 接缝），同名回引 |
-| `Template/plugins.json` | 登记 `qwen21-viggle-6step`（默认关） | `dir=plugins/qwen21-viggle-6step` |
+| `Template/plugins.json` | 登记 `qwen21-viggle-6step`（默认关） | `dir=plugin_packs/qwen21-viggle-6step` |
 | `Template/loras.json` | 新增 id `qwen21-viggle-turbo-6step` | 指向 viggle-turbo v0.2.1 6 步蒸馏 LoRA（本机路径） |
 | `ZivAiEditor.App.csproj` | 复制 `plugins\**\*` 到程序目录 | C# 仅动 csproj；`PluginRegistry` / env 注入未改 |
 | `publish.ps1` | 强删清单加 `plugins.json` | 与 commands / loras / models 同模式 |
@@ -5306,3 +5306,12 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 未接「检查依赖」按钮（仍 `待批 3` 后续；本批不动 IPC）。
 - **已知交互**：`sampling_plan` 谓词不检查 `additional_images`（多图控制）或请求已带的 LoRA
   （`pipeline_hooks`）——开启该插件会在其上叠加 6 步蒸馏 LoRA / 调度。默认关，故以**文档说明**取代自动排除。
+
+### 3.5 修订说明（2026-09-29，经用户授权 · 就地更新）
+
+- **改了**：插件代码目录 `plugins/` → **`plugin_packs/`**（含 `Template/plugins.json` 的 `dir`、
+  `App.csproj` 的复制 glob/Link、以及本节 3.2 表格的 `dir` 值）。
+- **为什么**：仓库根 `plugins/` 与加载器包 `python/server/plugins/` **同名二义**，易误读/易错。
+- **影响**：路径引用变化；`PLUGINS_BASE_DIR` 解析基准不变（仍为程序目录），dev / App 两端一致；
+  契约 / IPC / 命令集**无变化**。
+- **依据**：本会话评审「消歧」项（P1）。

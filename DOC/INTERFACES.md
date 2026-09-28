@@ -508,7 +508,7 @@
     `sampler_name` / `scheduler` / `cfg` / `steps` / `cleanup`(finally 调用)。
   - 管线语义：`sigmas` 非 None → `comfy.sample.sample_custom` + `samplers.sampler_object`；否则原
     `comfy.sample.sample` 路径不变；`skip_shift` 缺省且带 sigmas → 跳过 ModelSamplingAuraFlow。
-- **首个插件**：`qwen21-viggle-6step`（`plugins/qwen21-viggle-6step/`，默认关）——仅无掩码图像编辑
+- **首个插件**：`qwen21-viggle-6step`（`plugin_packs/qwen21-viggle-6step/`，默认关）——仅无掩码图像编辑
   （`op=="inpaint"` ∧ 有主图 ∧ 无 mask ∧ `denoise≈1.0`）接 6 步蒸馏 LoRA；LoRA 路径由 id
   `qwen21-viggle-turbo-6step`（`Template/loras.json`）解析。
 - **不做**：不改 IPC / 命令集；无新 NuGet；不新增 CLI。
