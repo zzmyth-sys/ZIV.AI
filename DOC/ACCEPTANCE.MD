@@ -4542,3 +4542,34 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 5. 若脸部未替换或变形，调 `loras[].strength_model`（当前 1.0）或确认 LoRA 与基础模型适配。
 
 - **不做**：不下载模型；未跑 GPU / 真实 App；未 commit。
+
+---
+
+## Z-021 编号冲突裁决（2026-09-29，只增）
+
+- 本文件早前「**Z-021 编号不一致**（FROZEN 现为「模板 UI T5」，裁决为「组合命令」）→ 待裁决」
+  **已裁决**（见 `FROZEN.md` 尾部同名段）：
+  - **`Z-021` 保留 = 「模板 UI（T5）」**；
+  - **「组合命令（/tag换背景）」= `Z-023`**（`FROZEN.md` T3.1.7 行，**本就已编号**），**无需新号**。
+- 原行不改，以本段为准。
+
+---
+
+## 插件配置层 + LoRA 根目录（配置层 · 2026-09-29）
+
+| 项 | 验收点 | 验证方式 | 结果 |
+|---|---|---|---|
+| PL.1 | 用户覆盖合并（整条目覆盖、新 id 追加） | `PluginRegistryTests` / `test_plugins.UserOverrideMergeTests` | 通过 |
+| PL.2 | 内置缺失 → 忽略用户文件 | 同上 | 通过 |
+| PL.3 | 注销移除用户条目 / 列表空删文件 | `PluginRegistryTests.RemoveEntry_*` | 通过 |
+| PL.4 | 注销按钮仅用户条目可用 | `SettingsWindowSmokeTests.PluginTab_Unregister_*` | 通过 |
+| LR.1 | `[models] lora_root` 解析（空 → null） | `SettingsLoaderTests.Load_Parses_Lora_Root` | 通过 |
+| LR.2 | `ZIV_AI_LORA_ROOT` 非空即注入（含不存在目录） | `BackendEnvironmentTests` | 通过 |
+| LR.3 | 写 `lora_root` 原子 / 保留注释 / 清空 | `SettingsWriterTests.WriteLoraRoot_*` | 通过 |
+| LR.4 | 相对路径拼接 / 无 root 透传 / validate 报错 | `test_loras.LoraRootTests` | 通过 |
+| LR.5 | 设置窗口新增 LoRA 根控件（TAB 仍 2） | `SettingsWindowSmokeTests` | 通过 |
+| V.1 | build | `dotnet build src\ZIV.AI.sln -c Release` | 0 警告 0 错误 |
+| V.2 | 非 GPU 全量 | 排除 `Ipc*` / `PythonProcessManagerTests` / `BackendTimeoutTests` | 747 通过 / 0 失败 |
+
+- **范围**：纯配置层；未改 IPC 契约 / 命令集 / `PythonProcessManager` / `pipeline.py` / `handlers.py` / TE-Speed / WD14。
+- **限制**：未跑 GPU / 未启动真实 App；未 commit。用户手动验证：编辑 `Template/plugins.user.json` 后重启 App 生效。

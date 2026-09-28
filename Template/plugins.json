@@ -6,6 +6,7 @@
       "id": "qwen21-viggle-6step",
       "display_name": "Qwen-Image-2.1 Viggle Turbo 6-Step (edit)",
       "version": "0.1.0",
+      "capabilities": ["sampling_plan"],
       "dir": "plugin_packs/qwen21-viggle-6step",
       "entry": "__init__.py",
       "deps": [],

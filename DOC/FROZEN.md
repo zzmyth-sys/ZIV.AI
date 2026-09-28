@@ -5315,3 +5315,119 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **影响**：路径引用变化；`PLUGINS_BASE_DIR` 解析基准不变（仍为程序目录），dev / App 两端一致；
   契约 / IPC / 命令集**无变化**。
 - **依据**：本会话评审「消歧」项（P1）。
+
+---
+
+## Z-021 编号冲突裁决（2026-09-29，只增）
+
+- **裁决**：**`Z-021` 保留 = 「模板 UI（T5）」**（与 T2.5 行一致）；本文件原行**不改**。
+- **「组合命令（/tag换背景）」**：**已为 `Z-023`**（T3.1.7 行，本文件），**无需新编号**；
+  `ACCEPTANCE.MD` / `DEVLOG.md` 中「Z-021 裁决为组合命令」的表述系**笔误** → 以本段为准。
+- **Z-0xx 现状**：已用 = Z-001…Z-025、Z-028…Z-030；**空号 = Z-026 / Z-027**（本轮不动用）。
+- **依据**：本会话小收尾批项 1；用户裁决「保留 Z-021 = 模板 UI」。
+- **风险**：本文件与 `ACCEPTANCE.MD` / `DEVLOG.md` 的既有编号表述仍有历史不一致，
+  以本段与 T2.5 / T3.1.7 行为准；后续新挂账从 **Z-026** 续接。
+
+---
+
+## 小收尾批（2026-09-29）· LoRA 校验 / 插件 META 上浮 / 姿态废弃
+
+> 四项小改：① Z-021 裁决（见上段）；② `loras` 文件存在性校验；③ 插件 META 上浮（数据驱动）；
+> ④ 姿态转换废弃口径。**只增不改**，不改 IPC，无新 NuGet / Python 依赖。
+
+### S1 契约 / 数据追加（只增）
+
+| 项 | 变化 | 备注 |
+|---|---|---|
+| `Template/plugins.json` | 每条插件新增 `version`(string) / `capabilities`(string[]) | 与模块 `PLUGIN_META` 保持一致（**无跨语言校验**，作者须手同步） |
+| `PluginDescriptor`（C#） | 新增 `Capabilities`（`IReadOnlyList<string>`） | `PluginFileDto.Capabilities` → 描述符；空项过滤 |
+| `loras.resolve_path`（Python） | 新增可选 `validate=False`；`validate=True` 且文件不存在 → `ValueError("LoRA 文件不存在：{path}")` | **使用时报错**；未用条目不校验；默认关（向后兼容） |
+| IPC `error` 帧 | 复用既有字段（`task_id`/`code`/`message`）；新增 code 值 **`lora_unavailable`** | `code` 本就自由文本，**非 schema 变更**（不改 IPC 契约） |
+
+### S2 行为变更
+
+- `handlers._register_loras` 以 `validate=True` 解析 LoRA；被请求的 LoRA 权重缺失 → 任务以
+  `lora_unavailable` **明确失败**（取代旧的「静默降级，任务照跑但无 LoRA」）。仅对**使用中**的 LoRA 生效。
+- 设置窗口「检查依赖」（置灰）→ **「检查安装」**（可用，仅 C# 侧「目录 + 入口文件」存在性检查，不涉 IPC）。
+  插件行新增元数据行：`v<version> · capabilities: <…>`。
+
+### S3 口径
+
+- Z-021 编号冲突：见上「Z-021 编号冲突裁决」段。
+- **姿态转换（SDPose + BodyRatioMapper）废弃**：见 `DEVLOG.md` 尾部「姿态转换废弃声明」与
+  `ARCHITECTURE.md` 尾部「姿态转换废弃」段。
+
+### S4 验证
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 警 0 错**。
+- 非 GPU filter 全量（排除 `BackendTimeoutTests` / `Ipc*` / `PythonProcessManagerTests`）
+  → **729 通过 / 0 失败**（基线 728 + 新增 `PluginMetaLabel` 测试 1 例 → 无回归）。
+- Python：`py_compile`（`loras.py` / `handlers.py`）+ `test_loras` **15** / `test_plugins` **24** / `test_dispatch` **18** 全通过。
+- 未跑 GPU / 未启动真实 App；未 commit（由用户决定）。
+
+---
+
+## 登记（2026-09-29）· `lora_unavailable` / 插件 META 跨语言一致性
+
+### R1 · IPC `error` code `lora_unavailable`（Python 新增；C# 消费方须知）
+
+- **来源**：`python/server/handlers.py` `_run_submit` —— `loras.resolve_path(..., validate=True)`
+  在权重文件缺失时抛 `ValueError`，任务以 `code="lora_unavailable"` **明确失败**（取代旧静默降级）。
+- **契约兼容**：`contracts/ipc-protocol.md:140` 的 `error` 帧 `code` 为**自由文本**，**无需改契约**。
+- **C# 消费**：`IpcInferenceClient.Receive.cs:211/287` 以 `ReadString(root,"code")` 原样读取，
+  包成 `InferenceBackendException(code, message)`（`InferenceProgressExtensions.cs:75`）；
+  **无 code 枚举 / switch**，新 code 原样透传 → **无需改 C#**。下游 UI / notify **若按 code 分支**需知晓此值。
+- **触发面**：仅当请求**实际引用**了某 LoRA 且其文件不存在；未引用的条目不受影响。
+- **不做**：不改 `contracts/ipc-protocol.md`；不改 IPC 任意字段。
+
+### R2 · `plugins.json` ↔ 插件 `PLUGIN_META` 跨语言一致性无校验（挂账 · **Z-026**）
+
+- **现状**：`Template/plugins.json` 的 `version` / `capabilities` 是模块 `PLUGIN_META` 的**手工副本**；
+  无跨语言校验 → 不一致时 **C# 显示 与 Python 运行期行为分叉**。
+- **约定**：插件作者改 `PLUGIN_META` 时**必须手动同步** `plugins.json`（见 `DOC/INTERFACES.md` §39）。
+- **未来考虑**：`plugins.loader` 启动时读取插件 `PLUGIN_META`，与 `plugins.json` 比对并告警
+  （需 Python→C# 通道 / 上报面，超出当前范围）。
+- **编号说明**：**Z-026**（上方「Z-021 编号冲突裁决」段确认的空号；如不妥可改号）。
+- **不改**：本轮只登记，不实现（不改 IPC / 无新依赖）。
+
+---
+
+## 登记（2026-09-29）：插件配置层（覆盖 / 注销）+ LoRA 根目录（配置层）
+
+### C1 插件用户覆盖 `Template/plugins.user.json`
+
+- **位置**：与内置 `Template/plugins.json` 同目录、同形状（`version` / `_comment` / `plugins`）。
+- **合并语义**：按 `id` **整条目覆盖**（用户条目胜出，**不**继承内置默认字段）+ 新 id **追加**在内置之后（按用户声明顺序）。
+  - **注意**：部分字段的用户条目会**静默重置**未写的内置默认（例如只写 `dir` 会丢掉内置的 `enabled_by_default`）。
+- **权威**：内置文件缺失 / 损坏 → 返回 `{}`，**且不读**用户覆盖文件（内置是权威，避免半套注册表）。
+- **Python**：`plugins.loader.load_registry()`（`path=None` 时读内置 + 同目录用户文件）；显式传 `path` 只读该文件、**不**合并同目录用户文件（测试用）。
+- **C#**：`PluginRegistry` 读取内置后合并同目录用户文件（缺失 / 损坏 → 无覆盖）；`All` = 合并结果；
+  新增 `UserFilePath` 与 `IsUserEntry(id)`（`[注销]` 按钮启用判定）。
+- **发布**：`publish.ps1` 无需改动——它保留整个 `Template/`，只强制刷新 4 个内置 json。
+
+### C2 注销登记
+
+- **新增** `src/ZivAiEditor.Backend/PluginOverrideStore.cs`：从 `plugins.user.json` 原子移除一个 id
+  （临时文件 + `File.Move(overwrite:true)`）；移除后列表为空则**删除**用户文件（镜像 `CommandTemplateService.ResetAll`）。
+  读仍由 `PluginRegistry` 独占（不新增第二份 JSON 读取器）。
+- **UI**（`SettingsWindow.Plugins.cs`）：每行一个 `[注销]` 按钮。仅用户条目可注销（`IsUserEntry`）；内置插件禁用，
+  tooltip「内置插件不可注销」。点击弹确认「确认注销该插件？目录文件不会删除。」，确认后写覆盖文件并刷新（启用判定每次刷新重算，不缓存）。
+- **语义**：移除同时是内置的 id → **回退到内置条目**（合并的预期结果，无需特判）。`settings.ini [plugins] <id>=0` 陈旧行**故意保留**不变。
+
+### C3 LoRA 根目录
+
+- `settings.ini [models] lora_root`（绝对路径；空 = 未配置，向后兼容）。
+- C#：`BackendSettings.LoraRoot`；`SettingsWriter.WriteLoraRoot`（路径规范化）；`AppContext.BuildBackendEnvironment`
+  以 **`AddIfSet`** 注入 `ZIV_AI_LORA_ROOT`（非空即注入，**不**要求目录存在，故配置错误在使用期才暴露）。
+- 设置窗口「环境」TAB 的「模型三件套」网格内新增一行 `PART_LoraRoot`（只读文本框）+ `PART_BrowseLoraRoot`（目录选择）
+  + `PART_ClearLoraRoot`（清除），TAB 数仍为 2。
+- Python：`config.LORA_ROOT = os.environ.get("ZIV_AI_LORA_ROOT","").strip()`；
+  `loras.resolve_path`：相对路径有 root → 拼接；无 root 且 `validate` → `ValueError("LoRA 相对路径需要配置 lora_root：…")`；
+  无 root 且不校验 → 原样透传（保留插件的降级与既有透传测试）。
+
+### C4 验证
+
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 警告 0 错误**。
+- 非 GPU filter 全量（排除 `BackendTimeoutTests` / `Ipc*` / `PythonProcessManagerTests`）→ **747 通过 / 0 失败**（729 + 新增 18）。
+- Python：`py_compile config.py loras.py plugins/loader.py` → **0**；`test_loras` **21**（原 15）、`test_plugins` **29**（原 24）全通过。
+- 未动 IPC 契约 / 命令集 / `PythonProcessManager` / `pipeline.py` / `handlers.py` / TE-Speed / WD14；未 commit。

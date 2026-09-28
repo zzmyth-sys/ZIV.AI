@@ -55,6 +55,19 @@ internal static class SettingsWriter
             });
 
     /// <summary>
+    /// Writes <c>[models] lora_root</c> (LoRA root directory; relative LoRA paths resolve against
+    /// it); empty clears the key. Path-normalized like the model paths.
+    /// </summary>
+    public static void WriteLoraRoot(string settingsPath, string loraRoot)
+        => WriteSectionValues(
+            settingsPath,
+            "models",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["lora_root"] = loraRoot ?? string.Empty,
+            });
+
+    /// <summary>
     /// Writes <c>[plugins]</c> enable states (batch 1). Keys are raw plugin ids; values are the
     /// literal <c>"1"</c> / <c>"0"</c> and are NEVER path-normalized (they are flags, not paths).
     /// Empty clears the key. Atomic and comment-preserving like the other writers.

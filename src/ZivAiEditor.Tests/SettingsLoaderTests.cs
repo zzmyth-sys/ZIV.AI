@@ -127,6 +127,22 @@ public class SettingsLoaderTests : IDisposable
     }
 
     [Fact]
+    public void Load_Parses_Lora_Root()
+    {
+        File.WriteAllLines(SettingsPath, new[] { "[models]", @"lora_root = D:\l\loras" });
+
+        Assert.Equal(@"D:\l\loras", SettingsLoader.Load(_directory).LoraRoot);
+    }
+
+    [Fact]
+    public void Load_Returns_Null_For_Missing_Or_Empty_Lora_Root()
+    {
+        File.WriteAllLines(SettingsPath, new[] { "[models]", "lora_root =" });
+
+        Assert.Null(SettingsLoader.Load(_directory).LoraRoot);
+    }
+
+    [Fact]
     public void Load_Parses_Plugins_Section()
     {
         File.WriteAllLines(SettingsPath, new[]
@@ -255,6 +271,28 @@ public class BackendEnvironmentTests : IDisposable
         var environment = ZivAiEditor.App.AppContext.BuildBackendEnvironment(settings, _directory);
 
         Assert.False(environment.ContainsKey("ZIV_AI_COMFY_ROOT"));
+    }
+
+    [Fact]
+    public void BuildBackendEnvironment_Injects_LoraRoot_Even_When_Directory_Absent()
+    {
+        // AddIfSet (NOT AddDirectoryIfPresent): a configured-but-missing root must reach Python.
+        var absent = Path.Combine(_directory, "no-such-loras");
+        var settings = new BackendSettings { LoraRoot = absent };
+
+        var environment = ZivAiEditor.App.AppContext.BuildBackendEnvironment(settings, _directory);
+
+        Assert.Equal(absent, environment["ZIV_AI_LORA_ROOT"]);
+    }
+
+    [Fact]
+    public void BuildBackendEnvironment_Omits_LoraRoot_When_Empty()
+    {
+        var settings = new BackendSettings { LoraRoot = "   " };
+
+        var environment = ZivAiEditor.App.AppContext.BuildBackendEnvironment(settings, _directory);
+
+        Assert.DoesNotContain("ZIV_AI_LORA_ROOT", environment.Keys);
     }
 
     [Fact]

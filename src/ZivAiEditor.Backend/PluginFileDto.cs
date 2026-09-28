@@ -28,6 +28,10 @@ internal sealed class PluginDto
     [JsonPropertyName("version")]
     public string? Version { get; init; }
 
+    /// <summary>Capability names the plugin exposes (must mirror the module's <c>PLUGIN_META</c>).</summary>
+    [JsonPropertyName("capabilities")]
+    public List<string>? Capabilities { get; init; }
+
     [JsonPropertyName("dir")]
     public string? Dir { get; init; }
 

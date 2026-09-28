@@ -27,6 +27,13 @@ public sealed class PluginDescriptor
     /// <summary>Entry file inside <see cref="Dir"/>; defaults to <c>__init__.py</c>.</summary>
     public string Entry { get; init; } = "__init__.py";
 
+    /// <summary>
+    /// Capability names the plugin exposes (batch 3 catalog). Data-driven copy of the module's
+    /// <c>PLUGIN_META.capabilities</c>; there is no cross-language check, so a plugin author must
+    /// keep the two in sync (see <c>DOC/INTERFACES.md</c> §38).
+    /// </summary>
+    public IReadOnlyList<string> Capabilities { get; init; } = Array.Empty<string>();
+
     /// <summary>Declared Python import names; checked (not installed) by the backend loader.</summary>
     public IReadOnlyList<string> Deps { get; init; } = Array.Empty<string>();
 
@@ -46,18 +53,64 @@ public sealed class PluginRegistry
 {
     private const string FileName = "plugins.json";
 
+    /// <summary>User override file living next to the built-in <c>plugins.json</c>.</summary>
+    public const string UserFileName = "plugins.user.json";
+
     private readonly List<PluginDescriptor> _plugins;
+    private readonly HashSet<string> _userIds;
 
     /// <param name="pluginsFilePath">
     /// Overrides the registry path (tests / App assembly use this). Defaults to
-    /// <c>{AppContext.BaseDirectory}/Template/plugins.json</c>.
+    /// <c>{AppContext.BaseDirectory}/Template/plugins.json</c>. The sibling
+    /// <c>plugins.user.json</c> is merged in as a whole-entry override (user wins; new ids
+    /// appended); it is never read when the built-in file is missing / empty.
     /// </param>
     public PluginRegistry(string? pluginsFilePath = null)
     {
-        _plugins = Load(pluginsFilePath);
+        var builtInPath = pluginsFilePath ?? Path.Combine(AppContext.BaseDirectory, "Template", FileName);
+        var builtIn = Load(builtInPath);
+        _userIds = new HashSet<string>(StringComparer.Ordinal);
+        _plugins = builtIn;
+
+        if (builtIn.Count == 0)
+        {
+            return;
+        }
+
+        UserFilePath = Path.Combine(Path.GetDirectoryName(builtInPath) ?? ".", UserFileName);
+        var user = Load(UserFilePath);
+        if (user.Count == 0)
+        {
+            return;
+        }
+
+        // Whole-entry override by id; a new id is appended after the built-ins (user order).
+        for (var index = 0; index < _plugins.Count; index++)
+        {
+            if (user.FirstOrDefault(u => string.Equals(u.Id, _plugins[index].Id, StringComparison.Ordinal)) is { } overridden)
+            {
+                _plugins[index] = overridden;
+            }
+        }
+
+        foreach (var plugin in user)
+        {
+            if (_plugins.All(p => !string.Equals(p.Id, plugin.Id, StringComparison.Ordinal)))
+            {
+                _plugins.Add(plugin);
+            }
+        }
+
+        _userIds = new HashSet<string>(user.Select(p => p.Id), StringComparer.Ordinal);
     }
 
     public IReadOnlyList<PluginDescriptor> All => _plugins;
+
+    /// <summary>Absolute path of the user override file (diagnostics / tests).</summary>
+    public string UserFilePath { get; private set; } = string.Empty;
+
+    /// <summary>True when <paramref name="pluginId"/> is declared by a user override entry.</summary>
+    public bool IsUserEntry(string pluginId) => _userIds.Contains(pluginId ?? string.Empty);
 
     public PluginDescriptor? Get(string pluginId)
         => _plugins.FirstOrDefault(p => string.Equals(p.Id, pluginId, StringComparison.Ordinal));
@@ -128,6 +181,9 @@ public sealed class PluginRegistry
             Version = dto.Version ?? string.Empty,
             Dir = dto.Dir ?? string.Empty,
             Entry = string.IsNullOrWhiteSpace(dto.Entry) ? "__init__.py" : dto.Entry!,
+            Capabilities = (dto.Capabilities ?? new List<string>())
+                .Where(cap => !string.IsNullOrWhiteSpace(cap))
+                .ToArray(),
             Deps = (dto.Deps ?? new List<string>())
                 .Where(dep => !string.IsNullOrWhiteSpace(dep))
                 .ToArray(),

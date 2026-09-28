@@ -7529,5 +7529,79 @@ invent a new identity.`
   ON（6 步 + 插件）wall **5.55 s** / pipeline **5549 ms** / 峰 **12.6 GB** → **端到端约 1.96×**，两轮结果逐位一致。
   画质：两版均为有效的「中式茶肆」编辑图；ON 保留原图上下黑边（源图为电影裁切帧，6 步路径更忠于原始构图），
   OFF 则重绘掉黑边——**保真度差异，非缺陷**（详见前轮 D 段说明）。
+
+---
+
+## 姿态转换废弃声明（2026-09-29，只增）
+
+- **结论**：**姿态转换（SDPose + BodyRatioMapper）在 DEMO 阶段验证效果不佳，决策：废弃，不再实施。**
+- 本文件早前（批 1 段，`batch 1` 统一插件架构）「capability 调度（**姿态转换等**）留批 3」的举例措辞，
+  **以本段为准**——姿态转换**不在**任何后续排期内。
+- 相关调研（如 IBB_POSE / MultiPoseToolkit）**一并归档**，不再进入实施排期。
+- **现状核对**：仓库内**无** SDPose / BodyRatioMapper 产品代码；仅测试夹具以 `pose-map` / `sdpose.ood`
+  作为 env 名规范化示例（`config.py:186`、`test_plugins.py:23-24`、`PluginRegistryTests.cs:97-98`、
+  `SettingsLoaderTests.cs:136`、`SettingsWriterTests.cs:218`）。
+- **保留**：插件 capability 机制本身（首个 capability = `sampling_plan`，见 `DOC/INTERFACES.md` §38）。
 - 6 步路径**未做多轮画质评分 / 步数扫描**（仅 2 轮路由 + 端到端冒烟）。
+
+---
+
+## 接缝系统地基批（S1+S2）：seams.py + dispatch.call_chain（2026-09-29，只增）
+
+> 目标：把「加插件要动管线」降为「接缝预留 + 数据驱动分发」。本批（S1+S2）只建**骨架**：
+> 新建 `seams.py` 接缝层 + 扩展 `dispatch.py` 链式分发；**不接 `pipeline.py`（S3）**、
+> **不碰 `plugins.json` / `plugins.user.json`（批 A 在改）**、不迁 Viggle（S6）、不接 C# UI（S5）。
+> 设计裁决见本批讨论（D1–D10）：seams 只放数据文件、链式不做 priority、旧名 `sampling_plan`
+> 保留别名、`before_save`/`after_save` 排除、cleanup 由 `_run_once` 持列表。
+
+### A · 契约（`DOC/INTERFACES.md` §41）
+- 6 锚点 `SEAMS`；`apply(anchor, ctx)` 唯一入口 / 唯一白名单边界；`collect_cleanup(ctx)`；
+  `LEGACY_CAPABILITY_MAP = {"sampling_plan": "before_sample"}`。
+- `dispatch._seams_for` 双读（entry seams > entry capabilities→映射表，**不读 PLUGIN_META**）；
+  `call_chain(seam, ctx)` 数组序链式、副本入参、异常隔离、patch 累积、无白名单。
+
+### B · 改动
+- 新 `python/server/seams.py`（纯 CPU，顶层无 torch/comfy）：`SEAMS` / `LEGACY_CAPABILITY_MAP` /
+  `_WHITELIST` / 6 个 `_apply_<seam>` reducer / `apply` / `collect_cleanup`。`apply` 延迟
+  `from plugins import dispatch`（避开 seams↔plugins.dispatch 循环 import）。
+- `python/server/plugins/dispatch.py`（**追加**；`active_plugins` / `call` 不动）：`_seams_for`、
+  `_fn_for`（接缝名 → 旧名 `sampling_plan` 回退）、`call_chain`。
+- 新 `python/server/test_seams.py`（33 例）：枚举完整性 / 白名单合并 / 非白名单忽略 / 不就地改 /
+  after_decode 尺寸归一 / collect_cleanup（单个 + 聚合列表）/ apply 未知 anchor 抛 ValueError /
+  apply 保留聚合 cleanup / CLEANUPS_KEY 与 dispatch 一致 / CPU-only import 子进程断言。
+- `python/server/test_dispatch.py`（+16 例，旧 18 例不动）：`_seams_for` 字段级优先级 / `call_chain`
+  数组序 / patch 累积 / 异常隔离 / 非 dict 忽略 / 旧名别名 / 副本入参 / 不就地改调用方 ctx /
+  多插件 cleanup 聚合。
+
+### C · 复核修复（前置 reviewer 意见）
+- **P1.1**：`_seams_for` **去掉 `PLUGIN_META.seams` 层级**，与裁决 D2（seams 只放数据文件）一致。
+- **P1.2**：`call_chain` **一次性 `load_registry()`**，把 `entry` 传入 `_seams_for`，避免每插件重读 / 顺序漂移。
+- **P2.1/P2.2**：明确 `apply` 为**唯一白名单边界**且先 `dict(ctx)` 复制；`call_chain` 为无过滤低层原语。
+- **P2.3**：`after_decode` 归一规则写明「有 `image.size` 则以其为准，否则保留传入 width/height」。
+- **P2.5**：新增「apply 经链后非白名单键不泄漏」与 seams CPU-only import 断言。
+
+### C2 · 复核修复（后置 reviewer 意见）
+- **P1（cleanup 聚合）**：`call_chain` 原以 `ctx.update(patch)` 累积，多插件同接缝各返回 `cleanup`
+  时后者**覆盖**前者，违背 D9。修复：`call_chain` 把每个 patch 的 `cleanup`（callable）**追加**进
+  `ctx[CLEANUPS_KEY]`（`CLEANUPS_KEY="cleanups"`，dispatch 与 seams 各定义 + 单测断言相等），
+  再从 patch 去掉 `cleanup`；`seams.collect_cleanup` 返回聚合列表（并兼容旧单个 `cleanup`）；
+  各接缝白名单加入 `CLEANUPS_KEY` 以穿过 reducer 边界。
+- **P2（就地改调用方 ctx）**：`call_chain` 入口 `context = dict(context)`，不再就地改调用方 ctx。
+- **P2（`_seams_for` 的 `module` 参数）**：保留（固定签名）但注明当前不读 `PLUGIN_META`（D2）。
+
+### D · 验证（Z29 / Z30：CPU-only，无 GPU、不启动后端 / App）
+- `python -m py_compile python/server/seams.py python/server/plugins/dispatch.py` → exit 0。
+- `python -m unittest test_seams test_dispatch`（cwd `python/server`）→ **67 通过 / 0 失败**
+  （test_seams 33 + test_dispatch 34）。
+- `python -m unittest discover -p "test_*.py"` → **176 通过 / 0 失败（6 skip：GPU 端到端类）**。
+- `git status` 确认 `pipeline.py` / `plugin_sampling.py` **零改**（S3 才接）。
+- C# 本批零改：`dotnet build src\ZIV.AI.sln -c Release` → **0 警告 / 0 错误**；
+  `dotnet test ... --filter "FullyQualifiedName!~Ipc"`（非 GPU 全量，**未跑无过滤 dotnet test**）→
+  **747 通过 / 0 失败**。
+- **未跑 GPU 端到端**（Z29 / Z30）；本批纯 CPU 骨架，无 GPU 参与。
+
+### E · 不做 / 遗留
+- 不接 `pipeline.py`（S3）；不迁 Viggle（S6）；不接 C# `seams` 展示（S5）。
+- `seams` 字段**尚未**写入 `plugins.json`（批 A 在改该文件）→ 目前所有接缝经 legacy 映射解析。
+- `call_chain` 返回「原始累积 ctx」**不含白名单**，契约调用必须经 `seams.apply`（已注明）。
 

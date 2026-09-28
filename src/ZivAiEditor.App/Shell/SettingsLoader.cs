@@ -28,6 +28,12 @@ internal sealed class BackendSettings
     public string? ComfyRoot { get; init; }
 
     /// <summary>
+    /// LoRA root directory (<c>[models] lora_root</c>); null when unset / cleared. Relative LoRA
+    /// paths in <c>loras.json</c> / commands resolve against it (backend-side).
+    /// </summary>
+    public string? LoraRoot { get; init; }
+
+    /// <summary>
     /// Start the Python backend at app start (<c>[backend] prewarm</c>, default on) so its
     /// background <c>import comfy</c> + DynamicVRAM init finish before the first generate
     /// (optimization §10.2.1). Set to <c>0</c> to start the backend lazily on first use.
@@ -129,6 +135,7 @@ internal static class SettingsLoader
             DitPath = GetOptional(models, "dit_path"),
             TePath = GetOptional(models, "te_path"),
             VaePath = GetOptional(models, "vae_path"),
+            LoraRoot = GetOptional(models, "lora_root"),
             ComfyRoot = GetOptional(backend, "comfy_root"),
             Prewarm = GetBool(backend, "prewarm", defaults.Prewarm),
             PluginStates = ParsePluginStates(plugins),

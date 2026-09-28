@@ -67,3 +67,6 @@ _test_step2/**/*.png
 # _test_step2 整体移出 git 跟踪（开发期实验目录；本地磁盘保留）
 # 2026-09-27：untrack（含 t1–t9 / e2e_*/ / diag_*/ / bench 等），README/DOC 勘误见 DEVLOG。
 _test_step2/
+
+# 用户插件覆盖（配置层）：本机用户添加/覆盖的插件条目，不应入库
+Template/plugins.user.json

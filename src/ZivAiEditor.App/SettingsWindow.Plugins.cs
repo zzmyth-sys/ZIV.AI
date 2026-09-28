@@ -31,6 +31,10 @@ public partial class SettingsWindow
             return;
         }
 
+        // Re-read the registry so 注销 enablement reflects the current user override file; the
+        // raw user set is never cached across refreshes.
+        _plugins = new PluginRegistry(_pluginsPath);
+
         list.Items.Clear();
         if (_plugins.All.Count == 0)
         {
@@ -58,6 +62,26 @@ public partial class SettingsWindow
     /// <summary>Install / enable status text (batch 1). Pure and unit-testable.</summary>
     internal static string PluginStatusLabel(bool installed, bool enabled)
         => !installed ? "未安装" : enabled ? "已启用" : "已安装未启用";
+
+    /// <summary>
+    /// Metadata line for the plugin row (batch 3 catalog): version + capability names, read
+    /// data-driven from <c>plugins.json</c>. Empty parts are omitted. Pure and unit-testable.
+    /// </summary>
+    internal static string PluginMetaLabel(PluginDescriptor plugin)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(plugin.Version))
+        {
+            parts.Add("v" + plugin.Version);
+        }
+
+        if (plugin.Capabilities.Count > 0)
+        {
+            parts.Add("capabilities: " + string.Join(", ", plugin.Capabilities));
+        }
+
+        return string.Join(" · ", parts);
+    }
 
     private Control BuildPluginRow(PluginDescriptor plugin, IReadOnlyDictionary<string, string> states)
     {
@@ -98,6 +122,23 @@ public partial class SettingsWindow
             Margin = new Thickness(0, 2, 0, 0),
         };
 
+        var body = new StackPanel { Children = { header } };
+
+        var meta = PluginMetaLabel(plugin);
+        if (meta.Length > 0)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = meta,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = PluginSecondaryBrush,
+                FontSize = 11,
+                Margin = new Thickness(0, 2, 0, 0),
+            });
+        }
+
+        body.Children.Add(description);
+
         var actions = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -107,9 +148,12 @@ public partial class SettingsWindow
             {
                 BuildPluginToggle(plugin.Id, enabled, installed),
                 BuildOpenDirButton(directory),
-                BuildDepsCheckButton(),
+                BuildInstallCheckButton(plugin, directory),
+                BuildUnregisterButton(plugin),
             },
         };
+
+        body.Children.Add(actions);
 
         return new Border
         {
@@ -118,7 +162,7 @@ public partial class SettingsWindow
             CornerRadius = new CornerRadius(6),
             Padding = new Thickness(10),
             Margin = new Thickness(0, 0, 0, 8),
-            Child = new StackPanel { Children = { header, description, actions } },
+            Child = body,
         };
     }
 
@@ -148,10 +192,54 @@ public partial class SettingsWindow
         return button;
     }
 
-    private static Button BuildDepsCheckButton()
+    /// <summary>
+    /// "检查安装" (batch 3): verifies the plugin directory and entry file exist, using **only
+    /// the C# side** (no IPC). The Python dependency probe (<c>find_spec</c>) stays deferred —
+    /// it needs the backend — so it is not part of this button.
+    /// </summary>
+    private Button BuildInstallCheckButton(PluginDescriptor plugin, string directory)
     {
-        var button = new Button { Content = "检查依赖", MinWidth = 80, Height = 28, IsEnabled = false };
-        ToolTip.SetTip(button, "待批 3 实现");
+        var button = new Button { Content = "检查安装", MinWidth = 80, Height = 28 };
+        ToolTip.SetTip(button, "检查插件目录与入口文件是否存在");
+        button.Click += (_, _) =>
+        {
+            var dirPresent = directory.Length > 0 && Directory.Exists(directory);
+            var entryPath = dirPresent ? Path.Combine(directory, plugin.Entry) : string.Empty;
+            var entryPresent = entryPath.Length > 0 && File.Exists(entryPath);
+            _ = MessageDialog.ShowAsync(
+                this,
+                $"插件：{plugin.Id}\n"
+                + $"目录：{(directory.Length > 0 ? directory : "(未配置)")}\n"
+                + $"目录存在：{(dirPresent ? "是" : "否")}\n"
+                + $"入口（{plugin.Entry}）：{(entryPresent ? "存在" : "缺失")}");
+        };
+        return button;
+    }
+
+    /// <summary>
+    /// "注销" (batch 3): removes the user override entry so the plugin reverts to its built-in
+    /// entry (or disappears when it had no built-in). Enabled only for a user entry; the built-in
+    /// list is never touched and no plugin directory file is deleted.
+    /// </summary>
+    private Button BuildUnregisterButton(PluginDescriptor plugin)
+    {
+        var isUserEntry = _plugins.IsUserEntry(plugin.Id);
+        var button = new Button { Content = "注销", MinWidth = 64, Height = 28, IsEnabled = isUserEntry };
+        if (!isUserEntry)
+        {
+            ToolTip.SetTip(button, "内置插件不可注销");
+        }
+
+        button.Click += async (_, _) =>
+        {
+            if (await ConfirmDialog.ShowAsync(this, "确认注销该插件？目录文件不会删除。") != true)
+            {
+                return;
+            }
+
+            PluginOverrideStore.RemoveEntry(_pluginsPath, plugin.Id);
+            RefreshPlugins();
+        };
         return button;
     }
 

@@ -222,5 +222,55 @@ class PluginRegistryPathTests(unittest.TestCase):
         self.assertIn("envpick", registry)
 
 
+class UserOverrideMergeTests(unittest.TestCase):
+    """``plugins.user.json`` 整条目覆盖（batch 3 注销登记）。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = self._tmp.name
+
+    def _write(self, name, plugins):
+        path = os.path.join(self.root, name)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"version": "1", "plugins": plugins}, handle)
+        return path
+
+    def test_user_entry_replaces_builtin_whole_entry(self):
+        builtin = self._write(
+            "plugins.json",
+            [{"id": "a", "dir": "builtin-a", "enabled_by_default": True}],
+        )
+        self._write("plugins.user.json", [{"id": "a", "dir": "user-a"}])
+        with mock.patch.object(config, "PLUGINS_REGISTRY_PATH", builtin):
+            registry = loader.load_registry()
+        self.assertEqual(registry["a"], {"id": "a", "dir": "user-a"})
+
+    def test_new_user_id_is_appended_after_builtins(self):
+        builtin = self._write("plugins.json", [{"id": "a"}])
+        self._write("plugins.user.json", [{"id": "b"}, {"id": "c"}])
+        with mock.patch.object(config, "PLUGINS_REGISTRY_PATH", builtin):
+            registry = loader.load_registry()
+        self.assertEqual(list(registry), ["a", "b", "c"])
+
+    def test_missing_user_file_yields_builtin(self):
+        builtin = self._write("plugins.json", [{"id": "a"}])
+        with mock.patch.object(config, "PLUGINS_REGISTRY_PATH", builtin):
+            registry = loader.load_registry()
+        self.assertEqual(list(registry), ["a"])
+
+    def test_explicit_path_does_not_merge_sibling_user_file(self):
+        builtin = self._write("plugins.json", [{"id": "a"}])
+        self._write("plugins.user.json", [{"id": "b"}])
+        self.assertEqual(list(loader.load_registry(builtin)), ["a"])
+
+    def test_builtin_missing_ignores_user_file(self):
+        self._write("plugins.user.json", [{"id": "b"}])
+        with mock.patch.object(
+            config, "PLUGINS_REGISTRY_PATH", os.path.join(self.root, "plugins.json")
+        ):
+            self.assertEqual(loader.load_registry(), {})
+
+
 if __name__ == "__main__":
     unittest.main()

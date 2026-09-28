@@ -33,7 +33,7 @@
           <StackPanel Spacing="8">
             <TextBlock Text="模型三件套" Foreground="{StaticResource ZivTextSecondaryBrush}" />
             <Grid ColumnDefinitions="90,*,Auto,Auto"
-                  RowDefinitions="Auto,Auto,Auto"
+                  RowDefinitions="Auto,Auto,Auto,Auto"
                   RowSpacing="8"
                   ColumnSpacing="8">
               <TextBlock Grid.Row="0" Grid.Column="0" Text="DiT权重"
@@ -53,6 +53,12 @@
               <TextBox x:Name="PART_VaePath" Grid.Row="2" Grid.Column="1" IsReadOnly="True" />
               <Button x:Name="PART_BrowseVae" Grid.Row="2" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
               <Button x:Name="PART_OpenVae" Grid.Row="2" Grid.Column="3" Content="打开文件夹" MinWidth="88" Height="30" />
+
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="LoRA根目录"
+                         VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
+              <TextBox x:Name="PART_LoraRoot" Grid.Row="3" Grid.Column="1" IsReadOnly="True" />
+              <Button x:Name="PART_BrowseLoraRoot" Grid.Row="3" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
+              <Button x:Name="PART_ClearLoraRoot" Grid.Row="3" Grid.Column="3" Content="清除" MinWidth="88" Height="30" />
             </Grid>
           </StackPanel>
 

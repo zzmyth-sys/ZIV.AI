@@ -16,7 +16,8 @@ public partial class SettingsWindow : Window
 {
     private readonly IShellContext _shell = null!;
     private readonly string _settingsPath = null!;
-    private readonly PluginRegistry _plugins = null!;
+    private readonly string _pluginsPath = null!;
+    private PluginRegistry _plugins = null!;
 
     public SettingsWindow()
     {
@@ -33,7 +34,8 @@ public partial class SettingsWindow : Window
     {
         _shell = shell ?? throw new ArgumentNullException(nameof(shell));
         _settingsPath = Path.Combine(System.AppContext.BaseDirectory, SettingsLoader.FileName);
-        _plugins = plugins ?? new PluginRegistry(Path.Combine(shell.TemplateDirectory, "plugins.json"));
+        _pluginsPath = Path.Combine(shell.TemplateDirectory, "plugins.json");
+        _plugins = plugins ?? new PluginRegistry(_pluginsPath);
 
         if (this.FindControl<Border>("PART_Header") is { } header)
         {
@@ -49,6 +51,7 @@ public partial class SettingsWindow : Window
         WireOpen("PART_OpenVae", "PART_VaePath");
         WirePython();
         WireComfy();
+        WireLoraRoot();
         WireFooter();
         Prefill();
         UpdateOpenEnabled();
@@ -154,6 +157,37 @@ public partial class SettingsWindow : Window
         };
     }
 
+    private void WireLoraRoot()
+    {
+        if (this.FindControl<Button>("PART_BrowseLoraRoot") is { } browse)
+        {
+            browse.Click += async (_, _) =>
+            {
+                if (this.FindControl<TextBox>("PART_LoraRoot") is not { } target)
+                {
+                    return;
+                }
+
+                var directory = await _shell.PickFolderAsync(this, "选择 LoRA 根目录", SuggestedDirectory(target.Text));
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    target.Text = directory;
+                }
+            };
+        }
+
+        if (this.FindControl<Button>("PART_ClearLoraRoot") is { } clear)
+        {
+            clear.Click += (_, _) =>
+            {
+                if (this.FindControl<TextBox>("PART_LoraRoot") is { } target)
+                {
+                    target.Text = string.Empty;
+                }
+            };
+        }
+    }
+
     private void WireFooter()
     {
         if (this.FindControl<Button>("PART_OpenTemplate") is { } open)
@@ -178,6 +212,7 @@ public partial class SettingsWindow : Window
         SetText("PART_DitPath", settings.DitPath);
         SetText("PART_TePath", settings.TePath);
         SetText("PART_VaePath", settings.VaePath);
+        SetText("PART_LoraRoot", settings.LoraRoot);
         SetText("PART_PythonExe", settings.PythonExe);
         SetText("PART_Script", settings.Script);
         SetText("PART_ComfyRoot", settings.ComfyRoot);
@@ -190,11 +225,13 @@ public partial class SettingsWindow : Window
             var dit = Normalize(Text("PART_DitPath"));
             var te = Normalize(Text("PART_TePath"));
             var vae = Normalize(Text("PART_VaePath"));
+            var loraRoot = Normalize(Text("PART_LoraRoot"));
             var python = Normalize(Text("PART_PythonExe"));
             var script = Normalize(Text("PART_Script"));
             var comfy = Normalize(Text("PART_ComfyRoot"));
 
             SettingsWriter.WriteModelPaths(_settingsPath, dit, te, vae);
+            SettingsWriter.WriteLoraRoot(_settingsPath, loraRoot);
             SettingsWriter.WritePythonExe(_settingsPath, python);
             SettingsWriter.WriteScript(_settingsPath, script);
             SettingsWriter.WriteComfyRoot(_settingsPath, comfy);

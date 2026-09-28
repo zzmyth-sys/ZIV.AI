@@ -125,6 +125,12 @@ LORA_REGISTRY_PATH = os.environ.get(
     os.path.join(REPO_ROOT, "Template", "loras.json"),
 )
 
+# ---- LoRA 根目录（设置窗口 [models] lora_root）----
+# 可选：loras.json / 命令里的**相对** LoRA 路径以此目录为基准拼接（绝对路径原样）。
+# 空 = 未配置（向后兼容）：无基准时相对路径按原样透传（禁止 validate 时则报错）。
+# 由 C# 注入 env ZIV_AI_LORA_ROOT（AddIfSet：非空即注入，不要求目录存在）。
+LORA_ROOT = os.environ.get("ZIV_AI_LORA_ROOT", "").strip()
+
 # ---- 模型注册表（Step 8-2）----
 # 数据文件 Template/models.json：每模型含路径 / 分辨率档位 / 采样预设；加模型 = 加一条。
 # 优先级：环境变量 > models.json > 本文件的代码默认。默认仓库根 Template/models.json。

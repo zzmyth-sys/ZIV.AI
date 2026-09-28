@@ -156,7 +156,13 @@ def _run_submit(frame_io, task_id, payload, op="inpaint"):
         # smart-memory flag at import time (see model_loader).
         model_loader.prepare_environment()
         _clear_interrupt()
-        _configure_pre_sampling_hooks(payload)
+        try:
+            _configure_pre_sampling_hooks(payload)
+        except ValueError as exc:
+            # 挂账-2 (小收尾批): a used LoRA whose weight file is missing fails clearly here
+            # instead of silently dropping the LoRA (loras.resolve_path(validate=True)).
+            _write_error(frame_io, task_id, "lora_unavailable", exc)
+            return
         if payload.get("resolution"):
             _LOG.info("submit resolution payload: %s", payload.get("resolution"))
         if _DIAG:
@@ -279,7 +285,7 @@ def _register_loras(payload):
         if not isinstance(lora, dict) or not lora.get("path"):
             continue
         entry = loras.resolve(lora.get("path"))
-        lora_path = loras.resolve_path(lora.get("path"))
+        lora_path = loras.resolve_path(lora.get("path"), validate=True)
         if not lora_path:
             _LOG.warning("LoRA id/path could not be resolved: %s", lora.get("path"))
             continue

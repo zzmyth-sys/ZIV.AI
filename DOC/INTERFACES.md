@@ -512,3 +512,55 @@
   （`op=="inpaint"` ∧ 有主图 ∧ 无 mask ∧ `denoise≈1.0`）接 6 步蒸馏 LoRA；LoRA 路径由 id
   `qwen21-viggle-turbo-6step`（`Template/loras.json`）解析。
 - **不做**：不改 IPC / 命令集；无新 NuGet；不新增 CLI。
+
+## 39. 插件 META 上浮（数据驱动）（2026-09-29，只增）
+
+- **背景**：插件的 `PLUGIN_META`（version / capabilities）原先只在 Python 模块内，C# / 设置窗口看不到。
+- **方案**（**不改 IPC**，数据驱动）：`Template/plugins.json` 每条插件追加
+  `version`（string）与 `capabilities`（string[]），取值与插件模块的 `PLUGIN_META` **保持一致**。
+- **C# 读取**：`PluginFileDto.Version` / `Capabilities` → `PluginDescriptor.Version` / `Capabilities`
+  （`PluginRegistry`）；设置窗口插件行显示 `v<version> · capabilities: <a, b>`。
+- **同步约束**：**无跨语言校验**——插件作者改模块 `PLUGIN_META` 时**必须同步** `plugins.json`
+  的 `version` / `capabilities`，否则 UI 显示与运行期能力可能不一致（风险已知，见 `FROZEN.md`）。
+- **「检查安装」按钮**：原置灰的「检查依赖」改为 **「检查安装」**——C# 侧仅做「目录 + 入口文件」
+  存在性检查（**不涉 IPC**）；Python 依赖探测（`find_spec`，`plugins.loader.check_deps`）仍留后续（需后端）。
+- **不变**：IPC 契约 / 命令集 / 分层依赖方向；无新 NuGet / Python 依赖。
+
+## 40. IPC error code `lora_unavailable`（2026-09-29，只增）
+
+- **新增**：Python 后端在「**被请求使用**的 LoRA 权重文件缺失」时返回
+  `{"type":"error","code":"lora_unavailable","message":"ValueError: LoRA 文件不存在：<path>"}`
+  （`handlers._run_submit` ← `loras.resolve_path(validate=True)`，小收尾批 · 挂账-2）。
+- **契约兼容**：`error.code` 为**自由文本**（`contracts/ipc-protocol.md:140`），**不是 schema 变更**，契约不动。
+- **C# 消费**：`IpcInferenceClient.Receive.cs:211/287` 原样读取 `code` →
+  `InferenceBackendException.Code`（`InferenceProgressExtensions.cs:75`）；**无枚举 / switch → 无需改 C#**；
+  下游按 `code` 分支（UI 文案 / notify）需知晓该值。
+- **触发面**：仅当请求**实际引用**了某 LoRA 且其文件不存在；未引用条目不受影响。
+- **登记**：见 `DOC/FROZEN.md` 尾部「登记（2026-09-29）」R1。
+
+## 41. 数据驱动接缝系统（地基批 S1+S2）（2026-09-29，只增）
+
+- **背景**：加插件（尤其新类型接缝）当前需动基础管线（`pipeline.py` 硬编码 7 处 `plugin_sampling.*`
+  调用 + 新建 `plugin_*.py`）。目标拆为「接缝系统地基批（S1+S2）→ S3 接 pipeline → S5 C# UI →
+  S6 Viggle 迁移」；**本段只登记 S1+S2 地基，未接管线**。
+- **接缝定义**：6 个固定锚点 `SEAMS = ("before_encode", "after_encode", "before_sample",
+  "after_sample", "before_decode", "after_decode")`（`before_save` / `after_save` **不纳入**）。
+- **新模块 `python/server/seams.py`**（纯 CPU，顶层无 torch / comfy）：
+  - 每接缝一个**纯函数 reducer** `_apply_<seam>(ctx, patch) -> dict`：按**白名单**把 patch 键并入
+    ctx 副本、非白名单忽略、不就地改原 ctx。白名单见源码 `_WHITELIST`。
+    `after_decode` 以 `image.size` 为准归一 `width` / `height`。
+  - `apply(anchor, ctx) -> dict`：**唯一对外入口 / 唯一白名单边界**；`anchor ∉ SEAMS` 抛
+    `ValueError`（开发者错误）；内部**延迟 import** `plugins.dispatch` 调 `call_chain`，再经 reducer 过滤。
+  - `collect_cleanup(ctx) -> list[callable]`：抽出 `cleanup` 键供 `_run_once` 的 `finally` 逆序执行；不改 ctx。
+  - `LEGACY_CAPABILITY_MAP = {"sampling_plan": "before_sample"}`（旧 capability 名 → 接缝名，长期保留）。
+- **`python/server/plugins/dispatch.py` 扩展**（`call` / `active_plugins` **不变**）：
+  - `_seams_for(plugin_id, module, entry=None) -> list[str]`：同一条 registry entry 内字段级回退
+    **`entry["seams"]` > `entry["capabilities"]`（经映射表）**；两者都不中 → `[]`。
+    **不读 `PLUGIN_META.seams`**（seams 只放数据文件）。`entry` 由调用方一次性传入（避免每插件重读注册表）。
+  - `call_chain(seam, ctx) -> dict`：按 `plugins.json` 数组顺序**链式**调用；不挂该接缝的插件跳过；
+    传插件 **ctx 副本**（防就地改）；返回 dict patch → `ctx.update(patch)` 累积；插件异常 / 非 dict → warning
+    跳过，**永不抛**。**不做白名单过滤**（过滤在 `seams.apply`）。
+  - 函数名解析 `_fn_for`：先按接缝名，`before_sample` 无则回退旧名 `sampling_plan`（D6/D7）。
+- **兼容性（双读）**：旧插件（`capabilities:["sampling_plan"]`，仅导出 `sampling_plan`）无需改动即被
+  `call_chain("before_sample", …)` 路由；新插件用 `seams` 字段 + 与接缝同名函数。
+- **不做**：不改 IPC / 命令集；无新 NuGet / Python 依赖；`pipeline.py` 零改（S3 才接）。

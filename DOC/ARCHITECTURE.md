@@ -647,3 +647,10 @@ ZIV.AI.sln
   插件**不改 IPC、不改命令集、不改既有分层依赖方向**。默认关，关闭时**路由 / 参数与改动前一致**
   （未做逐字节输出对比）。
 - **不做**：无新 NuGet；不新增 CLI / 公开签名。
+
+## 姿态转换废弃（2026-09-29，只增）
+
+- 本文件「插件层定位（batch 1）」段中「capability 调度（**姿态转换等**）留批 3」的举例，
+  **姿态转换已废弃**（DEMO 阶段效果不佳，不再实施）——完整声明见 `DOC/DEVLOG.md` 尾部同名段，以该段为准。
+- 仓库内**无** SDPose / BodyRatioMapper 代码（仅测试夹具把 `pose-map` / `sdpose.ood` 当 env 名示例）。
+- **保留**：插件 capability 机制本身（首个 capability = `sampling_plan`，边界见本文件「插件 capability 边界（batch 3）」段）。

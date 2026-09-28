@@ -143,6 +143,80 @@ public class SettingsWindowSmokeTests
     }
 
     [Fact]
+    public void SettingsWindow_Has_LoraRoot_Controls()
+    {
+        var directory = NewDirectory();
+        try
+        {
+            HeadlessTest.Run(() =>
+            {
+                var window = new SettingsWindow(new FakeShell(directory), new PluginRegistry(Path.Combine(directory, "plugins.json")));
+                try
+                {
+                    var tabs = window.FindControl<TabControl>("PART_SettingsTabs");
+                    Assert.NotNull(tabs);
+                    // The LoRA row lives inside the existing 环境 tab, not a new tab.
+                    Assert.Equal(2, tabs!.ItemCount);
+                    Assert.NotNull(window.FindControl<TextBox>("PART_LoraRoot"));
+                    Assert.NotNull(window.FindControl<Button>("PART_BrowseLoraRoot"));
+                    Assert.NotNull(window.FindControl<Button>("PART_ClearLoraRoot"));
+                }
+                finally
+                {
+                    window.Close();
+                }
+            });
+        }
+        finally
+        {
+            DeleteDirectory(directory);
+        }
+    }
+
+    [Fact]
+    public void PluginTab_Unregister_Enabled_Only_For_User_Entries()
+    {
+        var directory = NewDirectory();
+        try
+        {
+            var registryPath = Path.Combine(directory, "plugins.json");
+            File.WriteAllText(registryPath,
+                "{ \"version\": \"1\", \"plugins\": [ { \"id\": \"builtin\" }, { \"id\": \"override\" } ] }");
+            File.WriteAllText(
+                Path.Combine(directory, PluginRegistry.UserFileName),
+                "{ \"version\": \"1\", \"plugins\": [ { \"id\": \"override\" } ] }");
+            var registry = new PluginRegistry(registryPath);
+
+            HeadlessTest.Run(() =>
+            {
+                var window = new SettingsWindow(new FakeShell(directory), registry);
+                try
+                {
+                    var list = window.FindControl<ItemsControl>("PART_PluginList");
+                    Assert.NotNull(list);
+                    Assert.Equal(2, list!.ItemCount);
+
+                    var rows = list.Items.Cast<object>().Select(item => (Control)item).ToList();
+                    var builtinButton = FindButtonByContent(rows[0], "注销");
+                    var userButton = FindButtonByContent(rows[1], "注销");
+                    Assert.NotNull(builtinButton);
+                    Assert.NotNull(userButton);
+                    Assert.False(builtinButton!.IsEnabled);
+                    Assert.True(userButton!.IsEnabled);
+                }
+                finally
+                {
+                    window.Close();
+                }
+            });
+        }
+        finally
+        {
+            DeleteDirectory(directory);
+        }
+    }
+
+    [Fact]
     public void PluginStatusHelpers_Map_States()
     {
         var plugin = new PluginDescriptor { Id = "pose-map", EnabledByDefault = false };
@@ -157,6 +231,27 @@ public class SettingsWindowSmokeTests
         Assert.Equal("未安装", SettingsWindow.PluginStatusLabel(installed: false, enabled: false));
         Assert.Equal("已安装未启用", SettingsWindow.PluginStatusLabel(installed: true, enabled: false));
         Assert.Equal("已启用", SettingsWindow.PluginStatusLabel(installed: true, enabled: true));
+    }
+
+    [Fact]
+    public void PluginMetaLabel_Shows_Version_And_Capabilities()
+    {
+        // Both parts present.
+        Assert.Equal(
+            "v0.1.0 · capabilities: sampling_plan",
+            SettingsWindow.PluginMetaLabel(new PluginDescriptor
+            {
+                Id = "qwen21-viggle-6step",
+                Version = "0.1.0",
+                Capabilities = new[] { "sampling_plan" },
+            }));
+
+        // Version only.
+        Assert.Equal("v1.2.3", SettingsWindow.PluginMetaLabel(
+            new PluginDescriptor { Id = "x", Version = "1.2.3" }));
+
+        // Neither -> empty (row omits the line).
+        Assert.Equal(string.Empty, SettingsWindow.PluginMetaLabel(new PluginDescriptor { Id = "x" }));
     }
 
     private static Button? FindButtonByContent(Control root, string content)

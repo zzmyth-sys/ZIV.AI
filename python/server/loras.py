@@ -68,16 +68,34 @@ def resolve_strength(value, entry=None, default_key=None):
     return 1.0
 
 
-def resolve_path(id_or_path, registry=None):
+def resolve_path(id_or_path, registry=None, validate=False):
     """Resolve a LoRA id (or literal path) to a weight path.
 
     A registry hit returns its ``path``; otherwise the value is returned unchanged so a literal
     absolute path still works. Empty / whitespace -> ``None``.
+
+    ``validate`` (小收尾批 · 挂账-2): when true and the resolved path is not an existing file,
+    raise ``ValueError("LoRA 文件不存在：{path}")`` so a mis-configured / moved weight is
+    reported **at use-time** instead of silently degrading the task. It stays **off by default**
+    so callers that only need the string (e.g. the plugin, which declines on its own) keep the
+    old behavior, and because only *used* ids are resolved, unused registry entries are never
+    validated.
     """
     if not isinstance(id_or_path, str) or not id_or_path.strip():
         return None
     value = id_or_path.strip()
     entry = resolve(value, registry)
     if entry and isinstance(entry.get("path"), str) and entry["path"].strip():
-        return entry["path"].strip()
-    return value
+        path = entry["path"].strip()
+    else:
+        path = value
+    # 相对路径：配置了 lora_root 则以其为基准拼接；否则保持不变（validate 时视为配置错误）。
+    if not os.path.isabs(path):
+        root = getattr(config, "LORA_ROOT", "")
+        if root:
+            path = os.path.join(root, path)
+        elif validate:
+            raise ValueError("LoRA 相对路径需要配置 lora_root：%s" % path)
+    if validate and not os.path.isfile(path):
+        raise ValueError("LoRA 文件不存在：%s" % path)
+    return path

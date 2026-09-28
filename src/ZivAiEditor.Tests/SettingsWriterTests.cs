@@ -176,6 +176,48 @@ public class SettingsWriterTests : IDisposable
     }
 
     [Fact]
+    public void WriteLoraRoot_Replaces_Models_Key_And_Normalizes_Relative()
+    {
+        File.WriteAllLines(SettingsPath, new[]
+        {
+            "; top",
+            "[models]",
+            "dit_path = d.safetensors",
+            @"lora_root = C:\old\loras",
+        });
+
+        SettingsWriter.WriteLoraRoot(SettingsPath, @"rel\loras");
+
+        var lines = Read();
+        Assert.Equal("; top", lines[0]);
+        Assert.Equal("[models]", lines[1]);
+        Assert.Equal("dit_path = d.safetensors", lines[2]);
+        Assert.Equal("lora_root = " + Full(@"rel\loras"), lines[3]);
+    }
+
+    [Fact]
+    public void WriteLoraRoot_Clears_When_Empty()
+    {
+        File.WriteAllLines(SettingsPath, new[] { "[models]", @"lora_root = C:\old\loras" });
+
+        SettingsWriter.WriteLoraRoot(SettingsPath, "");
+
+        Assert.Equal("lora_root =", Read()[1]);
+    }
+
+    [Fact]
+    public void WriteLoraRoot_Leaves_No_Temp_Artifacts()
+    {
+        SettingsWriter.WriteLoraRoot(SettingsPath, "a");
+        SettingsWriter.WriteLoraRoot(SettingsPath, "b");
+
+        Assert.DoesNotContain(
+            Directory.GetFiles(_directory),
+            file => file.Contains(".tmp-", StringComparison.Ordinal));
+        Assert.Equal("lora_root = " + Full("b"), Read()[1]);
+    }
+
+    [Fact]
     public void WriteModelPaths_Normalizes_Relative_Values_To_Absolute()
     {
         File.WriteAllLines(SettingsPath, new[] { "[models]", "dit_path =", "te_path =", "vae_path =" });

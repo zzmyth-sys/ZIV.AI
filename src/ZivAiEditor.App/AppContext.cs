@@ -273,6 +273,10 @@ internal sealed class AppContext : IDisposable
         AddIfSet(environment, "ZIV_AI_DIT_PATH", settings.DitPath);
         AddIfSet(environment, "ZIV_AI_TE_PATH", settings.TePath);
         AddIfSet(environment, "ZIV_AI_VAE_PATH", settings.VaePath);
+        // LoRA root: inject whenever non-empty (AddIfSet, NOT AddDirectoryIfPresent) so a
+        // configured-but-not-yet-present directory still reaches Python and the LoRA resolve
+        // reports the real configuration error at use-time.
+        AddIfSet(environment, "ZIV_AI_LORA_ROOT", settings.LoraRoot);
         AddRegistryIfPresent(
             environment,
             "ZIV_AI_MODELS_REGISTRY",

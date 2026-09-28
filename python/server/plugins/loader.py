@@ -23,32 +23,68 @@ _LOG = logging.getLogger("zivai.server")
 # 已加载模块，按插件 id 缓存；执行插件代码代价高且可安全复用。
 _MODULES = {}
 
+# 用户覆盖文件：与内置 ``plugins.json`` 同目录，整条目覆盖（见 :func:`load_registry`）。
+USER_FILE_NAME = "plugins.user.json"
 
-def load_registry(path=None):
-    """读注册表为 ``{id: entry}``；缺失 / 损坏 → ``{}``（镜像 :func:`models.load_registry`，不抛）。"""
-    registry_path = path or config.PLUGINS_REGISTRY_PATH
+
+def _read_entries(registry_path):
+    """读一个注册表文件为 ``[(id, entry), ...]``（保序）；缺失 / 损坏 → ``[]``。
+
+    与 :func:`load_registry` 共用同一解析规则；返回列表（而非 dict）以保留声明顺序。
+    """
     if not registry_path or not os.path.isfile(registry_path):
-        _LOG.warning("plugins registry not found: %s", registry_path)
-        return {}
+        return []
 
     try:
         with open(registry_path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, ValueError) as exc:
         _LOG.warning("plugins registry unreadable (%s): %s", registry_path, exc)
-        return {}
+        return []
 
     entries = data.get("plugins") if isinstance(data, dict) else None
     if not isinstance(entries, list):
-        return {}
+        return []
 
-    registry = {}
+    parsed = []
     for entry in entries:
         if not isinstance(entry, dict):
             continue
         plugin_id = entry.get("id")
         if isinstance(plugin_id, str) and plugin_id.strip():
-            registry[plugin_id.strip()] = entry
+            parsed.append((plugin_id.strip(), entry))
+    return parsed
+
+
+def load_registry(path=None):
+    """读注册表为 ``{id: entry}``；缺失 / 损坏 → ``{}``（镜像 :func:`models.load_registry`，不抛）。
+
+    默认（``path is None``）：读内置 ``config.PLUGINS_REGISTRY_PATH``，再合并同目录的
+    ``plugins.user.json``。合并 = **整条目覆盖**（用户条目胜出，**不**继承内置字段）+ 新 id 追加在
+    内置之后（按用户声明顺序）。**内置文件缺失 / 损坏 → ``{}``，且不读用户文件**（内置是权威；
+    缺内置时用户覆盖无意义，避免半套注册表）。
+
+    显式传入 ``path``（测试 / 调用方指定）：只读该文件，**不**合并同目录用户文件。
+    """
+    if path is not None:
+        return dict(_read_entries(path))
+
+    built_in = _read_entries(config.PLUGINS_REGISTRY_PATH)
+    if not built_in:
+        if not config.PLUGINS_REGISTRY_PATH or not os.path.isfile(
+            config.PLUGINS_REGISTRY_PATH
+        ):
+            _LOG.warning("plugins registry not found: %s", config.PLUGINS_REGISTRY_PATH)
+        return {}
+
+    user_path = os.path.join(
+        os.path.dirname(config.PLUGINS_REGISTRY_PATH), USER_FILE_NAME
+    )
+    user = _read_entries(user_path)
+
+    registry = dict(built_in)
+    for plugin_id, entry in user:
+        registry[plugin_id] = entry
     return registry
 
 
