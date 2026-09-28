@@ -5255,3 +5255,54 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
    - 风险：运行时缺文件才失败（用户配错难诊断）
    - 建议：加载时检查 + 明确报错（如「LoRA 文件不存在：{path}」）
    - 触发时机：下一次改 loras 加载逻辑时
+
+---
+
+## 批 3（日期：2026-09-29）· 通用插件 capability 调度 + qwen21-viggle-6step
+
+> **本段为批 3 新增冻结**。把批 1 的「发现 / 加载 / 开关」接成**通用插件 capability 调度**，
+> 并以首个插件 `qwen21-viggle-6step` 给 Qwen-Image-2.1 **无掩码图像编辑**路径接 6 步蒸馏 LoRA 加速。
+> **默认关**（`enabled_by_default=false`），关闭时走旧路径；不改 IPC 契约，无新 NuGet。
+> 依据 `DOC/INTERFACES.md` §38；实验与端到端产物在 `_test_step2/`（gitignored）。
+
+### 3.1 契约（冻结）
+
+- **插件导出**：`PLUGIN_META = {id, display_name, version, capabilities}`；某 capability 即以**同名的模块级可调用对象**暴露。
+- **批 3 capability `sampling_plan`**：`sampling_plan(context: dict) -> dict | None`。
+  - `context`（只读）：`op` / `model` / `clip` / `vae` / `latent` / `mask` / `prompt` / `image_path` /
+    `mask_path` / `steps` / `denoise` / `seed` / `cfg` / `sampler_preset` / `model_id`。
+  - 返回 `None` = 放弃；否则为 dict，可选键：`model`（已打补丁）/ `skip_shift`(bool) / `sigmas`(1-D tensor) /
+    `sampler_name` / `scheduler` / `cfg` / `steps` / `cleanup`（管线在 `finally` 调用）。
+  - 管线语义：非 dict 的返回归一为 `None`（畸形插件不得在管线内抛）；有 `sigmas` 时走
+    `comfy.sample.sample_custom` + `samplers.sampler_object`，否则原 `comfy.sample.sample` 路径不变；
+    `sigmas` 存在但 `skip_shift` 缺省 → **跳过 ModelSamplingAuraFlow**（fail-safe，避免双重 shift）。
+- **调度**：`python/server/plugins/dispatch.py`（纯 CPU，无 torch / comfy）：
+  `active_plugins()` = `load_registry()` ∩ `loader.enabled(id, entry)` ∩ `loader.load_plugin(id)`；
+  `call(capability, context)` 按注册表顺序返回**首个非 None**，未暴露者跳过，抛异常者记 warning 跳过，**永不抛到管线**。
+
+### 3.2 冻结接口 / 结构变化
+
+| 项 | 变化 | 备注 |
+|---|---|---|
+| `pipeline.run`（Python 内部） | 新增关键字 `op="inpaint"` | `run_outpaint` 传 `op="outpaint"`；`handlers._dispatch_op` 传真实 op。IPC 不变 |
+| `pipeline.py` | **Z8 拆分**：696 → **541 行** | 拆出 `pipeline_io.py`（IO / decode / 路径 / emit）与 `plugin_sampling.py`（capability 接缝），同名回引 |
+| `Template/plugins.json` | 登记 `qwen21-viggle-6step`（默认关） | `dir=plugins/qwen21-viggle-6step` |
+| `Template/loras.json` | 新增 id `qwen21-viggle-turbo-6step` | 指向 viggle-turbo v0.2.1 6 步蒸馏 LoRA（本机路径） |
+| `ZivAiEditor.App.csproj` | 复制 `plugins\**\*` 到程序目录 | C# 仅动 csproj；`PluginRegistry` / env 注入未改 |
+| `publish.ps1` | 强删清单加 `plugins.json` | 与 commands / loras / models 同模式 |
+
+### 3.3 验证（冻结）
+
+- Python CPU：`python -m unittest discover -p "test_*.py"`（cwd `python/server`）→ **111 通过 / 0 失败**
+  （含 `test_dispatch.py` 18 例、`test_plugin_pipeline.py` 6 例）。
+- C#：`dotnet build src/ZIV.AI.sln` → **0 错 0 警**；`dotnet test` → **753 通过 / 0 失败**。
+- GPU 端到端（`_test_step2/plugin_e2e_ab.py`，真实 `pipeline.run`，1024×640 / seed 42，2 轮）：
+  OFF 10.87 s / ON 5.55 s → 约 **1.96×**；两轮逐位一致；均为有效编辑图。
+
+### 3.4 遗留 / 不做
+
+- 未做多轮画质评分 / 步数扫描；6 步路径的 GPU 画质仅冒烟级验证。
+- `Template/loras.json` 新增路径为本机绝对路径（换机需改数据）。
+- 未接「检查依赖」按钮（仍 `待批 3` 后续；本批不动 IPC）。
+- **已知交互**：`sampling_plan` 谓词不检查 `additional_images`（多图控制）或请求已带的 LoRA
+  （`pipeline_hooks`）——开启该插件会在其上叠加 6 步蒸馏 LoRA / 调度。默认关，故以**文档说明**取代自动排除。

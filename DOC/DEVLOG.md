@@ -7461,3 +7461,73 @@ invent a new identity.`
 
 ### D · 不做
 - 不改 IPC 契约 / 公开接口 / 命令集；不下模型；GUI 端到端首图待发布版复测。
+---
+
+## 批 3：通用 capability 调度 + qwen21-viggle-6step 六步编辑加速（2026-09-29，只增）
+
+> 目标：把批 1 的「发现 / 加载 / 开关」接成**通用插件 capability 调度**，并用首个插件
+> `qwen21-viggle-6step` 给 Qwen-Image-2.1 **无掩码图像编辑**路径接上 6 步蒸馏 LoRA 加速。
+> **默认关**：关闭时走旧路径（路由 / 参数与改动前一致，宿主侧路由测试证实；**未做逐字节输出对比**）；
+> 不改 IPC 契约，不动 TE-Speed / WD14。
+
+### A · 契约（`DOC/INTERFACES.md` §38）
+- 插件导出 `PLUGIN_META = {id, display_name, version, capabilities}`；capability 即模块级可调用对象。
+- 批 3 capability `"sampling_plan"`：`sampling_plan(context: dict) -> dict | None`。
+  context：`op/model/clip/vae/latent/mask/prompt/image_path/mask_path/steps/denoise/seed/cfg/`
+  `sampler_preset/model_id`；返回 `None` = 放弃，否则可选键
+  `model / skip_shift / sigmas / sampler_name / scheduler / cfg / steps / cleanup`。
+
+### B · 改动
+- 新 `python/server/plugins/dispatch.py`：`active_plugins()`（注册表 ∩ 启用 ∩ 可加载）与
+  `call(capability, context)`（首个非 None；异常仅 warning + 跳过，**永不抛**）。纯 CPU。
+- **Z8 拆分**：`pipeline.py` 696 → **541 行**（< 600），拆出两个纯模块并按同名回引
+  （`pipeline._load_mask_tensor` / `to_pil` 等外部引用不受影响）：
+  `pipeline_io.py`（图像 / 遮罩张量 IO、decode→PIL、输出路径 / seed / denoise、进度 emit、临时树删除）；
+  `plugin_sampling.py`（capability 接缝：`build_context` / `resolve_plan` / `plan_sigmas` /
+  `plan_steps` / `applies_shift` / `sample` / `cleanup`；纯 CPU，torch / comfy 惰性导入）。
+- 复核修复：`resolve_plan` 把非 dict 的插件返回归一为 `None`（畸形插件不再在管线里抛）；
+  `sampling_plan` 增加 `model_id` 白名单（非 `qwen-image-2.1` 直接放弃，避免对非 Qwen 模型挂错 LoRA）。
+- 新插件 `plugins/qwen21-viggle-6step/__init__.py`：`sampling_plan` 仅在
+  `op=="inpaint"` ∧ 有主图 ∧ 无 mask ∧ `denoise≈1.0` 时接管；LoRA 侧分支（`y = Wx + BAx`，
+  含 int8 融合 MLP 的 `gate_up`/`out` 旁路、张量 device 迁移、`finally` 摘 hook）与 sigma 公式
+  **忠实移植**自权威节点 `viggle_turbo.py`（见 `E:\Downloads\工作流\姿态编辑流\插件放custom_nodes根目录\`）。
+  LoRA 经 `loras.resolve_path("qwen21-viggle-turbo-6step")` 解析；缺失 → warning + `None` 降级。
+- `pipeline.py`：`run()` 新增 `op="inpaint"`；`run_outpaint` 传 `op="outpaint"`；`handlers._dispatch_op`
+  传真实 op。`_run_once` 里 **plan 改在 `encode_prompt` 之后**解析（plan 需要 latent/mask）：
+  1) encode → 2) 构造 context + `dispatch.call("sampling_plan", ctx)` → 3) `model = plan.get("model", model)`
+  且仅在 `not plan.get("skip_shift")` 时套 AuraFlow（有 sigmas 但缺 `skip_shift` 键时**默认跳过**，fail-safe）；
+  4) 再取 previewer；5) 有 sigmas → `comfy.sample.sample_custom` + `sampler_object` + plan 步数；
+  无 → 原 `comfy.sample.sample` 路径不变；6) install→sample 包 `try/finally` 保证 `cleanup` 必跑
+  （OOM 降级会重跑 `_run_once`，plan 亦按构造重新解析）。plan 为 None 时参数与旧实现完全一致。
+- `Template/plugins.json`：登记 `qwen21-viggle-6step`（`dir` `plugins/qwen21-viggle-6step`，
+  `enabled_by_default false`，`deps []`，`kind accel`）。`Template/loras.json`：新增
+  id `qwen21-viggle-turbo-6step` → `E:\Downloads\工作流\姿态编辑流\lora\...-6step-lora-r256.safetensors`。
+- 发布：`ZivAiEditor.App.csproj` 增加 `plugins\**\*` 复制到程序目录；`publish.ps1` 强删清单加
+  `plugins.json`。C# 仅动 csproj（`PluginRegistry` / env 注入本就齐全，未改）。
+
+### C · 验证
+- Python CPU：`python -m unittest discover -p "test_*.py"`（cwd `python/server`）→ **111 通过 / 0 失败**；
+  新增 `test_dispatch.py` 18 例（注册表 / 启用 / 首个非 None / 永不抛 / 无 capability 跳过；
+  插件子进程加载**不 import torch / comfy**；`sampling_plan` 对 outpaint / mask / denoise≠1 / t2i 全部放弃，
+  无掩码编辑返回 plan；禁用时 `dispatch.call` 返回 None）。
+- **仓内宿主侧集成测试** `test_plugin_pipeline.py`（6 例；`import comfy` + monkeypatch `comfy.sample.sample` /
+  `sample_custom` / `ModelSamplingAuraFlow.patch_aura`；CPU-only 解释器下整类 `skipUnless` 跳过）：
+  禁用编辑 → `sample` + AuraFlow；启用无掩码编辑 → `sample_custom`、AuraFlow 跳过、cleanup 必跑
+  （含采样抛错时，及 OOM 重试下每次 attempt 各自建/拆 clone、不泄漏）；outpaint / t2i / mask /
+  denoise<1 → 全部走旧路径；并断言真实 `_build_sigmas` 与权威节点输出一致
+  （`[1.0, 0.965249, 0.928378, 0.847450, 0.649338, 0.381666, 0.0]`）。**全绿**。
+- C#：`dotnet build src/ZIV.AI.sln` → **0 错 0 警**；`dotnet test` → **753 通过 / 0 失败**。
+  （首次全量跑中 `IpcIdleUnloadTests.Idle_Timeout_Unloads_Then_Reloads_On_Next_Submit` 曾失败一次：
+  该例断言 `VramUsedMb < 3000`，与外部占用 GPU 的进程争用有关；stash 基线复现同因，复跑即绿，非本改回归。）
+
+### D · 不做 / 遗留
+- 不改 IPC / 命令集 / 公开签名；不移 TE-Speed、WD14；未接 GUI 开关端到端（开关走既有
+  `settings.ini [plugins]` → env，无新面）。
+- `Template/loras.json` 的新增 LoRA 路径是**本机绝对路径**（与 `face-swap` 同风格）；换机需改数据。
+- **GPU 端到端已复测**（Z30：启动前确认空闲；`_test_step2/plugin_e2e_ab.py`，走**真实 `pipeline.run`**，
+  1024×640 / seed 42 / 无掩码编辑，2 轮）：OFF（40 步）wall **10.87 s** / pipeline **10864 ms** / nvidia-smi 峰 **10.5 GB**；
+  ON（6 步 + 插件）wall **5.55 s** / pipeline **5549 ms** / 峰 **12.6 GB** → **端到端约 1.96×**，两轮结果逐位一致。
+  画质：两版均为有效的「中式茶肆」编辑图；ON 保留原图上下黑边（源图为电影裁切帧，6 步路径更忠于原始构图），
+  OFF 则重绘掉黑边——**保真度差异，非缺陷**（详见前轮 D 段说明）。
+- 6 步路径**未做多轮画质评分 / 步数扫描**（仅 2 轮路由 + 端到端冒烟）。
+

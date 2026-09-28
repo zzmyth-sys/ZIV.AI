@@ -38,6 +38,11 @@
     <None Include="..\..\Template\models.json" Link="Template\models.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Template\plugins.json" Link="Template\plugins.json" CopyToOutputDirectory="PreserveNewest" />
 
+    <!-- B3: ship the executable plugins (data-registered in Template/plugins.json, dir
+         relative to the program directory). Without this the published app would resolve
+         `plugins/<id>` to a missing directory and the loader would degrade to a warning. -->
+    <None Include="..\..\plugins\**\*" Exclude="..\..\plugins\**\__pycache__\**" Link="plugins\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+
     <!-- ZIV.AI's own backend pipeline ships with the app (first-party, ~125 KB). ComfyUI /
          python_embeded / model weights are third-party and supplied by the user (RELEASE §2);
          they are NOT bundled. This makes the default [backend] script

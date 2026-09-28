@@ -15,6 +15,13 @@
       "default_strength_model": 1.0,
       "default_strength_clip": 1.0,
       "description": "BFS Head V1.1 换头 LoRA（Qwen-Image-2.1；图像1=基础，图像2=参考头部；来源 civitai.red/models/2027766）"
+    },
+    {
+      "id": "qwen21-viggle-turbo-6step",
+      "path": "E:\\Downloads\\工作流\\姿态编辑流\\lora\\Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors",
+      "default_strength_model": 1.0,
+      "default_strength_clip": 1.0,
+      "description": "Qwen-Image-2.1 viggle-turbo v0.2.1 6-step 蒸馏 LoRA（batch 3 插件 qwen21-viggle-6step 专用；r256，diffusers 格式）"
     }
   ]
 }

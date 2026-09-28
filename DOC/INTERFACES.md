@@ -492,3 +492,23 @@
   **不安装**（无新依赖）。
 - **开关**：`settings.ini [plugins] <id> = 1|0` → env `ZIV_AI_PLUGIN_<ID>`；缺省 registry 默认。
 - **不做**：不改 IPC / 命令集；无新 NuGet。
+
+## 38. 插件 capability 调度（batch 3）（2026-09-29，只增）
+
+- **契约**：插件导出 `PLUGIN_META = {id, display_name, version, capabilities}`；capability 即同名
+  模块级可调用对象。
+- **调度**：`python/server/plugins/dispatch.py`（纯 CPU）：
+  - `active_plugins()` = `loader.load_registry()` ∩ `loader.enabled(id, entry)` ∩ `loader.load_plugin(id)`；
+  - `call(capability, context)`：按注册表顺序调用启用插件暴露的该 capability，返回**首个非 None**；
+    未暴露者跳过，抛异常者记 warning 跳过——**永不抛到管线**。
+- **capability `sampling_plan`**：`sampling_plan(context: dict) -> dict | None`。
+  - context（只读）：`op` / `model` / `clip` / `vae` / `latent` / `mask` / `prompt` / `image_path` /
+    `mask_path` / `steps` / `denoise` / `seed` / `cfg` / `sampler_preset` / `model_id`。
+  - 返回 `None` = 放弃；否则可选键：`model`（已打补丁）/ `skip_shift`(bool) / `sigmas`(1-D tensor) /
+    `sampler_name` / `scheduler` / `cfg` / `steps` / `cleanup`(finally 调用)。
+  - 管线语义：`sigmas` 非 None → `comfy.sample.sample_custom` + `samplers.sampler_object`；否则原
+    `comfy.sample.sample` 路径不变；`skip_shift` 缺省且带 sigmas → 跳过 ModelSamplingAuraFlow。
+- **首个插件**：`qwen21-viggle-6step`（`plugins/qwen21-viggle-6step/`，默认关）——仅无掩码图像编辑
+  （`op=="inpaint"` ∧ 有主图 ∧ 无 mask ∧ `denoise≈1.0`）接 6 步蒸馏 LoRA；LoRA 路径由 id
+  `qwen21-viggle-turbo-6step`（`Template/loras.json`）解析。
+- **不做**：不改 IPC / 命令集；无新 NuGet；不新增 CLI。

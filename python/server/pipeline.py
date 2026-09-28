@@ -20,10 +20,8 @@ import importlib.util
 import logging
 import math
 import os
-import random
 import sys
 import time
-from datetime import datetime
 
 import config
 import model_loader
@@ -31,8 +29,25 @@ import models
 import multi_image
 import outpaint
 import pipeline_hooks
+import pipeline_io
+import plugin_sampling
 import preview as preview_module
 import vram_probe
+from pipeline_io import (
+    _emit,
+    _load_image_tensor,
+    _load_mask_tensor,
+    _mask_is_binary,
+    _remove_tree,
+    _resize_mask,
+    _resolve_denoise,
+    _resolve_output_path,
+    _resolve_seed,
+    _to_pil,
+    save_png,
+    to_pil,
+    vae_decode,
+)
 from resolution import (
     _normalize_payload_resolution,
     _resolution_specs,
@@ -101,7 +116,7 @@ def apply_te_speed(model):
 
 
 def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cancel=None,
-        mask_binary=True):
+        mask_binary=True, op="inpaint"):
     """Run one inpaint / edit request.
 
     ``on_progress(step, total, fraction, stage, message)`` and
@@ -114,6 +129,10 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
     user / C# masks (revised Z19: user-explicit feather is exported as
     grayscale and must reach the sampler). The outpaint path also passes
     ``False`` so its backend-generated feathered mask stays soft.
+
+    ``op`` is the IPC op (``inpaint`` / ``t2i`` / ``outpaint``): it is threaded
+    into the batch-3 capability context so a plugin can decide whether it applies
+    (the generic ``sampling_plan`` accelerator is edit-only).
 
     Retries at lower resolutions on CUDA OOM (Step 4).
     """
@@ -156,6 +175,7 @@ def run(model, clip, vae, request, on_progress=None, on_preview=None, poll_cance
                 spec, steps, seed, denoise, started,
                 on_progress, on_preview, poll_cancel, mask_binary,
                 additional_images=additional_images, sampler=sampler,
+                op=op, model_id=request.get("model_id"),
             )
         except oom_types as exc:
             last_error = exc
@@ -208,36 +228,21 @@ def run_outpaint(model, clip, vae, request, on_progress=None, on_preview=None, p
         return run(
             model, clip, vae, derived,
             on_progress=on_progress, on_preview=on_preview, poll_cancel=poll_cancel,
-            mask_binary=False,
+            mask_binary=False, op="outpaint",
         )
     finally:
         _remove_tree(workdir)
 
 
-def _remove_tree(path):
-    import shutil
-
-    try:
-        shutil.rmtree(path, ignore_errors=True)
-    except Exception:
-        pass
-
-
 def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
               spec, steps, seed, denoise, started,
               on_progress, on_preview, poll_cancel, mask_binary=True,
-              additional_images=None, sampler=None):
+              additional_images=None, sampler=None, op="inpaint", model_id=None):
     import comfy.model_management as mm
     import comfy.sample
     from comfy_extras.nodes_model_advanced import ModelSamplingAuraFlow
 
     sampler = sampler or {}
-    # Step 8-2: the schedule model + shift are data (models.json sampler block); AuraFlow
-    # remains the only supported schedule type. Patch a clone so the resident model is
-    # never mutated.
-    if sampler.get("type", "auraflow") == "auraflow":
-        shift = float(sampler.get("shift", config.AURAFLOW_SHIFT))
-        model = ModelSamplingAuraFlow().patch_aura(model, shift)[0]
 
     # Stage 2: encode the prompt + optional reference image (clip is patched).
     # cfg==1.0 discards the negative conditioning in the sampler
@@ -250,6 +255,27 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
         clip, vae, prompt, image_path, mask_path, spec=spec, mask_binary=mask_binary,
         additional_images=additional_images, need_negative=need_negative,
     )
+
+    # batch 3: an optional capability plugin may replace the model / schedule / sampler
+    # for a maskless image edit. Runs after `encode_prompt` because the plan needs the
+    # latent (schedule depends on its token count) and the mask (edit-only predicate).
+    # Disabled / declining plugins return None, leaving every step below unchanged.
+    plan = plugin_sampling.resolve_plan(plugin_sampling.build_context(
+        op=op, model=model, clip=clip, vae=vae, latent=latent_image, mask=mask,
+        prompt=prompt, image_path=image_path, mask_path=mask_path, steps=steps,
+        denoise=denoise, seed=seed, cfg=cfg, sampler_preset=sampler, model_id=model_id,
+    ))
+    plan_sigmas = plugin_sampling.plan_sigmas(plan)
+    if plan is not None:
+        model = plugin_sampling.plan_model(plan, model)
+        steps = plugin_sampling.plan_steps(plan, steps)
+
+    # Step 8-2: the schedule model + shift are data (models.json sampler block); AuraFlow
+    # remains the only supported schedule type. Patch a clone so the resident model is
+    # never mutated. A plan that ships its own sigmas defaults to skipping the shift.
+    if plugin_sampling.applies_shift(plan, plan_sigmas) and sampler.get("type", "auraflow") == "auraflow":
+        shift = float(sampler.get("shift", config.AURAFLOW_SHIFT))
+        model = ModelSamplingAuraFlow().patch_aura(model, shift)[0]
 
     previewer = preview_module.get_previewer(model)
     preview_every = max(1, int(config.PREVIEW_EVERY))
@@ -278,12 +304,18 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
 
     noise = comfy.sample.prepare_noise(latent_image, seed)
     vram_probe.stage("sample BEG (first call loads weights)")
-    samples = sample(
-        model, positive, negative, latent_image, noise, steps, denoise, mask, seed, callback,
-        sampler_name=sampler.get("sampler_name"),
-        scheduler=sampler.get("scheduler"),
-        cfg=cfg,
-    )
+
+    # batch 3: the plugin installs the LoRA side-branch (a MODEL clone / its hooks) during
+    # `sampling_plan`; its cleanup must run even on OOM because `run()` retries `_run_once`
+    # per resolution fallback and must not leak / double-apply hooks.
+    try:
+        samples = plugin_sampling.sample(
+            plan=plan, sigmas=plan_sigmas, model=model, noise=noise, positive=positive,
+            negative=negative, latent=latent_image, mask=mask, seed=seed, callback=callback,
+            steps=steps, denoise=denoise, cfg=cfg, sampler=sampler, legacy_sample=sample,
+        )
+    finally:
+        plugin_sampling.cleanup(plan)
     vram_probe.stage("sample END")
 
     # A cancel that lands after the last sampling step still aborts here; the
@@ -352,22 +384,6 @@ def sample(model, positive, negative, latent, noise, steps, denoise, mask, seed,
         disable_pbar=True,
         seed=seed,
     )
-
-
-def vae_decode(vae, samples):
-    """Pipeline stage: decode the sampled latent back to pixels."""
-    return vae.decode(samples)
-
-
-def to_pil(tensor):
-    """Convert a decoded tensor to a PIL image plus (height, width)."""
-    return _to_pil(tensor)
-
-
-def save_png(image, output_path):
-    """Pipeline stage: write the output as a new PNG file (Z24)."""
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    image.save(output_path)
 
 
 def _oom_types():
@@ -523,100 +539,3 @@ def _encode(clip, vae, prompt, image_path, mask_path, resolution, mode=None, spe
             mode="nearest" if _mask_is_binary(mask) else "bilinear",
         )
     return positive, negative, latent_samples, mask
-
-
-def _load_image_tensor(path):
-    import numpy as np
-    import torch
-    from PIL import Image
-
-    image = Image.open(path).convert("RGB")
-    array = np.asarray(image).astype(np.float32) / 255.0
-    return torch.from_numpy(array)[None, ...]  # [1,H,W,3]
-
-
-def _load_mask_tensor(path, binary=True):
-    import numpy as np
-    import torch
-    from PIL import Image
-
-    image = Image.open(path).convert("L")
-    array = np.asarray(image).astype(np.float32) / 255.0
-    if binary:
-        array = (array >= 0.5).astype(np.float32)  # legacy: threshold a binary mask to 0 / 1
-    # binary=False keeps the soft 0..1 ramp (user feather OR backend outpaint mask).
-    return torch.from_numpy(array)[None, ...]  # [1,H,W]
-
-
-def _mask_is_binary(mask):
-    """True when every mask value is exactly 0 or 1 (a hard mask)."""
-    import torch
-
-    return bool(torch.all((mask == 0) | (mask == 1)))
-
-
-def _resize_mask(mask, width, height, mode="nearest"):
-    import torch
-
-    if mask.shape[-1] == width and mask.shape[-2] == height:
-        return mask
-    resized = torch.nn.functional.interpolate(
-        mask[:1, None], size=(height, width), mode=mode
-    )
-    return resized[0]
-
-
-def _to_pil(tensor):
-    import numpy as np
-    from PIL import Image
-
-    array = tensor.detach().cpu().float().clamp(0, 1).numpy()
-    array = (array * 255.0).round().astype(np.uint8)
-    image = Image.fromarray(array)
-    return image, image.height, image.width
-
-
-def _resolve_denoise(value):
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return 1.0
-    return min(1.0, max(0.0, number))
-
-
-def _resolve_seed(seed):
-    try:
-        value = int(seed)
-    except (TypeError, ValueError):
-        value = -1
-    if value < 0:
-        return random.randint(0, 0x7FFFFFFF)
-    return value
-
-
-def _resolve_output_path(requested, image_path):
-    """Pick an output path that never overwrites the source (Z24 / SPEC §3.9)."""
-    if requested:
-        candidate = os.path.abspath(requested)
-        if not image_path or candidate != os.path.abspath(image_path):
-            return candidate
-    if image_path:
-        directory = os.path.dirname(os.path.abspath(image_path))
-        stem = os.path.splitext(os.path.basename(image_path))[0]
-    else:
-        directory = config.OUTPUT_DIR
-        os.makedirs(directory, exist_ok=True)
-        stem = "zivai"
-
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    candidate = os.path.join(directory, "%s_ai_%s.png" % (stem, stamp))
-    suffix = 1
-    while os.path.exists(candidate):
-        candidate = os.path.join(directory, "%s_ai_%s_%d.png" % (stem, stamp, suffix))
-        suffix += 1
-    return candidate
-
-
-def _emit(on_progress, step, total, fraction, stage, message):
-    if on_progress is not None:
-        on_progress(step, total, fraction, stage, message)

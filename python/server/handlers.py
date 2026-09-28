@@ -235,12 +235,13 @@ def _dispatch_op(model, clip, vae, payload, op, frame_io, task_id):
         "on_preview": _make_preview(frame_io, task_id),
         "poll_cancel": _make_cancel_poller(frame_io),
     }
+    op = op or "inpaint"
     if op == "outpaint":
         return pipeline.run_outpaint(model, clip, vae, payload, **callbacks)
-    if op in ("", "inpaint", "t2i"):
-        return pipeline.run(model, clip, vae, payload, mask_binary=False, **callbacks)
+    if op in ("inpaint", "t2i"):
+        return pipeline.run(model, clip, vae, payload, mask_binary=False, op=op, **callbacks)
     _LOG.warning("unknown op %r; falling back to inpaint", op)
-    return pipeline.run(model, clip, vae, payload, mask_binary=False, **callbacks)
+    return pipeline.run(model, clip, vae, payload, mask_binary=False, op=op, **callbacks)
 
 
 def _configure_pre_sampling_hooks(payload):

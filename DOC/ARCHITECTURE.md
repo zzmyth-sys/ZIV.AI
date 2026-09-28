@@ -634,3 +634,15 @@ ZIV.AI.sln
 - **边界**：批 1 只做「发现 / 加载 / 依赖探测 / 开关」，capability 调度（姿态转换等）留批 3；
   Python 侧姿态图注入沿用 `additional_images`，不改 IPC。
 - **不做**：不改既有分层依赖方向；无新 NuGet。
+
+## 插件 capability 边界（batch 3）（2026-09-29，只增）
+
+- **定位**：批 3 落地**通用 capability 调度**（`python/server/plugins/dispatch.py`，纯 CPU）：
+  启用插件导出 `PLUGIN_META` + 同名可调用 capability（首个 `sampling_plan`），调度器遍历启用插件、
+  取首个非 None 结果，异常隔离（永不失败任务）。
+- **分层**：Python 契约（`PLUGIN_META` / context / 返回 dict）与调度在**后端进程内**
+  （`python/server/plugins/` + `pipeline._run_once` 消费点）；C# 仍只管注册表与开关
+  （`PluginRegistry` / `settings.ini [plugins]` → env），**契约不新增**。
+- **边界**：插件自带算力（LoRA 权重 / 调度）与降级策略；主图 / 掩码 / op 由 context 只读传入，
+  插件**不改 IPC、不改命令集、不改既有分层依赖方向**。默认关，关闭时禁用路径与改动前一致。
+- **不做**：无新 NuGet；不新增 CLI / 公开签名。

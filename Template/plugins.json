@@ -1,5 +1,17 @@
 {
   "version": "1",
   "_comment": "Plugin registry (batch 1). Add a plugin = add one entry here; no code change. `dir` is relative to the program directory (absolute allowed). `deps` are Python import names checked with importlib.util.find_spec. Enable/disable state lives in settings.ini [plugins] keyed by the raw id; absent = enabled_by_default.",
-  "plugins": []
+  "plugins": [
+    {
+      "id": "qwen21-viggle-6step",
+      "display_name": "Qwen-Image-2.1 Viggle Turbo 6-Step (edit)",
+      "version": "0.1.0",
+      "dir": "plugins/qwen21-viggle-6step",
+      "entry": "__init__.py",
+      "deps": [],
+      "enabled_by_default": false,
+      "kind": "accel",
+      "description": "6-step distilled LoRA acceleration for the maskless image-EDIT path (batch 3 sampling_plan capability; off by default)."
+    }
+  ]
 }

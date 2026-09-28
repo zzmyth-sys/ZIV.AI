@@ -79,7 +79,7 @@ Get-ChildItem -LiteralPath $OutputDir -Force | Where-Object {
 # which only overwrites when the source is newer than the target. Delete the preserved copies
 # first so the next publish is guaranteed to refresh them (Template/commands.user.json, the user
 # override, is kept).
-foreach ($builtinName in @('commands.json', 'loras.json', 'models.json')) {
+foreach ($builtinName in @('commands.json', 'loras.json', 'models.json', 'plugins.json')) {
     $builtinPath = Join-Path $OutputDir "Template\$builtinName"
     if (Test-Path -LiteralPath $builtinPath) {
         Remove-Item -LiteralPath $builtinPath -Force
