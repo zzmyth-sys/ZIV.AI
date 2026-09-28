@@ -212,5 +212,184 @@ class QwenPluginTests(unittest.TestCase):
         self.assertIsNone(dispatch.call("sampling_plan", self._context()))
 
 
+class SeamsForTests(unittest.TestCase):
+    """S2 ``_seams_for``：entry seams > entry capabilities > legacy map（D2 / D10）。"""
+
+    def setUp(self):
+        loader._MODULES.clear()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = self._tmp.name
+
+    def _seams(self, entry, module=None):
+        return dispatch._seams_for("p", module or object(), entry)
+
+    def test_declared_seams_win(self):
+        entry = {"seams": ["before_encode"], "capabilities": ["sampling_plan"]}
+        self.assertEqual(self._seams(entry), ["before_encode"])
+
+    def test_capabilities_legacy_mapped(self):
+        entry = {"capabilities": ["sampling_plan"]}
+        self.assertEqual(self._seams(entry), ["before_sample"])
+
+    def test_capabilities_unknown_dropped(self):
+        entry = {"capabilities": ["not_a_seam", "sampling_plan"]}
+        self.assertEqual(self._seams(entry), ["before_sample"])
+
+    def test_empty_seams_falls_back_to_capabilities(self):
+        entry = {"seams": [], "capabilities": ["sampling_plan"]}
+        self.assertEqual(self._seams(entry), ["before_sample"])
+
+    def test_none_entry_is_empty(self):
+        self.assertEqual(self._seams(None), [])
+        self.assertEqual(self._seams({}), [])
+
+    def test_plugin_meta_seams_is_not_read(self):
+        # D2：seams 只放数据文件；PLUGIN_META.seams 不参与解析。
+        module = mock.Mock()
+        module.PLUGIN_META = {"seams": ["after_encode"]}
+        self.assertEqual(self._seams({"capabilities": ["sampling_plan"]}, module), ["before_sample"])
+
+    def test_seams_from_registry_when_entry_omitted(self):
+        directory = os.path.join(self.root, "plugins", "p")
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, "__init__.py"), "w", encoding="utf-8") as handle:
+            handle.write("MARKER = 1\n")
+        path = os.path.join(self.root, "plugins.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(
+                {"version": "1", "plugins": [{"id": "p", "dir": "plugins/p", "seams": ["after_sample"]}]},
+                handle,
+            )
+        with mock.patch.object(config, "PLUGINS_REGISTRY_PATH", path):
+            self.assertEqual(dispatch._seams_for("p", object()), ["after_sample"])
+
+
+class CallChainTests(unittest.TestCase):
+    """S2 ``call_chain``：数组序链式、patch 累积、异常隔离、旧函数名别名。"""
+
+    def setUp(self):
+        loader._MODULES.clear()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = self._tmp.name
+
+    def _make_plugin(self, name, body):
+        directory = os.path.join(self.root, "plugins", name)
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, "__init__.py"), "w", encoding="utf-8") as handle:
+            handle.write(body)
+        return directory
+
+    def _install(self, entries):
+        path = os.path.join(self.root, "plugins.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"version": "1", "plugins": entries}, handle)
+        patcher = mock.patch.multiple(
+            config, PLUGINS_REGISTRY_PATH=path, PLUGINS_BASE_DIR=self.root
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_chain_accumulates_in_array_order(self):
+        self._make_plugin(
+            "one",
+            "def before_encode(ctx):\n    ctx.setdefault('order', []).append('one')\n"
+            "    return {'prompt': ctx['prompt'] + '1'}\n",
+        )
+        self._make_plugin(
+            "two",
+            "def before_encode(ctx):\n    return {'prompt': ctx['prompt'] + '2'}\n",
+        )
+        self._install([
+            {"id": "one", "dir": "plugins/one", "enabled_by_default": True, "seams": ["before_encode"]},
+            {"id": "two", "dir": "plugins/two", "enabled_by_default": True, "seams": ["before_encode"]},
+        ])
+        out = dispatch.call_chain("before_encode", {"prompt": "x"})
+        self.assertEqual(out["prompt"], "x12")
+
+    def test_chain_skips_plugins_not_on_seam(self):
+        self._make_plugin("a", "def after_sample(ctx):\n    return {'samples': 'A'}\n")
+        self._make_plugin("b", "def before_encode(ctx):\n    return {'prompt': 'B'}\n")
+        self._install([
+            {"id": "a", "dir": "plugins/a", "enabled_by_default": True, "seams": ["after_sample"]},
+            {"id": "b", "dir": "plugins/b", "enabled_by_default": True, "seams": ["before_encode"]},
+        ])
+        out = dispatch.call_chain("before_encode", {"prompt": "x"})
+        self.assertEqual(out, {"prompt": "B"})
+
+    def test_chain_isolates_exceptions(self):
+        self._make_plugin("boom", "def before_encode(ctx):\n    raise RuntimeError('boom')\n")
+        self._make_plugin("ok", "def before_encode(ctx):\n    return {'prompt': 'ok'}\n")
+        self._install([
+            {"id": "boom", "dir": "plugins/boom", "enabled_by_default": True, "seams": ["before_encode"]},
+            {"id": "ok", "dir": "plugins/ok", "enabled_by_default": True, "seams": ["before_encode"]},
+        ])
+        self.assertEqual(dispatch.call_chain("before_encode", {"prompt": "x"}), {"prompt": "ok"})
+
+    def test_chain_ignores_non_dict_patch(self):
+        self._make_plugin("odd", "def before_encode(ctx):\n    return 42\n")
+        self._install([
+            {"id": "odd", "dir": "plugins/odd", "enabled_by_default": True, "seams": ["before_encode"]},
+        ])
+        self.assertEqual(dispatch.call_chain("before_encode", {"prompt": "x"}), {"prompt": "x"})
+
+    def test_chain_all_decline_returns_original(self):
+        self._make_plugin("noop", "def before_encode(ctx):\n    return None\n")
+        self._install([
+            {"id": "noop", "dir": "plugins/noop", "enabled_by_default": True, "seams": ["before_encode"]},
+        ])
+        self.assertEqual(dispatch.call_chain("before_encode", {"prompt": "x"}), {"prompt": "x"})
+
+    def test_chain_legacy_sampling_plan_alias(self):
+        # 旧插件只导出 sampling_plan、capabilities 声明旧名 → 经 seam 解析 + 函数名回退被调用。
+        self._make_plugin("legacy", "def sampling_plan(ctx):\n    return {'steps': 6}\n")
+        self._install([
+            {"id": "legacy", "dir": "plugins/legacy", "enabled_by_default": True,
+             "capabilities": ["sampling_plan"]},
+        ])
+        self.assertEqual(dispatch.call_chain("before_sample", {"steps": 40}), {"steps": 6})
+
+    def test_chain_gives_plugin_a_copy_not_live_ctx(self):
+        self._make_plugin(
+            "mutator",
+            "def before_encode(ctx):\n    ctx['prompt'] = 'in-place'\n    return None\n",
+        )
+        self._install([
+            {"id": "mutator", "dir": "plugins/mutator", "enabled_by_default": True,
+             "seams": ["before_encode"]},
+        ])
+        ctx = {"prompt": "x"}
+        dispatch.call_chain("before_encode", ctx)
+        self.assertEqual(ctx["prompt"], "x")
+
+    def test_chain_does_not_mutate_callers_ctx(self):
+        self._make_plugin("a", "def before_encode(ctx):\n    return {'prompt': 'y'}\n")
+        self._install([
+            {"id": "a", "dir": "plugins/a", "enabled_by_default": True, "seams": ["before_encode"]},
+        ])
+        ctx = {"prompt": "x"}
+        out = dispatch.call_chain("before_encode", ctx)
+        self.assertEqual(out["prompt"], "y")
+        self.assertEqual(ctx, {"prompt": "x"})
+
+    def test_chain_aggregates_cleanups_from_multiple_plugins(self):
+        self._make_plugin(
+            "c1", "def before_sample(ctx):\n    return {'cleanup': lambda: 'c1'}\n"
+        )
+        self._make_plugin(
+            "c2", "def before_sample(ctx):\n    return {'cleanup': lambda: 'c2'}\n"
+        )
+        self._install([
+            {"id": "c1", "dir": "plugins/c1", "enabled_by_default": True, "seams": ["before_sample"]},
+            {"id": "c2", "dir": "plugins/c2", "enabled_by_default": True, "seams": ["before_sample"]},
+        ])
+        out = dispatch.call_chain("before_sample", {})
+        self.assertNotIn("cleanup", out)
+        cleanups = out[dispatch.CLEANUPS_KEY]
+        self.assertEqual(len(cleanups), 2)
+        self.assertEqual([fn() for fn in cleanups], ["c1", "c2"])
+
+
 if __name__ == "__main__":
     unittest.main()
