@@ -7361,3 +7361,67 @@ ScrollBar 拉回；渲染正向 cap 到 `scaled` 仅落在「已全白」区，o
 
 ### E · 不做
 - 不做批 3；不动 TE-Speed / WD14；无新 NuGet；未跑 GPU/真实 App；未 commit。
+
+---
+
+## 换脸命令（纯数据 · /换脸 + face-swap LoRA）（2026-09-28，只增）
+
+> 目标：新增「换脸」能力 = `Template/commands.json` 加 `/换脸` + `Template/loras.json` 加
+> `face-swap` 条目，参考图 `<image2>` 提供脸部。**纯数据**；不改管线代码。
+
+### A · 数据
+- `commands.json` 追加 `/换脸`（`handler: Edit` / `tool: QW21edit` / `params: [description]` /
+  `variadic` / `template` 引用 `<image2>` / `loras: [{ path: "face-swap", strength_model: 1.0,
+  strength_clip: 1.0 }]`）；commands 13 → **14**。
+- `loras.json` 追加 `face-swap`（占位 `path`：用户自备换脸 LoRA 并改为实际权重文件）。
+- `CommandParser.BuiltIn.cs` 同步追加同一命令（`BuiltIn_Matches_DataFile` 名称集合一致）。
+
+### B · 提示词（template 全文）
+`Replace the face of the person in <image1> with the face from <image2>. {description}. Preserve
+<image1>'s pose, body, clothing, hairstyle and background exactly unchanged; match the facial
+features, skin tone and lighting from <image2> naturally so the result looks seamless. Do not
+invent a new identity.`
+- 要点：`<image1>` 保留姿态/身体/服装/发型/背景；`<image2>` 只取脸部；要求肤色/光照自然、
+  **不生成新身份**；`{description}` 吸收 variadic 补充描述。
+
+### C · 验证
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**；JSON 均可解析。
+- 非 GPU filter 全量 → **728 通过 / 0 失败**。
+- 同步修正 `CommandSuggestionsTests.BuiltIn_Set_Counts` 常量（13→14、/换 5→6）——本轮经用户确认。
+
+### D · 不做
+- 不下载 / 不内置换脸 LoRA（用户自备）；不改管线代码；未跑 GPU / 真实 App；未 commit。
+
+---
+
+## /换脸 修正（真实 LoRA 路径 + BFS 官方触发词）（2026-09-28，只增）
+
+> 上一轮 `/换脸` 结构正确但有两处偏差；本轮修正：① LoRA 用真实绝对路径；② template 改用 BFS
+> 官方触发词。**只改数据 + `CommandParser.BuiltIn.cs` 同步副本**；命令数不变。
+
+### A · 改动
+- `Template/loras.json` 的 `face-swap.path`：
+  `D:\path\to\your\face-swap-lora.safetensors` → **`C:\AI\ComfyUI_PIC\ComfyUI\models\loras\qwen_image2\bfs_head_v1.1_qwen_2.1.safetensors`**；
+  description → 「BFS Head V1.1 换头 LoRA（Qwen-Image-2.1；图像1=基础，图像2=参考头部；来源
+  civitai.red/models/2027766）」，移除「占位路径」措辞。
+- `Template/commands.json` 与 `CommandParser.BuiltIn.cs` 的 `/换脸` `template` → BFS 官方风格：
+  `head_swap: start with Picture 1 as the base image, keeping its lighting, environment, and
+  background. Remove the head from Picture 1 completely and replace it with the head from
+  Picture 2. Ensure the head and body have correct anatomical proportions and natural blending.
+  {description}`
+
+### B · 为什么用官方触发词
+- `head_swap:` 是 **BFS Head V1.1 LoRA 训练触发词**，官方措辞 `Picture 1`（基础图）/`Picture 2`
+  （参考头部）对应 ZIV 的 `<image1>`（主图）/`<image2>`（参考）。LoRA 训练分布与触发词绑定，
+  自写措辞可能不出效果或身份不稳。
+- 视觉输入按 `additional_images` 顺序注入（`<image1>`=主图 / `<image2>`=参考），与官方
+  `Picture 1/2` 语义一致，无需额外标记。
+- LoRA 来源：`civitai.red/models/2027766`（BFS Head V1.1，Qwen-Image-2.1）。
+
+### C · 验证
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 错误 0 警告**；两个 JSON 均可解析。
+- 非 GPU filter 全量 → **728 通过 / 0 失败**（命令数不变，`CommandSuggestionsTests` 常量无需改）。
+- `CommandRealDataTests.BuiltIn_Matches_DataFile` 仍绿（名称集合不变）。
+
+### D · 不做
+- 不改代码逻辑；不跑 GPU / 真实 App；未 commit。

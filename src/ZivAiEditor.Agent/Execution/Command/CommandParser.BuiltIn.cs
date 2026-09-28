@@ -1,5 +1,6 @@
 using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Imaging;
+using ZivAiEditor.Contracts.Inference;
 
 namespace ZivAiEditor.Agent.Execution;
 
@@ -170,6 +171,20 @@ public sealed partial class CommandParser
             },
             Template = "Generate a 180-degree equirectangular panorama (front hemisphere only, 2:1 aspect ratio) from the input perspective image. Use a true equirectangular projection covering 180 degrees horizontal and 180 degrees vertical. The left and right edges should be at the 90-degree-left and 90-degree-right extremes of the front hemisphere. Keep the scene, style, lighting and all content continuous and consistent with the original image.",
             Description = "将当前图转为 180° 半全景",
+        },
+        new CommandDefinition
+        {
+            Name = "/换脸",
+            Handler = CommandHandler.Edit,
+            Params = new List<string> { "description" },
+            Variadic = true,
+            Tool = "QW21edit",
+            Template = "head_swap: start with Picture 1 as the base image, keeping its lighting, environment, and background. Remove the head from Picture 1 completely and replace it with the head from Picture 2. Ensure the head and body have correct anatomical proportions and natural blending. {description}",
+            Loras = new List<LoraOptions>
+            {
+                new LoraOptions { Path = "face-swap", StrengthModel = 1.0, StrengthClip = 1.0 },
+            },
+            Description = "换脸：把参考图（<image2>）的脸换到主图（<image1>）人物上（需自备换脸 LoRA）",
         },
     };
 }

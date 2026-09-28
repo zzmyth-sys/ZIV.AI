@@ -5241,3 +5241,17 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **无签名变更**；无新 NuGet；不改 TE-Speed / WD14。
 - **验证**：build 0/0；非 GPU 全量 **728 通过 / 0 失败**（不回归）；
   `test_plugins.py` 24 通过 / 0 失败（含 base-dir 用例）。
+
+## 挂账登记（2026-09-28 · /换脸 收尾）
+
+1. **CommandSuggestionsTests.BuiltIn_Set_Counts 硬编码命令集数量**
+   - 现状：13→14、5→6 每次加命令都要手改常量
+   - 风险：加命令时测试脆弱；易漏改
+   - 建议：未来改为「断言集合包含关键命令」或「≥ N」下界
+   - 触发时机：下一次大规模改命令集时
+
+2. **loras.json 的 path 不校验文件存在性**
+   - 现状：Python loras.py 原样返回 registry path，不检查文件
+   - 风险：运行时缺文件才失败（用户配错难诊断）
+   - 建议：加载时检查 + 明确报错（如「LoRA 文件不存在：{path}」）
+   - 触发时机：下一次改 loras 加载逻辑时

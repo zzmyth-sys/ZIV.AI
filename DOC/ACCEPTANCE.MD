@@ -4519,3 +4519,26 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 | PL.8 | 非 GPU 全量 | 排除 `Ipc*` GPU 类 / `PythonProcessManagerTests` / `BackendTimeoutTests` | 727 通过 / 0 失败（基线 707 + 20） |
 
 - **不做**：不集成具体插件；不动 TE-Speed / WD14；无新 NuGet；未跑 GPU/Python/真实 App；未 commit。
+
+## 换脸命令验收（2026-09-28，只增）
+
+**目标**：`/换脸` 数据命令 + `face-swap` LoRA 条目；纯数据驱动（不改管线代码）。
+
+| 编号 | 验收点 | 验证方式 | 结果 |
+|---|---|---|---|
+| FS.1 | 命令存在 | `commands.json` 含 `/换脸`，commands=14 | ✅ |
+| FS.2 | 命令级 LoRA | `/换脸` 的 `loras=[{path:face-swap,strength_model:1.0,strength_clip:1.0}]` | ✅ |
+| FS.3 | LoRA 条目 | `loras.json` 含 `face-swap`（占位 path） | ✅ |
+| FS.4 | BuiltIn 同步 | `CommandRealDataTests.BuiltIn_Matches_DataFile` 名称集合一致 | ✅ |
+| FS.5 | JSON 合法 | ConvertFrom-Json 解析通过 | ✅ |
+| FS.6 | build | `dotnet build src\ZIV.AI.sln -c Release` | 0 错误 0 警告 |
+| FS.7 | 非 GPU 全量 | 排除 `Ipc*` GPU 类 / `PythonProcessManagerTests` / `BackendTimeoutTests` | 728 通过 / 0 失败 |
+
+### 真机验收清单（需用户自备 LoRA + GPU）
+1. 把换脸 LoRA 权重放本机任意路径，编辑 `Template/loras.json` 的 `face-swap.path` 为实际文件；
+2. 输入 `/换脸`，附件两张图：**第一张为主图（被换脸者）**、第二张为**参考脸**（`<image2>`）；
+3. 可选补充描述（如 `换成微笑的表情`）由 `{description}` 吸收；
+4. 检查输出：脸部被替换为参考脸，且主图姿态/身体/服装/发型/背景保留、肤色与光照自然；
+5. 若脸部未替换或变形，调 `loras[].strength_model`（当前 1.0）或确认 LoRA 与基础模型适配。
+
+- **不做**：不下载模型；未跑 GPU / 真实 App；未 commit。
