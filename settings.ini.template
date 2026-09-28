@@ -16,6 +16,9 @@ prewarm = 1
 dit_path =
 te_path =
 vae_path =
+; LoRA 根目录（配置层）：loras.json 中的相对路径以此为基准拼接；绝对路径不受影响。
+; 留空 = 未配置（相对路径将无法解析）；由设置窗口「环境」页填入。
+lora_root =
 
 ; 规划器（Planner）使用的本地 LLM（llama-server，OpenAI 兼容 /v1/chat/completions）。
 ; 由 LocalLlmClient 读取；未配置时使用内置默认值。
