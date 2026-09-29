@@ -281,3 +281,40 @@ ref token 数变化（@1024 实测 3368.5MB / 同 32 条）。**另 ≈0.35–2.
 - `DOC/FROZEN.md`：Step 3.4（smart memory 默认关闭决策）、Step 6（DynamicVRAM）。
 - `DOC/DEVLOG.md`：Step 3（512² smart memory 实测）、方案 1（VRAM 余量注入无效）段。
 - `DOC/OPTIMIZATION.md`：§6.2（aimdo 下 1536 单图峰值 13091 基线）。
+
+---
+
+## 12. E_E2 修正（2026-09-29，尾部追加；不改既有行）
+
+> **本段更正本文中「官方 @1536 双 ref pinned=0 / RSS 2.93GB」的结论——该数据无效（见 12.1）。**
+
+### 12.1 无效数据说明
+- 官方 harness（`_test_step2/off_submit.py`）把 `TextEncodeQwenImage21` 的参考图以**嵌套**形式传入
+  （`"images": {"image_1": …, "image_2": …}`）。该节点的 `images` 是 `io.Autogrow`
+  （`TemplateNames` `image_1..image_16`），canonical `/prompt` 输入 id 为**扁平** `images.image_N`
+  （`comfy_extras/nodes_qwen.py:125-133`；`execution.py:296 build_nested_inputs`；blueprints 中
+  `"name": "images.image_1"` 佐证）。嵌套键被忽略 → `images={}` → `ref_latents=[]` → `keep_vision=True`
+  → prefix 仅文本（64 token）→ 官方实际跑的是**文生图**，非 2-ref 对照。
+- 故前序「官方 pinned=0 / RSS 2.93GB」为**无效数据**，不得作为「官方落 GPU / ZIV 有余差」的依据。
+
+### 12.2 E_E2 实测（修正 harness 后，真 2-ref）
+harness 修复：`off_submit.py build()` 展平为 `images.image_1/2`（`/prompt` 返回 `node_errors` 空）。
+
+| 组 | store | prefix_len | pinned_n | TOTAL_PINNED | 峰值 RSS | wall |
+|---|---|---|---|---|---|---|
+| ZIV E_A | cpu | 14865 | 32 | 7977.5MB | 11.9GB | 22.7s |
+| **官方 E_E2** | **cpu** | **18480** | **32** | **11597MB** | **14.0GB** | 14.0–18.1s |
+
+- 官方 `prefix_len=18480`（≫64，真 2-ref ✓）、`store=cpu`、TOTAL_PINNED 峰 11597MB。
+- 两方 `4×cache_bytes`（官方 ≈38.7GB / ZIV ≈29.7GB）均 > `free_cuda`（≈7–8.5GB）→ gate False。
+
+### 12.3 结论（更新）
+- **官方真 2-ref 也落 CPU pinned**（甚至比 ZIV 更大）。
+- 残差 = **16GB 卡固有限制**：`get_free_memory(cuda) > 4×cache_bytes`
+  （`comfy/ldm/qwen_image21/model.py:250-258`）在 16GB 卡上永不满足 → 必然回落 cpu。
+- **ZIV 无特有问题**；§8「候选（未验证）」中把残差归因于 ZIV in-process / Viggle 的推断不成立。
+
+### 12.4 门控决策
+- **不引入 `qwen_image21_cache` 门控，保持 `auto`**（官方同落 cpu、RSS 在 §2 安全线内、不 thrash）。
+- 备选（仅在明确需要压残差时）：`dtype=int4`（store→gpu / host pin 0 / 实测 18.8s）或
+  `device=off`（host pin 0 / 实测 28.6s）；均有精度 / 速度取舍。

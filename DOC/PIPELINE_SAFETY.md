@@ -207,3 +207,19 @@ pwsh -File E:\temp\opencode\watch.ps1 -TargetPid <pid> -MaxRssGB 28 -MaxWallSec 
 - `DOC/FROZEN.md` —— Step 3.4（smart memory 决策）、Step 6（DynamicVRAM）。
 - `DOC/DEVLOG.md` —— Step 3（512² smart memory 实测）、方案 1（VRAM 余量注入无效）段。
 - `DOC/OPTIMIZATION.md` —— §6.2（aimdo 下 1536 单图峰值 13091）。
+
+---
+
+## 7. E_E2 修正（2026-09-29，尾部追加；不改既有行）
+
+> **更正：§4「零污染读」表中「官方 @1536 pinned=0 / 3.2GB」、§5「prefix K/V host-pin 行为」中
+> 「官方 pinned=0」、§6 未决 4 中「官方对应项 ≈0」均为无效数据（见下）。**
+
+- 无效原因：官方 harness（`_test_step2/off_submit.py`）的 `TextEncodeQwenImage21` 参考图用**嵌套** dict，
+  而 canonical `/prompt` 输入 id 为**扁平** `images.image_N`（`nodes_qwen.py:125-133`；`execution.py:296`）
+  → ref 未进模型 → prefix 仅 64 token → 官方跑成文生图。
+- E_E2（修正 harness、真 2-ref）：**官方 `store=cpu` / `prefix_len=18480` / `pinned_n=32` /
+  TOTAL_PINNED 峰 11597MB / 峰值 RSS 14.0GB**（对照 ZIV E_A：store=cpu / 14865 / 32 / 7977.5MB / 11.9GB）。
+- **结论**：官方也落 CPU pinned → 残差 = **16GB 卡固有限制**（`get_free_memory(cuda) > 4×cache_bytes`
+  永不满足，`comfy/ldm/qwen_image21/model.py:250-258`）；ZIV 无特有问题。
+- **决策**：不引入 `qwen_image21_cache` 门控，保持 `auto`（备选 int4 / off 仅在明确需要时）。
