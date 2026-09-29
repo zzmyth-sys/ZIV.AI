@@ -5658,3 +5658,52 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
   函数内懒 import 时模块级属性 patch 无效。
   另：@skipUnless 会掩盖 mock 失配 + 语义失配，
   写 GPU-host 测试时应至少跑一次真环境。
+
+### 修正：Z-027 修复（skip_shift 默认值倒置）
+- 背景：Z-027 记录的 skip_shift 默认值倒置——sampling_policy.py:207
+  原逻辑为 skip_shift = not sigmas_legal（sigmas 非法时默认跳过施力），
+  与 test_seams.test_shift_applied_without_sigmas、
+  test_plugin_pipeline legacy 用例期望、models.json 的 type=auraflow 语义
+  均矛盾。
+- 修复：sampling_policy.py:207 改为 skip_shift = sigmas_legal。
+  语义：无 sigmas + plugin 未声明 skip_shift → 施 AuraFlow；
+        有 sigmas + plugin 未声明 skip_shift → 不施。
+  与旧 plugin_sampling.applies_shift（return sigmas is None）对齐。
+  sigmas 分支的 plugin 显式 skip_shift 优先规则不变。
+- 测试同步：
+  - test_seams 2 个 @expectedFailure 装饰器移除（修复后真 PASS）
+  - test_seams.BeforeSampleForceTests._apply 注入
+    patch = {"skip_shift": True, **patch}（隔离施力面，避免 CPU 环境
+    触发 comfy_extras import）
+  - test_sampling_policy 4 条断言同步（:56/:95/:138 None→3.1；
+    :148 3.1→None）
+- 验证：
+  - CPU test_seams：OK (skipped=3)
+  - embedded python test_seams：OK（0 fail / 0 err / 0 expectedFailures）
+  - embedded python test_plugin_pipeline：OK（旧 FAIL→PASS）
+  - 全量 CPU：269 / 0 / 11 skip
+  - dotnet：750 / 0；build 0 / 0
+- Z-027 状态：已修复。
+- 旧 B3 金标 974D35FEC71807B8EA43262AD60DE88F19188B98DF490AE6FEACD8FC993978BB
+  归档为历史（其输入 IMG2 D:\temp\7a5ba952803440059787efe2b0daaa92.png
+  已丢失、不可复现）。
+- 旧 B4 金标 D03122F5A47BA49CCA2CB6C6FC5D5BA09E911E7D2A23F3FF79662AC37C8878D9
+  亦归档（同因不可复现；本次内部对照中 B4_old==B4_new 一致）。
+
+### 新金标（S4-G1 重取，基于替代图）
+- 背景：原 IMG2 丢失，金标不可复现。以替代图重取内部对照金标。
+- 替代图：D:\devlop\ZIV.AI\_test_step2\viggle_aspect_640x1024.png
+  （640×1024；原 832×1024 无精确匹配，选同高 1024 最接近竖构图）
+- 参数：SCN_OP=inpaint、SCN_SIDE=1536、SCN_NREF=2、SCN_STEPS=40、
+  seed=42；B3 无 Viggle / B4 Viggle ON。
+- 新金标：
+  - B3（无 Viggle，无插件，施 AuraFlow）：
+    53DF2DB71C76908394B354BEBDCC585CE0FE820524A2273D4C4AF058B396BBC9
+  - B4（Viggle ON）：
+    5AD34D51D48779243CF6CEA99526584DA682C355C6FC09946C058C97976A26C8
+- 内部对照证据（Z-027 修复效果）：
+  - B4_old == B4_new（5AD34D51…）→ 修复未越界
+  - B3_old（24EEE1A910D68D64DA6A5C21AD90CEE4F29D8F93A4425779586D8D7BD3087EAE）
+    != B3_new（53DF2DB7…）→ 修复生效
+- 限制：新金标仅在「上述替代图 + 上述参数」下有效。
+  若将来原 IMG2 恢复，须以原图重取并覆盖本段。

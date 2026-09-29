@@ -53,7 +53,7 @@ class SystemDefaultTests(unittest.TestCase):
             self.assertEqual(r.cfg, 1.0)
             self.assertEqual(r.sampler_name, "euler")
             self.assertEqual(r.scheduler, "simple")
-            self.assertIsNone(r.shift)
+            self.assertEqual(r.shift, 3.1)
             self.assertEqual(r.sampler_type, "auraflow")
             self.assertIsNone(r.sigmas)
             self.assertFalse(r.terminated)
@@ -92,7 +92,7 @@ class LayerOverrideTests(unittest.TestCase):
         self.assertEqual(r.provenance["sampler_name"], "model_profile")
         self.assertEqual(r.provenance["steps"], "data")
         self.assertEqual(r.provenance["scheduler"], "plugin")
-        self.assertIsNone(r.shift)
+        self.assertEqual(r.shift, 3.1)
         self.assertEqual(r.sampler_type, "auraflow")
 
     def test_per_key_independence_with_sigmas(self):
@@ -131,21 +131,21 @@ class SigmasTerminatorTests(unittest.TestCase):
         self.assertEqual(r.cfg, 1.0)
         self.assertEqual(r.steps, 4)
 
-    def test_b3_no_sigmas_no_skip_shift_shift_is_none(self):
-        # Legacy no-plugin path: skip_shift defaults to True => AuraFlow is not applied.
+    def test_b3_no_sigmas_no_skip_shift_shift_is_applied(self):
+        # Z-027: no-plugin path (no sigmas) now applies AuraFlow.
         r = sp.resolve(payload={"steps": 40})
         self.assertFalse(r.terminated)
-        self.assertIsNone(r.shift)
+        self.assertEqual(r.shift, 3.1)
 
     def test_b4_sigmas_with_skip_shift_true_shift_is_none(self):
         r = sp.resolve(plugin_patch={"sigmas": _Sig1D(7), "steps": 6, "skip_shift": True})
         self.assertTrue(r.terminated)
         self.assertIsNone(r.shift)
 
-    def test_sigmas_without_skip_shift_applies_shift(self):
-        # Legacy: sigmas present, skip_shift unset => skip False => AuraFlow applied.
+    def test_sigmas_without_skip_shift_skips_shift(self):
+        # Z-027: sigmas present, skip_shift unset => shift skipped.
         r = sp.resolve(plugin_patch={"sigmas": _Sig1D(4)})
-        self.assertEqual(r.shift, 3.1)
+        self.assertIsNone(r.shift)
 
     def test_no_sigmas_skip_shift_false_applies_shift(self):
         r = sp.resolve(plugin_patch={"skip_shift": False})

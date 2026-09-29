@@ -198,13 +198,13 @@ def resolve(*, model_entry=None, payload=None, plugin_patch=None):
         scheduler = merged.get("scheduler") or _SYSTEM_DEFAULT["scheduler"]
 
     sampler_type = merged.get("sampler_type") or _SYSTEM_DEFAULT["sampler_type"]
-    # Replicates seams._apply_before_sample's legacy skip_shift gate verbatim:
-    # an explicit plugin value wins; otherwise shift is skipped when there is no
-    # sigmas and applied when sigmas is present (the pre-S3 ``applies_shift``).
+    # Z-027 fix: an explicit plugin value wins; otherwise shift is applied when there
+    # is no sigmas and skipped when sigmas is present (matches the pre-S3
+    # ``plugin_sampling.applies_shift``: ``return sigmas is None``).
     if "skip_shift" in raw_plugin:
         skip_shift = bool(raw_plugin["skip_shift"])
     else:
-        skip_shift = not sigmas_legal
+        skip_shift = sigmas_legal
     shift = None
     if not skip_shift and sampler_type == "auraflow":
         shift = merged.get("shift")
