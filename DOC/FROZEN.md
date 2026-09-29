@@ -5614,3 +5614,27 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - B3/B4 不触发（B4 显式 steps=6）。
 - 回归触发条件：任何「有 sigmas 但不给 steps」的插件。
 - 触发时机：后续独立步。
+
+### Z-034：D4.1 修复挂账（非 sigmas 插件 sampler_name/scheduler 未生效）
+- 背景：Step 2 的 plugin 层键集有意排除 sampler_name/scheduler
+  （seams.py:117-118 docstring「excluded on purpose (kept inert,
+  matching the legacy path)」），以保持等价重构。
+- D4.1 原定义：无 sigmas 的插件，其 patch 中的 sampler_name/scheduler
+  在 legacy 路径被静默忽略。
+- Stage 3 只读结论（2026-09-29）：
+  - 修复面 = seams._extract_plugin_patch 键集加 2 键（1 行改动）
+  - legacy 分支会自然读到（plugin_sampling.py:111-112 读 sampler_preset）
+  - 但：全库仅 viggle 插件，恒带 sigmas，走 sigmas 分支
+  - 结论：当前零消费者。修 = 行为变更 + B3/B4 gate，收益为零。
+- 回归触发条件：出现「无 sigmas 且 patch 带 sampler_name/scheduler」的插件。
+- 触发时机：后续独立步（该插件引入时）。
+
+### Z-035：sigmas 分支 sampler_name 读 ctx 顶层不生效
+- 背景：plugin_sampling.py:99 的 sigmas 分支读 ctx 顶层 sampler_name
+  （plan = ctx）；seams 只写 new_preset["sampler_name"]，不写顶层。
+- 后果：sigmas 插件的 sampler_name 不会真正生效——当前 viggle 的
+  sampler_name="euler" 与 config.SAMPLER_NAME="euler" 是默认值巧合，
+  非插件声明生效。
+- 独立于 Z-034（Z-034 是 legacy 分支；本条是 sigmas 分支）。
+- 回归触发条件：出现「sigmas 插件希望显式覆盖 sampler_name」的场景。
+- 触发时机：后续独立步。
