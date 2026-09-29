@@ -488,8 +488,8 @@ ZIV.AI.sln
 | D-1 | **独立解决方案**：`ZIV.AI.sln` 独立，不进 `ZIV.sln`，不共享 `bin` / `obj` / publish | 发布节奏不同；避免构建耦合（Z25） |
 | D-2 | **进程外插件**：ZIV 经 CLI / URL 协议 / 命名管道调用 ZIV.AI，不加载托管程序集 | 插件崩溃不拖垮主程序；主程序升级不迫使 AI 模块重编译（Z27） |
 | D-3 | **共享库引用方式**：`ZIV.Core` / `ZIV.Imaging` **采用项目引用（Step 1 起步）**，NuGet 化留待分发期再评估；仓库内只有一份源码 | 复制会分叉（Z26）；项目引用开发期最简；分发期再评估 NuGet（裁决 1） |
-| D-4 | **UI 框架沿用 Avalonia** | 与 ZIV 一致，复用既有经验与控件；`MaskCanvas` 自绘可控 |
-| D-5 | **遮罩用 Avalonia 自绘**（`MaskCanvas`），不引第三方画布 | 需求简单（画笔 / 橡皮 / 撤销 / 二值导出）；避免大依赖与 AOT 风险 |
+| D-4 | **UI 框架沿用 Avalonia** | 与 ZIV 一致，复用既有经验与控件；遮罩自绘可控（`ImagePreview.Mask.cs`） |
+| D-5 | **遮罩用 Avalonia 自绘**（`ImagePreview.Mask.cs`），不引第三方画布 | 需求简单（画笔 / 橡皮 / 撤销 / 二值导出）；避免大依赖与 AOT 风险 |
 | D-6 | **任务存储用 `session.json`**（原 SQLite，Z-020 已修订） | 单文件、随程序目录（Z14）、可靠、支持恢复与重跑（Z-020 已修订） |
 | D-7 | **Python 后端**：**Step 2 起改为 ComfyUI v0.37.0 便携版源码，in-process 直接调管线**（不启 HTTP server）；SGLang 路线**废弃**；LightX2V / Lightning LoRA 作为 **Step 7 可选加速**再引入 | 实测确认 v0.37.0 原生支持 Qwen-Image-2.1，512² 编辑闭环可跑通；in-process 免 HTTP 栈、免官方 Embedding API（实测不存在）（Step 2 修订，取代裁决 3） |
 | D-8 | **跨进程契约**：Step 2 起改为 **IPC 传输契约** `contracts/ipc-protocol.md`（Named Pipe + 长度前缀，Step 2 冻结）；`contracts/openapi.yaml` 的 8 端点**降级为 Schema 参考**（保留定义，作为 payload 形状来源） | 实测 Named Pipe 性能充足（7.91MB 2.71ms）且免 HTTP 栈；版本解耦（Z23）（Step 2 修订，取代裁决 4） |
@@ -543,7 +543,7 @@ ZIV.AI.sln
 | 维度 | 说明 |
 |---|---|
 | 一致性 | 与 ZIV 同框架，抽离 / 复用经验成本最低（D-4） |
-| 自绘能力 | `MaskCanvas` 可用 Avalonia 绘制 API 自绘，满足画笔 / 橡皮需求 |
+| 自绘能力 | 遮罩（`ImagePreview.Mask.cs`）可用 Avalonia 绘制 API 自绘，满足画笔 / 橡皮需求 |
 | AOT | 与 ZIV 相同约束（编译绑定、资源内嵌），沿用 ZIV 的结论 |
 | 风险 | 复杂控件树性能争议（ZIV 已评估，对自绘视图影响小） |
 
