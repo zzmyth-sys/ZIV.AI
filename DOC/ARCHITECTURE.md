@@ -20,7 +20,7 @@
 | 推理进程隔离 | C# 不加载 Python 运行时，只经 `IInferenceClient`（Z17） |
 | GPU 串行 | 单队列 + 优先级 + OOM 降级（Z18） |
 | 遮罩可信 | 二值 PNG，原图 / 遮罩分开传，C# 不预填充（Z19） |
-| 状态可恢复 | 任务 / 步骤 / 参数 / 路径 / 耗时入 SQLite（Z20） |
+| 状态可恢复 | 任务 / 步骤 / 参数 / 路径 / 耗时入 session.json（Z-020 已修订） |
 | 显存可控 | 空闲卸载 + 保留最近一个 + 超时可配（Z21） |
 | 规划可降级 | LLM 失败回退默认计划，`IPlanner` 可替换（Z22） |
 | 版本解耦 | AI 模块与 Python 后端各自更新，经 OpenAPI 契约通信（Z23） |
@@ -465,7 +465,7 @@ ZIV.AI.sln
 - **任务队列**：`ExecutionQueue` 单一串行队列；交互任务优先；OOM 按策略降级重试（Z18）；
   任务状态由 session.json 持久化（Z-020 已修订）
 - **UI 线程约束**：推理、解码、文件 IO 在后台线程（`Task` + `CancellationToken`）；
-  控件更新经 Avalonia `Dispatcher.UIThread` 回主线程（Z11）；`MaskCanvas` 绘制在主线程，
+  控件更新经 Avalonia `Dispatcher.UIThread` 回主线程（Z11）；遮罩绘制（`ImagePreview.Mask.cs`）在主线程，
   大图栅格化在后台
 - **路径解析（Z14）**：程序根 = `Path.GetDirectoryName(Environment.ProcessPath)`；
   `settings` / `tasks.db` / `output` / `_cache` / `_logs` 一律 `Path.Combine(程序根, ...)`；
@@ -490,7 +490,7 @@ ZIV.AI.sln
 | D-3 | **共享库引用方式**：`ZIV.Core` / `ZIV.Imaging` **采用项目引用（Step 1 起步）**，NuGet 化留待分发期再评估；仓库内只有一份源码 | 复制会分叉（Z26）；项目引用开发期最简；分发期再评估 NuGet（裁决 1） |
 | D-4 | **UI 框架沿用 Avalonia** | 与 ZIV 一致，复用既有经验与控件；`MaskCanvas` 自绘可控 |
 | D-5 | **遮罩用 Avalonia 自绘**（`MaskCanvas`），不引第三方画布 | 需求简单（画笔 / 橡皮 / 撤销 / 二值导出）；避免大依赖与 AOT 风险 |
-| D-6 | **任务存储用 SQLite** | 单文件、随程序目录（Z14）、事务可靠、支持恢复与重跑（Z20） |
+| D-6 | **任务存储用 `session.json`**（原 SQLite，Z-020 已修订） | 单文件、随程序目录（Z14）、可靠、支持恢复与重跑（Z-020 已修订） |
 | D-7 | **Python 后端**：**Step 2 起改为 ComfyUI v0.37.0 便携版源码，in-process 直接调管线**（不启 HTTP server）；SGLang 路线**废弃**；LightX2V / Lightning LoRA 作为 **Step 7 可选加速**再引入 | 实测确认 v0.37.0 原生支持 Qwen-Image-2.1，512² 编辑闭环可跑通；in-process 免 HTTP 栈、免官方 Embedding API（实测不存在）（Step 2 修订，取代裁决 3） |
 | D-8 | **跨进程契约**：Step 2 起改为 **IPC 传输契约** `contracts/ipc-protocol.md`（Named Pipe + 长度前缀，Step 2 冻结）；`contracts/openapi.yaml` 的 8 端点**降级为 Schema 参考**（保留定义，作为 payload 形状来源） | 实测 Named Pipe 性能充足（7.91MB 2.71ms）且免 HTTP 栈；版本解耦（Z23）（Step 2 修订，取代裁决 4） |
 | D-9 | **发布目录**：固定为 **`D:\Program Files\ZIV.AI`**（可用 `ZIV_AI_PUBLISH_DIR` 覆盖） | 与 Z16 保持一致；URL 协议注册依赖绝对路径（裁决 2） |
@@ -515,7 +515,7 @@ ZIV.AI.sln
 | 与对方关系 | 不感知 ZIV.AI | 可被 ZIV 可选调用；不依赖 ZIV（Z27 / Z28） |
 | 进程模型 | 单进程 | 至少两进程：C# 前端 + Python 推理后端（Z17） |
 | 重资源 | 解码 / 渲染（CPU / 内存） | 推理（GPU / 显存），需串行与空闲卸载（Z18 / Z21） |
-| 状态 | 会话内为主 | 任务持久化到 SQLite，可恢复 / 重跑（Z20） |
+| 状态 | 会话内为主 | 任务持久化到 session.json，可恢复 / 重跑（Z-020 已修订） |
 | 输出安全 | 另存为 | 一律新文件，原图只读（Z24） |
 | 通知 | C# event + 回调 | 同左，另加 `IProgress<T>` 三级进度（D-13） |
 | 契约 | 进程内 C# 接口 | 进程内 C# 接口 + 跨进程 IPC（Named Pipe，D-8） |
@@ -547,13 +547,13 @@ ZIV.AI.sln
 | AOT | 与 ZIV 相同约束（编译绑定、资源内嵌），沿用 ZIV 的结论 |
 | 风险 | 复杂控件树性能争议（ZIV 已评估，对自绘视图影响小） |
 
-### 12.2 任务存储：SQLite
+### 12.2 任务存储：session.json（D-6 已修订）
 
 | 维度 | 说明 |
 |---|---|
-| 优点 | 单文件、事务、查询方便；随程序目录（Z14）；支持恢复 / 重跑（Z20） |
-| 代价 | 需引入 SQLite 包并处理 AOT（待 Step 1 核实托管提供程序） |
-| 备选 | JSON 文件（并发 / 查询弱，不选）、LiteDB（生态较小，待评估） |
+| 定稿 | **改用 `session.json`**（`ISessionPersistence`/`SessionStore`；Z-020 已修订，原 SQLite 方案不采用） |
+| 优点 | 随程序目录（Z14）；DAG 节点 + 参数快照（rerun）；支持恢复 / 重跑 |
+| 不采用 | SQLite（原 D-6；Z-020 已修订）、LiteDB（生态小，待评估） |
 
 ### 12.3 Python 后端：ComfyUI in-process（D-7 定稿）
 
