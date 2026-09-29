@@ -5545,3 +5545,29 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - S6：`python -m unittest test_dispatch test_seams test_plugins` → **114 通过 / 0 失败 / 3 skip**；
   同一非 GPU 全量 → **749 通过 / 0 失败**；`dotnet build` → 0/0。
 - 未 commit（两份报告交用户裁决）。
+
+## 登记（2026-09-29）：@1536 双 ref 金标（S4+ 架构回归锚点）
+
+> 真机全量验证（HEAD = 15d8bff，S4 完成后）发现两条核心路径输出逐字节稳定。
+> 后续任何 pipeline / 接缝 / 插件改动后，重跑同场景对照 SHA256 即可检测行为漂移。
+
+### S4-G1 金标场景（冻结）
+- **B3**：@1536 双 ref 无 Viggle → SHA256 `974D35FEC71807B8EA43262AD60DE88F19188B98DF490AE6FEACD8FC993978BB`
+  · 实测：wall 45.7s / 峰值 VRAM 11197 MiB / 峰值 RSS 9.3 GB / 输出 1216×1536
+  · 输入图 / prompt / seed(42) / steps(40) / 分辨率：见 `_test_step2/` 本地脚本（gitignore）
+  · 用途：核心编辑路径（无插件）的等价锚点
+- **B4**：@1536 双 ref + Viggle → SHA256 `D03122F5A47BA49CCA2CB6C6FC5D5BA09E911E7D2A23F3FF79662AC37C8878D9`
+  · 实测：wall 22.6s / 峰值 VRAM 13033 MiB / 峰值 RSS 11.7 GB / 输出 1216×1536
+  · 用途：接缝系统 + Viggle 插件的等价锚点（S6 迁移后行为不变）
+  · 基线图：`D:\temp\repro_s4v2.png`（仓库外，未版本化；同 hash）
+
+### S4-G2 复现方式（冻结）
+- 脚本：`_test_step2/` 本地脚本（不入库，gitignore）——`s5s6_scenarios.py` + `run_scn.ps1` / `watch.ps1`（`E:\temp\opencode`）
+- 解释器：ComfyUI 内嵌 `D:\devlop\ZIV.AI\Comfyui\python_embeded\python.exe`（PATH 上的 Python313 缺 `comfy_aimdo`，不可用）
+- 对照方式：重跑同场景 → 计算输出 PNG 的 SHA256 → 与上表对照
+- 允许差异：不同 GPU / 驱动 / torch 版本可能导致 hash 不同（跨机不可比）；同机同 HEAD 下应逐字节相同
+
+### S4-G3 使用纪律（冻结）
+- 金标仅供**回归检测**——不用于「必须产出特定图」的验收
+- 金标失效条件：模型权重更新 / torch 大版本 / CUDA 驱动大版本 → 需重跑取新金标
+- 不在 CI 里硬断言（GPU 敏感）；由真机维护者手动对照
