@@ -6054,3 +6054,32 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - `dotnet build src\ZIV.AI.sln -c Release` → **0 警告 0 错误**；非 GPU 全量 **782 通过 / 0 失败**（不变）。
 - zivcli 单测（`python -m unittest discover -s tools/zivcli/tests -t .`）→ **59 通过 / 0 失败**（含新增 prompt 用例）。
 - 未跑 GPU。
+
+---
+
+## 1969 GPU 真跑取证（日期：2026-09-30）
+
+> **追加（只增不改）**。**非裁定**：记录事实，验收权在用户。
+
+### Y1969R.1 事实
+- Z30 `gpu-check`：`free=true`（used 1009 / 16376 MiB，无大进程）；`run` 内置 gpu-check 亦过。
+- 真跑一次（CLI，`--yes`）：`op=inpaint side=1536 nref=2 steps=40`；`exit=0`；未被看门狗杀。
+- prompt（= env `SCN_PROMPT` 注入值，逐字）：
+  `Replace the background of <image1> with the scene from <image2>; relight it like <image3>.`
+- 三图：img1=`tools/zivcli/harness/fixtures/img1.jpg`；img2=`tools/zivcli/harness/fixtures/img2.png`；img3=`DOC/ICO/logo.png`。
+- 输出：`D:\devlop\ZIV.AI\tools\zivcli\runs\1969\multiref.png`（1216×1536，3223820 B）。
+- SHA256=`98451aabc43f1d111d9c8d630b15a4297c2537cd4d8a3b8f3516cfb1d1fb2e3f`
+- wall：load 8.8s + pipeline 57.2s；峰值 VRAM 11841 MiB；峰值 RSS 12.96 GB。
+
+### Y1969R.2 第三张独立图来源
+- `DOC/ICO/logo.png`（应用图标；repo 内 **tracked**，1001×992，1070836 B，SHA `8329FC95…`）。
+- 选因：repo 内 tracked 图像仅 logo×2 + img1/img2；`tools/zivcli/fixtures/` **目录不存在**（实为 `harness/fixtures/`）；Z-027 的 `viggle_aspect_640x1024.png` 位于 gitignore 的 `_test_step2/`，**非入库**。logo 与 img1(人像)/img2(场景) 视觉互异。
+
+### Y1969R.3 side / thrash
+- `side=1536`；对策 = `THRASH_ROOTCAUSE.md` §7 的 cudaMallocAsync 对齐（默认开，经 `model_loader.prepare_environment` → `config.apply_official_env`，`pipeline.py:142` 亦调用）。本次**无 thrash**（峰值 RSS 12.96 GB ≪ §2 的 28 GB 线，未被杀）。B3/B4 同 1536/2ref 亦健康。
+
+### Y1969R.4 golden 候选
+- 上述 SHA 可作 1969 golden 候选；**本次不入 `goldens.json`**（需裁判在独立任务裁定）。
+
+### Y1969R.5 边界
+- 未改 `src/` / IPC / `python/` / contracts / harness / `goldens.json`；ACCEPTANCE / FROZEN 纯增。

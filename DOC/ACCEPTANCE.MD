@@ -4585,3 +4585,21 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
   `python -m tools.zivcli run --op inpaint --side 1536 --nref 2 --img1 <abs img1.jpg> --img2 <abs img2.png> --img3 <abs img1.jpg> --prompt "Replace the background of <image1> with the scene from <image2>; relight it like <image3>." --out <png> --yes`
 - 结果：1969 可 CLI 跑；B3/B4 金标不变（默认不注入 `SCN_PROMPT`）；未跑 GPU（零 GPU 任务）。
 - 原 `:1969` 行不改，以本段为准。
+
+---
+
+## 1969 GPU 真跑取证（2026-09-30，只增）
+
+- 引：CLI 支持 commit `299d491`；本次取证 commit `feat(zivcli): 1969 GPU 真跑取证`（见 git log）。
+- Z30：`gpu-check` → `free=true`（used 1009 MiB / 16376 MiB，无大进程）；`run` 内置 gpu-check 亦过。
+- 命令（绝对路径）：
+  `python -m tools.zivcli run --op inpaint --side 1536 --nref 2 --img1 D:\devlop\ZIV.AI\tools\zivcli\harness\fixtures\img1.jpg --img2 D:\devlop\ZIV.AI\tools\zivcli\harness\fixtures\img2.png --img3 D:\devlop\ZIV.AI\DOC\ICO\logo.png --prompt "Replace the background of <image1> with the scene from <image2>; relight it like <image3>." --out D:\devlop\ZIV.AI\tools\zivcli\runs\1969\multiref.png --yes`
+- prompt（逐字，= env `SCN_PROMPT` 实际注入值）：
+  `Replace the background of <image1> with the scene from <image2>; relight it like <image3>.`
+- 三图绝对路径：img1=`D:\devlop\ZIV.AI\tools\zivcli\harness\fixtures\img1.jpg`；img2=`D:\devlop\ZIV.AI\tools\zivcli\harness\fixtures\img2.png`；img3=`D:\devlop\ZIV.AI\DOC\ICO\logo.png`。
+- 输出 PNG：`D:\devlop\ZIV.AI\tools\zivcli\runs\1969\multiref.png`（1216×1536，3223820 B）。
+- SHA256（输出，独立复核一致）：`98451aabc43f1d111d9c8d630b15a4297c2537cd4d8a3b8f3516cfb1d1fb2e3f`
+- 耗时：load 8.8s；pipeline wall 57.2s；峰值 VRAM 11841 MiB；峰值 RSS 12.96 GB；exit=0；未被看门狗杀。
+- 状态：**证据已录，待用户目视签**（不下「通过」裁定）。
+- 与 B3/B4 无冲突（B3=`53DF2DB7…` / B4=`5AD34D51…`，本项 SHA 不同，属不同输入）。
+- 原 `:1969` 行不改，以本段为准。
