@@ -1,8 +1,8 @@
 # ZIV.AI 架构设计（ARCHITECTURE）
 
-- 文档状态：草案 v0.1（待评审）
+- 文档状态：已定稿（多轮冻结，以 `FROZEN.md` 为准）
 - 目标：在**独立解决方案**内实现「三图 + 一 prompt → 计划 → 多步执行」，复用 `ZIV.Core` /
-  `ZIV.Imaging`，与 ZIV 保持**进程隔离**，推理经**本地 HTTP 契约**访问 Python 后端
+  `ZIV.Imaging`，与 ZIV 保持**进程隔离**，推理经 **IPC（Named Pipe）** 访问 Python 后端
 - 上游：[`SPEC.md`](SPEC.md)；冻结见 [`FROZEN.md`](FROZEN.md)；契约草案见
   [`../contracts/openapi.yaml`](../contracts/openapi.yaml)
 
@@ -71,21 +71,21 @@
         ▲                        ▲                    ▲
         │                        │                    │
 ┌── Agent ────────────┐  ┌── Tools ──────────┐  ┌── Backend ───────────┐
-│ Planner（LLM / 降级）│  │ InpaintTool        │  │ IpcInferenceClient    │
-│ Executor（串行队列） │  │ UpscaleTool        │  │ PythonProcessManager  │
-│ 重跑 / 取消 / 进度   │  │ RemoveObjectTool   │  │ 健康检查 / 任务轮询   │
-│                      │  │ StyleTransferTool  │  │ 空闲卸载（后端协作）  │
-│                      │  │ ToolRegistry       │  └───────────────────────┘
+│ Planner（LLM / 降级）│  │ QwenImage21Edit    │  │ IpcInferenceClient    │
+│ Executor（串行队列） │  │ QwenImage21Outpaint│  │ PythonProcessManager  │
+│ 重跑 / 取消 / 进度   │  │ ToolRegistry       │  │ 健康检查 / 任务轮询   │
+│                      │  │                    │  │ 空闲卸载（后端协作）  │
+│                      │  │                    │  └───────────────────────┘
 └──────────────────────┘  └────────────────────┘
         ▲
 ┌── UI ─────────────────────────────────────────────────────┐
-│  AiEditorWindow · MaskCanvas（画笔 / 橡皮 / 撤销 / 二值导出）│
-│  TaskCardStream · PromptTemplatePanel · ImageSlotPanel     │
+│  AiEditorWindow · 遮罩编辑（画笔/橡皮/撤销/二值导出）        │
+│  聊天流（SessionViewModel）· 历史节点列表                   │
 └────────────────────────────────────────────────────────────┘
         ▲
 ┌── App（装配 + 平台 + 对外接口）─────────────────────────────┐
-│  依赖装配 · 单实例 · CLI · URL 协议（zivai://）· 本地 HTTP  │
-│  设置持久化 · SQLite 任务库 · 平台路径解析                  │
+│  依赖装配 · 单实例 · CLI · URL 协议（zivai://）              │
+│  设置持久化 · session.json 任务状态 · 平台路径解析          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -99,10 +99,10 @@
 | 计划生成（LLM） | `ZivAiEditor.Agent` | `LlmPlanner : IPlanner` + `FallbackPlanner` |
 | 步骤执行 / 重跑 / 取消 | `ZivAiEditor.Agent` | `Executor : IExecutor`，单队列 |
 | 单步编辑工具 | `ZivAiEditor.Tools` | `IEditTool` 实现 + `ToolRegistry` |
-| 遮罩绘制 | `ZivAiEditor.UI` | `MaskCanvas`（Avalonia 自绘） |
-| 任务卡片流 | `ZivAiEditor.UI` | `TaskCardStream` |
-| 提示词模板 | `ZivAiEditor.UI` | `PromptTemplatePanel` |
-| 任务持久化 | `ZivAiEditor.App` | SQLite（`Z20`），实现契约的存储接口 |
+| 遮罩绘制 | `ZivAiEditor.App` | `ImagePreview.Mask.cs`（Avalonia 自绘；UI 项目无视图，见 Z-007） |
+| 聊天流 / 历史节点 | `ZivAiEditor.UI` | `SessionViewModel`（视图在 App） |
+| 命令候选列表 | `ZivAiEditor.App` | `CommandList.cs` |
+| 任务持久化 | `ZivAiEditor.App` | `session.json`（`ISessionPersistence`/`SessionStore`；Z-020 已修订） |
 | 对外接口 | `ZivAiEditor.App` | CLI / URL 协议 / 本地 HTTP |
 | 图像解码 / 变换 / 编码 | `ZIV.Imaging` | 复用，不新造 codec（Z26 / Z5） |
 | 共享契约 / 值对象 | `ZIV.Core` | `SKImageRef` 等直接引用，不重新定义 |
@@ -162,8 +162,8 @@
 ## 5. 跨模块接口契约草案
 
 > 完整冻结见 [`FROZEN.md`](FROZEN.md)；下方为设计示意，字段可能省略。
-> 契约先行：`contracts/openapi.yaml` 定义**跨进程**的 HTTP 契约，本节定义**进程内**的 C# 契约；
-> 两者在 Step 1 一并冻结。
+> 契约先行：跨进程传输为 **IPC（Named Pipe + 长度前缀）**，见 `contracts/ipc-protocol.md`；
+> `contracts/openapi.yaml` 的 8 端点已**降级为 Schema 参考**（D-8）。本节定义**进程内**的 C# 契约。
 
 ### 5.1 IInferenceClient（推理访问唯一入口）
 
@@ -370,7 +370,7 @@ ZIV.AI 不引入事件总线（与 ZIV 一致，Z1 / D-13）。跨模块通知�
 Planner 产出计划 ──► Executor 执行（App 接线：Agent 内部）
 Executor 进度 ──► UI 任务卡片（IProgress<TaskProgress> 注入）
 InferenceClient 任务轮询 ──► 进度回传（IProgress<InferenceProgress>）
-TaskState 变化 ──► SQLite 持久化（App 订阅 / 写入，Z20）
+TaskState 变化 ──► session.json 持久化（App 订阅 / 写入；Z-020 已修订）
 ```
 
 规则：**下层不引用上层**；所有跨模块接线发生在 `ZivAiEditor.App`（对应 Z2 / Z6）。
@@ -390,21 +390,20 @@ ZIV.AI.sln
 │  ├─ Directory.Packages.props      # 中央包版本管理（CPM）
 │  │                                # （global.json 固定 SDK 10.0.401，位于仓库根）
 │  │
-│  ├─ ZivAiEditor.Contracts/        # 契约与模型（net8.0；引用 ZIV.Core）
-│  │   ├─ Inference/{IInferenceClient.cs, InpaintRequest.cs, InferenceTask.cs,
-│  │   │             InferenceTaskHandle.cs, HealthStatus.cs, InferenceProgress.cs}
+│  ├─ ZivAiEditor.Contracts/        # 契约与模型（net8.0；无依赖，Z3）
+│  │   ├─ Inference/{IInferenceClient.cs, InpaintRequest.cs, InferenceTask.cs, ...}
 │  │   ├─ Tools/{IEditTool.cs, IToolRegistry.cs, ToolInput.cs, ToolResult.cs, StepProgress.cs}
-│  │   ├─ Planning/{IPlanner.cs, EditPlan.cs, EditStep.cs, PlanRequest.cs}
 │  │   ├─ Execution/{IExecutor.cs, TaskState.cs, StepState.cs, TaskProgress.cs}
+│  │   ├─ Session/   Project/   Models/   # 原 Planning 已拆分（Z-006 / INTERFACES.md）
 │  │   ├─ Imaging/{MaskSpec.cs}
 │  │   └─ Enums/{TaskStatus.cs, StepStatus.cs}
 │  │
 │  ├─ ZivAiEditor.Agent/            # Planner / Executor 编排（net8.0；引用 Contracts）
-│  │   ├─ PlaceholderPlanner.cs     # Step 1 占位（throw-only）
-│  │   └─ PlaceholderExecutor.cs    # Step 1 占位（throw-only）
+│  │   └─ Execution/（Planner：LlmPlanner / FallbackPlanner；Executor）
 │  │
 │  ├─ ZivAiEditor.Tools/            # 工具与注册表（net8.0；引用 Contracts）
-│  │   └─ PlaceholderToolRegistry.cs # Step 1 占位（throw-only）
+│  │   ├─ QwenImage21EditTool.cs
+│  │   └─ QwenImage21OutpaintTool.cs
 │  │
 │  ├─ ZivAiEditor.Backend/          # IInferenceClient 实现（net8.0；引用 Contracts）
 │  │   └─ IpcInferenceClient.cs     # Named Pipe 实现（Step 2 起）
@@ -418,18 +417,18 @@ ZIV.AI.sln
 │  ├─ ZivAiEditor.App/              # WinExe（net8.0-windows；AOT；引用全部）
 │  │   ├─ Program.cs
 │  │   ├─ App.axaml(.cs)
-│  │   └─ MainWindow.axaml(.cs)     # 空窗口，标题 ZIV.AI Editor
+│  │   └─ MainWindow.axaml(.cs)     # 完整编辑器主窗口（partial 拆分）
 │  │
 │  └─ ZivAiEditor.Tests/            # xunit（net8.0；引用 Contracts/Agent/Tools）
-│      └─ ContractsSmokeTests.cs
+│      └─ 多测试类（Contracts/Agent/Tools/UI 等）
 │
 ├─ contracts/
-│  └─ openapi.yaml                  # 跨进程契约（Step 1 冻结，8 端点）
+│  └─ openapi.yaml                  # Schema 参考（8 端点降级；传输契约见 ipc-protocol.md）
 │
 ├─ publish.ps1                      # 发布到 D:\Program Files\ZIV.AI（D-9）
 │
-├─ python/                          # Python 推理后端（独立进程，不属于 .NET 解决方案；Step 1 未创建，待 Step 3）
-│  ├─ server/                       # SGLang 主路线（LightX2V 为 Step 7 可选加速）
+├─ python/                          # Python 推理后端（独立进程，不属于 .NET 解决方案）
+│  ├─ server/                       # ComfyUI in-process 后端（D-7；SGLang 路线废弃）
 │  ├─ models/                       # Qwen-Image-2.1 权重（本地）
 │  └─ requirements.txt
 │
@@ -451,7 +450,7 @@ ZIV.AI.sln
   `App.OnFrameworkInitializationCompleted` 构造一次，注入 `AiEditorWindow`（Z1）
 - **初始化顺序（草案，按依赖）**：
   1. `PathResolver`（程序目录，Z14）
-  2. `SqliteTaskStore`（打开 / 建库 / 迁移）
+  2. 会话/项目存储（`SessionStore`；session.json，Z-020 已修订）
   3. `PythonProcessManager`（探测端口 / 启动后端，可延迟）
   4. `IpcInferenceClient`（依赖 3）
   5. `ToolRegistry`（注册工具）+ `ModelProfileRegistry`（模型分辨率档位，Step 6.5）
@@ -464,7 +463,7 @@ ZIV.AI.sln
 - **模型加载 / 卸载**：由 Python 后端负责加载与**空闲卸载**（Z21），C# 侧只配置超时并展示状态；
   保留最近一个模型，超时可配（`BackendOptions`）
 - **任务队列**：`ExecutionQueue` 单一串行队列；交互任务优先；OOM 按策略降级重试（Z18）；
-  任务状态即时写入 SQLite（Z20）
+  任务状态由 session.json 持久化（Z-020 已修订）
 - **UI 线程约束**：推理、解码、文件 IO 在后台线程（`Task` + `CancellationToken`）；
   控件更新经 Avalonia `Dispatcher.UIThread` 回主线程（Z11）；`MaskCanvas` 绘制在主线程，
   大图栅格化在后台
@@ -519,7 +518,7 @@ ZIV.AI.sln
 | 状态 | 会话内为主 | 任务持久化到 SQLite，可恢复 / 重跑（Z20） |
 | 输出安全 | 另存为 | 一律新文件，原图只读（Z24） |
 | 通知 | C# event + 回调 | 同左，另加 `IProgress<T>` 三级进度（D-13） |
-| 契约 | 进程内 C# 接口 | 进程内 C# 接口 + 跨进程 OpenAPI（D-8） |
+| 契约 | 进程内 C# 接口 | 进程内 C# 接口 + 跨进程 IPC（Named Pipe，D-8） |
 | UI 复用 | Avalonia | Avalonia（D-4） |
 
 ## 11. 反过度设计原则
@@ -527,11 +526,11 @@ ZIV.AI.sln
 1. **不造框架**：通知用原生 C# `event` + `IProgress<T>`，不做事件总线 / 中间件（D-13）
 2. **契约只放真正共享的**：`Contracts` 只放跨项目必需的类型，不预留未用抽象
 3. **薄层可合并**：某层只剩转发就并回上一层
-4. **不预留多实现**：`IInferenceClient` 先做 HTTP 一份；命名管道等有真实需求再加
+4. **不预留多实现**：`IInferenceClient` 已落定为 IPC（Named Pipe）实现（`IpcInferenceClient`，D-8）
 5. **复用优先**：图像读写 / 变换走 `ZIV.Imaging`，不重写（Z26 / Z13）
 6. **工具按需**：先做「重绘 / 局部编辑」一条主线，其余工具随需求增加
-7. **契约先行但不贪多**：OpenAPI 在 Step 1 冻结 8 个端点（health / inpaint / img2img /
-   upscale / segment / outpaint / task 查询 / task 取消），其余端点待有真实调用方再加
+7. **契约先行但不贪多**：跨进程传输为 IPC（Named Pipe，D-8）；`openapi.yaml` 的 8 端点
+   （health / inpaint / img2img / upscale / segment / outpaint / task 查询 / task 取消）降级为 Schema 参考
 8. **Planner 先确定性兜底**：先保证 `FallbackPlanner` 可用，再增强 LLM 规划
 
 ## 12. 技术选型利弊（调研支撑）
@@ -556,23 +555,24 @@ ZIV.AI.sln
 | 代价 | 需引入 SQLite 包并处理 AOT（待 Step 1 核实托管提供程序） |
 | 备选 | JSON 文件（并发 / 查询弱，不选）、LiteDB（生态较小，待评估） |
 
-### 12.3 Python 后端：LightX2V vs SGLang
-
-| 维度 | LightX2V | SGLang |
-|---|---|---|
-| 定位 | 低延迟图像 / 视频生成推理 | 高吞吐 LLM / 多模态服务 |
-| 适合 | 交互式单请求、低首帧 | 批量 / 并发规划请求 |
-| 结论 | **Step 1 单主线 SGLang**（D-7）：先跑通一条路线；LightX2V 作为 **Step 7 可选加速**再引入；两者统一在 OpenAPI 契约后 | |
-
-> 模型：Qwen-Image-2.1（本地权重）。显存与吞吐数字**待 Step 1 实测**。
-
-### 12.4 跨进程契约：OpenAPI 3.1
+### 12.3 Python 后端：ComfyUI in-process（D-7 定稿）
 
 | 维度 | 说明 |
 |---|---|
-| 优点 | 语言中立（C# / Python 都能生成客户端 / 服务端）；版本化清晰（Z23） |
-| 代价 | 需维护契约与生成代码的同步；生成工具与 AOT 兼容性待核实 |
-| 备选 | gRPC（需 proto 工具链）、命名管道 + 自定义协议（仅 Windows，先不做） |
+| 定稿 | **Step 2 起采用 ComfyUI v0.37.0 便携版源码，in-process 直接调管线**（D-7）；**SGLang 路线废弃** |
+| 加速 | LightX2V / Lightning LoRA 作为 Step 7 可选加速再引入 |
+| 传输 | 跨进程改用 **IPC（Named Pipe）**，非 HTTP（D-8） |
+
+> 模型：Qwen-Image-2.1（本地权重）。显存与吞吐数字见 FROZEN / DEVLOG 实测。
+> （原 LightX2V vs SGLang 权衡表随 D-7 定稿废弃。）
+
+### 12.4 跨进程契约：IPC（Named Pipe + 长度前缀）
+
+| 维度 | 说明 |
+|---|---|
+| 定稿 | **Step 2 起采用 IPC 传输契约** `contracts/ipc-protocol.md`（D-8） |
+| 理由 | 实测 Named Pipe 性能充足且免 HTTP 栈；版本解耦（Z23） |
+| openapi | `openapi.yaml` 的 8 端点降级为 **Schema 参考**（payload 形状来源） |
 
 > **修订（2026-09-25，R-3）**：D-8 已定稿——跨进程传输采用 **IPC（Named Pipe + 长度前缀）**
 > [`../contracts/ipc-protocol.md`](../contracts/ipc-protocol.md)；`contracts/openapi.yaml` 的 8 端点
