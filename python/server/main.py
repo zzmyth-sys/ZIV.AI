@@ -8,6 +8,11 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
+
+# Align official main.py's process env BEFORE importing handlers (which pulls in
+# comfy/torch): PYTORCH_CUDA_ALLOC_CONF must land before the first CUDA init.
+config.apply_official_env()
+
 import handlers
 import heartbeat
 import idle_watcher

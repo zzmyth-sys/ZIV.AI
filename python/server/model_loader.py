@@ -50,6 +50,8 @@ def prepare_environment():
     with _environment_lock:
         if _environment_ready:
             return
+        # Align official main.py's env before any comfy/torch import (in-process path).
+        config.apply_official_env()
         root = config.COMFY_ROOT
         if not root or not os.path.isdir(root):
             raise RuntimeError(
@@ -74,6 +76,10 @@ def _apply_runtime_defaults():
         return
     if config.DISABLE_SMART_MEMORY:
         ca.args.disable_smart_memory = True
+    if config.DISABLE_PINNED_MEMORY:
+        # Must land before the first `import comfy.model_management`: MAX_PINNED_MEMORY is
+        # computed there from `args.disable_pinned_memory` (model_management.py:1613).
+        ca.args.disable_pinned_memory = True
     if config.SAGE_ATTENTION:
         if importlib.util.find_spec("sageattention") is None:
             _LOG.warning(
@@ -92,6 +98,28 @@ def _dynamic_vram_supported():
     if mm.is_amd() and mm.rocm_version >= (7, 14):
         return True
     return False
+
+
+def _simple_vram_headroom(ca):
+    """``control.init`` headroom in bytes; ``None`` = ComfyUI default.
+
+    ``config.VRAM_RESERVE_MB`` (> 0) overrides the CLI ``--reserve-vram`` (GB),
+    which the in-process loader never sets (no argparse); 0 keeps the CLI value.
+    """
+    if config.VRAM_RESERVE_MB > 0:
+        return config.VRAM_RESERVE_MB * 1024 ** 2
+    return None if ca.args.reserve_vram is None else int(ca.args.reserve_vram * 1024 ** 3)
+
+
+def _device_vram_headroom(ca):
+    """Per-device ``control.init_devices`` headroom in bytes (0 = ComfyUI default).
+
+    ``config.VRAM_HEADROOM_MB`` (> 0) overrides the CLI ``--vram-headroom`` (GB),
+    which defaults to 0 for the in-process loader.
+    """
+    if config.VRAM_HEADROOM_MB > 0:
+        return config.VRAM_HEADROOM_MB * 1024 ** 2
+    return int(ca.args.vram_headroom * 1024 ** 3)
 
 
 def _enable_dynamic_vram():
@@ -115,7 +143,7 @@ def _enable_dynamic_vram():
         # comfy.model_management first would freeze that reference to None.
         import comfy_aimdo.control as control
 
-        headroom = None if ca.args.reserve_vram is None else int(ca.args.reserve_vram * 1024 ** 3)
+        headroom = _simple_vram_headroom(ca)
         try:
             control.init(simple_vram_headroom=headroom, nvml_pressure=not ca.args.disable_nvml_pressure)
         except TypeError:
@@ -136,10 +164,10 @@ def _enable_dynamic_vram():
             )
             return
 
+        device_headroom = _device_vram_headroom(ca)
         try:
             initialized = control.init_devices(
-                (d.index, int(ca.args.vram_headroom * 1024 ** 3))
-                for d in mm.get_all_torch_devices()
+                (d.index, device_headroom) for d in mm.get_all_torch_devices()
             )
         except TypeError:
             initialized = control.init_devices(

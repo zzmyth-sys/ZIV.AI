@@ -223,11 +223,68 @@ DISABLE_SMART_MEMORY = os.environ.get("ZIV_AI_DISABLE_SMART_MEMORY", "1") not in
 # attention.py 因缺包而 exit(-1)（见 ComfyUI comfy/ldm/modules/attention.py:30-36）。
 # 回退方式：设环境变量 ZIV_AI_SAGE_ATTENTION=0（或 false）即恢复原生 attention。
 SAGE_ATTENTION = os.environ.get("ZIV_AI_SAGE_ATTENTION", "1") not in ("", "0", "false", "False")
+# 关闭 ComfyUI 的 host pinned memory（等效官方 --disable-pinned-memory）。
+# pinned buffer 上限 = RAM×40%×2（model_management.py:1617,1625-1628）；@1536 工作集溢出时
+# 会被填满（RSS ≈ 2× staged 模型 ≈ 33GB）并触发 host RAM thrash。置 1 关闭 pin（牺牲 pin 的
+# PCIe 加速）以验证机制。默认 0 = 保持 ComfyUI 默认（启用 pin）。
+# 约束：必须在首次 import comfy.model_management 之前设置（同 DISABLE_SMART_MEMORY）。
+DISABLE_PINNED_MEMORY = os.environ.get("ZIV_AI_DISABLE_PINNED_MEMORY", "0") == "1"
 # 启用 ComfyUI Dynamic VRAM（comfy-aimdo，等效官方 ComfyUI/main.py 的启动引导）。
 # **默认开启**：该引导只写在官方入口 main.py 里，进程内直连 ComfyUI 时不会执行，于是落到
 #   传统 ModelPatcher（粗粒度 offload、卸载不彻底），16GB 卡上高分辨率会冲顶（实测 side 1536）。
 #   启用后权重由 vbar 按需换入换出，与官方流一致。回退：设 ZIV_AI_DYNAMIC_VRAM=0（或 false）。
 DYNAMIC_VRAM = os.environ.get("ZIV_AI_DYNAMIC_VRAM", "1") not in ("", "0", "false", "False")
+# ---- 官方 main.py 运行时 env 对齐（2026-09-29）----
+# 官方入口 ComfyUI/main.py 的 `if __name__ == "__main__"` 段设置了一些进程级 env；进程内直连
+# ComfyUI 时不会执行，导致与官方行为差异（@1536 thrash 的候选源）。这里只“对齐官方已设的 env”，
+# 不碰官方 cli_args / model_management / aimdo 调用。每项用 ZIV_AI_* 开关，可单独关闭做 A/B。
+#   - ALIGN_CUDA_MALLOC_ASYNC：等效官方 `import cuda_malloc`（cu130 自动设
+#     PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync）。**必须早于首次 CUDA 初始化**。
+#   - ALIGN_MIMALLOC_PURGE：等效官方 main.py:84 `MIMALLOC_PURGE_DELAY=0`（Windows）。
+#   - ALIGN_CUDA_VISIBLE_DEVICES：等效官方 main.py:52 Windows 单卡强制 `CUDA_VISIBLE_DEVICES=0`。
+#     该项与平台/硬件绑定，**默认关闭**（单卡机器上为 no-op；需显式开启才对齐）。
+ALIGN_CUDA_MALLOC_ASYNC = os.environ.get("ZIV_AI_CUDA_MALLOC_ASYNC", "1") not in ("", "0", "false", "False")
+ALIGN_MIMALLOC_PURGE = os.environ.get("ZIV_AI_MIMALLOC_PURGE_DELAY", "1") not in ("", "0", "false", "False")
+ALIGN_CUDA_VISIBLE_DEVICES = os.environ.get("ZIV_AI_CUDA_VISIBLE_DEVICES", "0") not in ("", "0", "false", "False")
+
+
+def apply_official_env():
+    """Set the env vars official ``main.py`` sets in its ``__main__`` block.
+
+    Idempotent and order-sensitive: call before PyTorch's first CUDA init (in the real
+    backend, before ``import handlers``; in-process, at the top of
+    ``model_loader.prepare_environment``). Only the three aligned vars are touched.
+    """
+    if ALIGN_CUDA_MALLOC_ASYNC:
+        conf = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")
+        parts = [p for p in conf.split(",") if p]
+        if not any(p.startswith("backend:") for p in parts):
+            parts.append("backend:cudaMallocAsync")
+            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = ",".join(parts)
+    if ALIGN_MIMALLOC_PURGE:
+        os.environ.setdefault("MIMALLOC_PURGE_DELAY", "0")
+    if ALIGN_CUDA_VISIBLE_DEVICES:
+        os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
+
+
+# DynamicVRAM 显存余量注入（方案 1，2026-09-29）。进程内直连 ComfyUI 没有官方 main.py 的 CLI 解析，
+#   故 --reserve-vram（→ control.init 的 simple_vram_headroom）与 --vram-headroom（→ init_devices
+#   的每设备 extra_vram_headroom）恒为默认（None / 0）。ZIV @1536 + Viggle 峰值 16002 MiB 贴近 16376
+#   卡上限，Windows 便外溢到「共享 GPU 内存」/ host RAM 触发 thrash（77s，官方 19.4s）。这里用 env 注入
+#   余量把峰值压回临界之下。单位 MB（官方 CLI 用 GB）；仅当 > 0 时注入，0 = 保持 ComfyUI 自身默认。
+#   - VRAM_HEADROOM_MB：每设备额外余量（等效官方 --vram-headroom），经 control.init_devices 生效。
+#   - VRAM_RESERVE_MB ：进程级 simple 预算余量（等效官方 --reserve-vram），经 control.init 生效。
+
+
+def _env_int_mb(name):
+    try:
+        return int(os.environ.get(name, "0") or "0")
+    except ValueError:
+        return 0
+
+
+VRAM_HEADROOM_MB = _env_int_mb("ZIV_AI_VRAM_HEADROOM_MB")
+VRAM_RESERVE_MB = _env_int_mb("ZIV_AI_VRAM_RESERVE_MB")
 
 # ---- host-RAM / 共享显存守卫（mem_guard）----
 # 专用 VRAM 打满后，Windows 会把权重外溢到「共享 GPU 内存」(= 系统 RAM)，DynamicVRAM 还会额外把

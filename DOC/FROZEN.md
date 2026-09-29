@@ -5469,3 +5469,20 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
   **`mem_guard.HostMemoryError`**。
 - 目的：host/共享显存溢出与 AcceleratorError 都能走分辨率降级，而不是冒泡硬崩（原先 `AcceleratorError`
   不在列，见 DEVLOG Step 9C.6-E 遗留）。
+
+## 登记（2026-09-29）：DynamicVRAM 显存余量注入（方案 1）
+
+### F1 env 与语义（冻结）
+- **位置**：`python/server/config.py`（`VRAM_HEADROOM_MB` / `VRAM_RESERVE_MB`）→
+  `python/server/model_loader.py`（`_simple_vram_headroom` / `_device_vram_headroom`）。
+- **两个余量**（单位 MB；仅当 > 0 注入，0 = 保持 ComfyUI 自身默认）：
+  - `ZIV_AI_VRAM_HEADROOM_MB` → `config.VRAM_HEADROOM_MB`：**每设备**额外余量，等效官方
+    `--vram-headroom`，经 `comfy_aimdo.control.init_devices` 的 `(index, bytes)` 生效；未设时回退
+    CLI `ca.args.vram_headroom`（GB→bytes，默认 0）。
+  - `ZIV_AI_VRAM_RESERVE_MB` → `config.VRAM_RESERVE_MB`：**进程级** simple 预算余量，等效官方
+    `--reserve-vram`，经 `comfy_aimdo.control.init(simple_vram_headroom=...)` 生效；未设时回退 CLI
+    `ca.args.reserve_vram`（GB→bytes，默认 `None`）。
+- **单位换算**：MB × 1024² = bytes（官方 CLI 用 GB；本注入统一 MB）。
+- **非法 env**：非整数 → 0（`config._env_int_mb`），不抛。
+- **默认**：两者均默认 0 = 完全不注入，与官方 `main.py` 未传 CLI 参数时逐字等价。
+- **依赖**：纯 stdlib（`os`）；**无新 NuGet / Python 依赖**；不改 IPC / 契约。

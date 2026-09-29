@@ -7771,3 +7771,33 @@ invent a new identity.`
 - `python -m unittest discover -p "test_*.py"` → **206 通过 / 0 失败（11 skip）**。
 - `mem_guard.snapshot()` 真机只读实测：total 95.9GB / avail 86.4GB / commit 131.2GB / RSS 正常。
 - **未跑 GPU**：真机守卫效果待用户按需验证（且必须带外部看门狗）。
+
+## DynamicVRAM 显存余量注入（方案 1）（2026-09-29，只增）
+
+> 背景：ZIV @1536 + Viggle + `/换背景` 77s thrash（官方 ComfyUI 19.4s）。诊断显示 ZIV 峰值
+> 16002 MiB 贴近 16376 卡上限（官方 15808 MiB，ZIV 高 ~200 MB）；越临界后 Windows 外溢到
+> 「共享 GPU 内存」/ host RAM，触发 pinned buffer / VBAR thrash。
+
+### A · 根因与方案
+- 进程内直连 ComfyUI 时**不做官方 `main.py` 的 CLI 解析**，故 `--reserve-vram`（→ `control.init`
+  的 `simple_vram_headroom`）与 `--vram-headroom`（→ `init_devices` 每设备 `extra_vram_headroom`）
+  **恒为默认**（`None` / `0`）。
+- 方案 1：用 env 注入显存余量，让 DynamicVRAM 主动多留一段空闲，把峰值压回临界之下；属**止血**
+  （非治本），1536 thrash 的更深根因另立。
+
+### B · 改动（`python/server/`）
+- `config.py`：新增 `VRAM_HEADROOM_MB`（env `ZIV_AI_VRAM_HEADROOM_MB`，默认 0）与
+  `VRAM_RESERVE_MB`（env `ZIV_AI_VRAM_RESERVE_MB`，默认 0）；`_env_int_mb` 容错非法值。
+- `model_loader.py`：新增纯函数 `_simple_vram_headroom(ca)` / `_device_vram_headroom(ca)`；
+  `_enable_dynamic_vram` 的 `control.init` 与 `control.init_devices` 改走这两个函数。值 > 0 时覆盖，
+  0 时回退 CLI 值（保持官方语义）。
+- 文档：FROZEN 尾部登记 F1（env + 语义）；本段 DEVLOG。
+
+### C · 验证（Z29 / Z30：CPU-only，无 GPU、不启动后端 / App）
+- `python -m py_compile model_loader.py config.py test_vram_headroom.py` → exit 0。
+- `python -m unittest test_vram_headroom` → **8 通过 / 0 失败**。
+- `python -m unittest discover -p "test_*.py"` → **214 通过 / 0 失败（11 skip）**（基线 206 + 8 新增）。
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 警告 / 0 错误**。
+- `dotnet test src\ZIV.AI.sln -c Release --no-build --filter "FullyQualifiedName!~Ipc"` → **747 通过 /
+  0 失败**（未跑无过滤 dotnet test）。
+- 真机对照（headroom 各值 / 峰值 VRAM / thrash）由用户执行。
