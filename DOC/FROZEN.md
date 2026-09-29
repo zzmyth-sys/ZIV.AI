@@ -5607,3 +5607,10 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 影响：无运行时行为变化（死默认仍不触发）。
 - 回归触发条件：任何让 payload `steps` 为 falsy 的路径（当前无）。
 - 触发时机：本步。
+
+### Z-032：SamplingPolicy sigmas 让位时 steps=len(sigmas)
+- 背景：Step 2 policy 终结器在「sigmas 合法且插件未显式给 steps」时，steps = len(sigmas)。旧 seams 保持 ctx steps。
+- 差异仅影响进度 / 展示（采样由 len(sigmas) 决定），输出不变。
+- B3/B4 不触发（B4 显式 steps=6）。
+- 回归触发条件：任何「有 sigmas 但不给 steps」的插件。
+- 触发时机：后续独立步。
