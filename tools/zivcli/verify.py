@@ -38,6 +38,7 @@ def golden_to_opts(name, golden, out):
         img1=resolve_path(golden["img1"]),
         img2=resolve_path(golden.get("img2")),
         img3=resolve_path(golden.get("img3")),
+        prompt=golden.get("prompt"),
         out=out,
         harness=runner.DEFAULT_HARNESS,
     )

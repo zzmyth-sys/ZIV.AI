@@ -44,6 +44,7 @@ SCN_ENV_KEYS = (
     "SCN_IMG1",
     "SCN_IMG2",
     "SCN_IMG3",
+    "SCN_PROMPT",
     "REPRO_HARNESS",
 )
 
@@ -59,6 +60,7 @@ class RunOptions:
     out: str
     img2: str = None
     img3: str = None
+    prompt: str = None
     max_wall: float = 120.0
     max_vram: float = 15500.0
     max_rss_gb: float = 18.0
@@ -78,6 +80,11 @@ def build_env(opts, base=None):
         env["SCN_IMG2"] = str(opts.img2)
     if opts.nref >= 2 and opts.img3:
         env["SCN_IMG3"] = str(opts.img3)
+    # None (default) -> leave SCN_PROMPT unset so the harness keeps its built-in prompt
+    # (B3/B4 goldens stay byte-identical). An explicit "" is passed through (harness `or`
+    # then falls back to its default — documented, not a silent drop).
+    if opts.prompt is not None:
+        env["SCN_PROMPT"] = str(opts.prompt)
     env["REPRO_HARNESS"] = str(opts.harness)
     return env
 

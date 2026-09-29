@@ -6026,3 +6026,31 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - `dotnet build src\ZIV.AI.sln -c Release` → **0 警告 0 错误**。
 - `dotnet test --filter "FullyQualifiedName!~Ipc"` → **782 通过 / 0 失败**（段 2 基线 780 + 2：
   OFF 后面板常驻且 `Enabled=false` / OFF 后选文件重新启用）。
+
+---
+
+## 1969 补 CLI `--prompt`（日期：2026-09-30）
+
+> **追加（只增不改）**。扩展 zivcli 覆盖面：使 `ACCEPTANCE.MD:1969`（`9C.5D.14`）可 CLI 跑。零 GPU 任务。
+
+### Y-1969.1 背景与根因
+- `ACCEPTANCE.MD:1969` = `9C.5D.14`「`<image2>` / `<image3>` 引用生效」。
+- 根因：harness（`tools/zivcli/harness/s5s6_scenarios.py:94`）已读 `SCN_PROMPT`，但 zivcli `run` 未暴露 `--prompt`（`runner.build_env` 未设 `SCN_PROMPT`）。
+
+### Y-1969.2 改动（仅 CLI 层）
+- `tools/zivcli/runner.py`：`RunOptions.prompt`；`SCN_ENV_KEYS += SCN_PROMPT`；`build_env` 在 `prompt is not None` 时注入（None → 不设）。
+- `tools/zivcli/__main__.py`：`run --prompt TEXT`。
+- `tools/zivcli/batch.py` / `verify.py`：内联条目 / golden 透传 `prompt`（现有输入无该键 → None）。
+- `tools/zivcli/README.md`：`--prompt` 说明 + 1969 示例（**绝对** fixture 路径；`run` 原样传路径，harness cwd=`harness/`）。
+- 测试：`tests/test_runner.py` / `tests/test_batch.py` 增 prompt 用例。
+
+### Y-1969.3 边界
+- **不进产品路径**：未改 `src/`、IPC 契约、Python 后端、harness（vendor 冻结快照）。
+- **金标不回退**：b3/b4 无 prompt → None → 不注入 `SCN_PROMPT` → env / SHA 不变。
+- 不新增 fixture / golden（1969 为视觉检查，无 GPU 不可钉 SHA）；`<image3>` 建议指向与 `--img2` 不同的图。
+- 空 prompt（`--prompt ""`）被 harness `or` 回退为默认 prompt（已记）。
+
+### Y-1969.4 验证
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 警告 0 错误**；非 GPU 全量 **782 通过 / 0 失败**（不变）。
+- zivcli 单测（`python -m unittest discover -s tools/zivcli/tests -t .`）→ **59 通过 / 0 失败**（含新增 prompt 用例）。
+- 未跑 GPU。

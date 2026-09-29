@@ -90,6 +90,17 @@ class BuildEnvTests(unittest.TestCase):
         self.assertIn("SCN_OP", subset)
         self.assertNotIn("PATH", subset)
 
+    def test_prompt_in_env(self):
+        env = runner.build_env(make_opts(prompt="swap <image2> <image3>"), base={})
+        self.assertEqual(env["SCN_PROMPT"], "swap <image2> <image3>")
+        self.assertIn("SCN_PROMPT", runner.input_env(env))
+
+    def test_prompt_omitted_by_default(self):
+        # B3/B4 parity: an unspecified prompt must not inject SCN_PROMPT at all.
+        env = runner.build_env(make_opts(), base={})
+        self.assertNotIn("SCN_PROMPT", env)
+        self.assertNotIn("SCN_PROMPT", runner.input_env(env))
+
 
 class ParseAndHashTests(unittest.TestCase):
     def test_parse_result(self):
@@ -223,6 +234,30 @@ class RunGateTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(captured["opts"].viggle, 0)
         self.assertEqual(captured["opts"].nref, 0)
+
+    def test_prompt_reaches_runner(self):
+        captured = {}
+
+        def fake_run(opts):
+            captured["opts"] = opts
+            return 0, {}
+
+        old = runner.run_scenario
+        runner.run_scenario = fake_run
+        try:
+            code = main(
+                [
+                    "run",
+                    "--img1", "a.png",
+                    "--out", "b.png",
+                    "--prompt", "P <image3>",
+                    "--yes",
+                ]
+            )
+        finally:
+            runner.run_scenario = old
+        self.assertEqual(code, 0)
+        self.assertEqual(captured["opts"].prompt, "P <image3>")
 
 
 if __name__ == "__main__":

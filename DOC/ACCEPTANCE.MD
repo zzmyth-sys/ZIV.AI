@@ -4573,3 +4573,15 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 
 - **范围**：纯配置层；未改 IPC 契约 / 命令集 / `PythonProcessManager` / `pipeline.py` / `handlers.py` / TE-Speed / WD14。
 - **限制**：未跑 GPU / 未启动真实 App；未 commit。用户手动验证：编辑 `Template/plugins.user.json` 后重启 App 生效。
+
+---
+
+## zivcli 补 `--prompt`（1969 / 9C.5D.14，2026-09-30，只增）
+
+- 背景：`ACCEPTANCE.MD:1969`（`9C.5D.14`：`<image2>` / `<image3>` 引用生效）原无 CLI 跑法。
+- 根因：harness 已支持 `SCN_PROMPT`（`tools/zivcli/harness/s5s6_scenarios.py:94`），但 `zivcli run` 未暴露 `--prompt`。
+- 修复（仅 CLI 层）：`ziv run --prompt TEXT` → `SCN_PROMPT`；`batch` 内联条目 / golden 支持 `prompt` 字段；未改 harness / 产品路径 / IPC / Python 后端。
+- 1969 跑法（**绝对** fixture 路径；完整可复制示例见 `tools/zivcli/README.md`）：
+  `python -m tools.zivcli run --op inpaint --side 1536 --nref 2 --img1 <abs img1.jpg> --img2 <abs img2.png> --img3 <abs img1.jpg> --prompt "Replace the background of <image1> with the scene from <image2>; relight it like <image3>." --out <png> --yes`
+- 结果：1969 可 CLI 跑；B3/B4 金标不变（默认不注入 `SCN_PROMPT`）；未跑 GPU（零 GPU 任务）。
+- 原 `:1969` 行不改，以本段为准。

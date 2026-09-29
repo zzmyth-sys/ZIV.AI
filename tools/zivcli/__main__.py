@@ -30,6 +30,8 @@ def build_parser():
     rn.add_argument("--img1", required=True)
     rn.add_argument("--img2")
     rn.add_argument("--img3")
+    rn.add_argument("--prompt", default=None,
+                    help="prompt text (SCN_PROMPT); omit for the harness default")
     rn.add_argument("--out", required=True)
     rn.add_argument("--max-wall", dest="max_wall", type=float, default=120.0)
     rn.add_argument("--max-vram", dest="max_vram", type=float, default=15500.0)
@@ -110,6 +112,7 @@ def main(argv=None):
         img1=args.img1,
         img2=args.img2,
         img3=args.img3,
+        prompt=args.prompt,
         out=args.out,
         max_wall=args.max_wall,
         max_vram=args.max_vram,

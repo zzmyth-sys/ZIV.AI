@@ -83,6 +83,13 @@ class ResolveTests(unittest.TestCase):
             with self.assertRaises(KeyError):
                 batch._resolve({"golden": "zzz"}, td, {})
 
+    def test_inline_prompt_passed(self):
+        with tempfile.TemporaryDirectory() as td:
+            entry = inline("c1", A)
+            entry["prompt"] = "P <image2>"
+            name, opts, expected = batch._resolve(entry, td, {})
+            self.assertEqual(opts.prompt, "P <image2>")
+
 
 class RunBatchTests(unittest.TestCase):
     def test_all_pass(self):

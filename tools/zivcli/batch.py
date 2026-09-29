@@ -49,6 +49,7 @@ def _resolve(entry, out_dir, goldens):
         img1=verify.resolve_path(entry["img1"]),
         img2=verify.resolve_path(entry.get("img2")),
         img3=verify.resolve_path(entry.get("img3")),
+        prompt=entry.get("prompt"),
         out=out,
         harness=runner.DEFAULT_HARNESS,
     )
