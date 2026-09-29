@@ -34,6 +34,13 @@ public sealed class PluginDescriptor
     /// </summary>
     public IReadOnlyList<string> Capabilities { get; init; } = Array.Empty<string>();
 
+    /// <summary>
+    /// Seam anchors the plugin declares (S5). Data-driven copy of the <c>seams</c> array in
+    /// plugins.json; resolved by Python <c>plugins.dispatch._seams_for</c> (entry seams &gt;
+    /// legacy capability map). No cross-language check (see DOC/INTERFACES.md).
+    /// </summary>
+    public IReadOnlyList<string> Seams { get; init; } = Array.Empty<string>();
+
     /// <summary>Declared Python import names; checked (not installed) by the backend loader.</summary>
     public IReadOnlyList<string> Deps { get; init; } = Array.Empty<string>();
 
@@ -183,6 +190,9 @@ public sealed class PluginRegistry
             Entry = string.IsNullOrWhiteSpace(dto.Entry) ? "__init__.py" : dto.Entry!,
             Capabilities = (dto.Capabilities ?? new List<string>())
                 .Where(cap => !string.IsNullOrWhiteSpace(cap))
+                .ToArray(),
+            Seams = (dto.Seams ?? new List<string>())
+                .Where(seam => !string.IsNullOrWhiteSpace(seam))
                 .ToArray(),
             Deps = (dto.Deps ?? new List<string>())
                 .Where(dep => !string.IsNullOrWhiteSpace(dep))

@@ -65,7 +65,8 @@ public partial class SettingsWindow
 
     /// <summary>
     /// Metadata line for the plugin row (batch 3 catalog): version + capability names, read
-    /// data-driven from <c>plugins.json</c>. Empty parts are omitted. Pure and unit-testable.
+    /// data-driven from <c>plugins.json</c>; plus the seam anchors the plugin declares (S5).
+    /// Empty parts are omitted. Pure and unit-testable.
     /// </summary>
     internal static string PluginMetaLabel(PluginDescriptor plugin)
     {
@@ -78,6 +79,11 @@ public partial class SettingsWindow
         if (plugin.Capabilities.Count > 0)
         {
             parts.Add("capabilities: " + string.Join(", ", plugin.Capabilities));
+        }
+
+        if (plugin.Seams.Count > 0)
+        {
+            parts.Add("seams: " + string.Join(", ", plugin.Seams));
         }
 
         return string.Join(" · ", parts);

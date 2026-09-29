@@ -32,6 +32,10 @@ internal sealed class PluginDto
     [JsonPropertyName("capabilities")]
     public List<string>? Capabilities { get; init; }
 
+    /// <summary>Seam names the plugin attaches to (S5). Mirrors the <c>seams</c> array in plugins.json.</summary>
+    [JsonPropertyName("seams")]
+    public List<string>? Seams { get; init; }
+
     [JsonPropertyName("dir")]
     public string? Dir { get; init; }
 

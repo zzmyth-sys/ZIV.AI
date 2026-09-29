@@ -254,6 +254,31 @@ public class SettingsWindowSmokeTests
         Assert.Equal(string.Empty, SettingsWindow.PluginMetaLabel(new PluginDescriptor { Id = "x" }));
     }
 
+    [Fact]
+    public void PluginMetaLabel_Shows_Seams_And_Omits_Empty()
+    {
+        // Seams appear after capabilities (S5); a blank seam is filtered before display.
+        Assert.Equal(
+            "v0.1.0 · capabilities: sampling_plan · seams: before_sample",
+            SettingsWindow.PluginMetaLabel(new PluginDescriptor
+            {
+                Id = "qwen21-viggle-6step",
+                Version = "0.1.0",
+                Capabilities = new[] { "sampling_plan" },
+                Seams = new[] { "before_sample" },
+            }));
+
+        // Empty seams -> the whole "seams:" segment is omitted (no bare prefix).
+        Assert.Equal(
+            "v1.2.3",
+            SettingsWindow.PluginMetaLabel(new PluginDescriptor
+            {
+                Id = "x",
+                Version = "1.2.3",
+                Seams = Array.Empty<string>(),
+            }));
+    }
+
     private static Button? FindButtonByContent(Control root, string content)
     {
         switch (root)

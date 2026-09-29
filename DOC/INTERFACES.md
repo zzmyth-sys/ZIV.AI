@@ -597,3 +597,21 @@
   本机无重栈 → **跳过**（GPU host 由既有用例覆盖）。
 - **不做**：不接其余 5 锚点（S4）；不动 `plugins.json`（批 A 冻结）；不改 `seams.SEAMS` / `apply` 签名
   / `dispatch.py`；不迁 Viggle 数据（S6）；不改 `plugin_sampling` 既有函数行为 / `pipeline_hooks`。
+
+## 43. seams 字段说明（S5，C# 侧展示seam，2026-09-29，只增不改）
+
+- **数据来源**：`Template/plugins.json` 每条插件 entry 的 **`seams` 数组**（string[]）。缺失 / 空白项
+  视作未声明。**C# 不写、不校验**该字段，只做展示。
+- **C# 读取**：`PluginFileDto.Seams`（`PluginsFileDto.cs`）经 `PluginRegistry.ToDescriptor`
+  映射到 `PluginDescriptor.Seams`；映射时仿 `Capabilities` 过滤 `null` 与空白项（`IsNullOrWhiteSpace`），
+  缺省为空数组。
+- **与 Python 语义对齐**：`PluginDescriptor.Seams` 是 `plugins.json` `seams` 数组的**数据驱动副本**；
+  Python `plugins.dispatch._seams_for` 的解析优先级为 **entry `seams` > `capabilities` → legacy map**
+  （`LEGACY_CAPABILITY_MAP = {"sampling_plan": "before_sample"}`）、再回退 `[]`。C# 侧仅展示本 entry
+  声明的 `seams`，**不**复现该优先级，也**不**读 `PLUGIN_META.seams`。
+- **设置窗口展示规则**：`SettingsWindow.PluginMetaLabel` 在 capabilities 段之后追加 seams 段
+  （`seams: a, b`）。**空 seams 不显示**（绝不输出裸 `seams: ` 前缀），与 capabilities 段的隐藏策略一致。
+- **同步约定**：**无跨语言校验**。插件作者新增接缝时须自行同步 `plugins.json` 的 `seams` 与 Python
+  模块；不一致时 UI 只反映 `plugins.json`（与 §39 capabilities 同一约定）。
+- **不做**：不校验 `seams` 是否为合法接缝名（S3 教训：不做语义校验）；不改 `plugins.json` / `plugin_packs`
+  / Python 侧；不改契约 / 冻结模块。

@@ -65,12 +65,25 @@ public class PluginRegistryTests : IDisposable
         Assert.Null(registry.Get("missing"));
     }
 
+        [Fact]
+    public void Maps_Seams_And_Filters_Blank()
+    {
+        File.WriteAllText(RegistryPath,
+            "{ \"version\": \"1\", \"plugins\": ["
+            + " { \"id\": \"before-sampler\", \"seams\": [\"before_sample\", \"\"] } ] }");
+
+        var plugin = Assert.Single(new PluginRegistry(RegistryPath).All);
+
+        Assert.Equal(new[] { "before_sample" }, plugin.Seams);
+    }
+
     [Fact]
     public void Defaults_Entry_When_Omitted()
     {
         File.WriteAllText(RegistryPath, "{ \"version\": \"1\", \"plugins\": [ { \"id\": \"a\" } ] }");
 
         Assert.Equal("__init__.py", Assert.Single(new PluginRegistry(RegistryPath).All).Entry);
+        Assert.Empty(Assert.Single(new PluginRegistry(RegistryPath).All).Seams);
     }
 
     [Fact]
