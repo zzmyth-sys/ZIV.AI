@@ -5850,3 +5850,14 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 生效范围：仅 /换背景（其它 variadic 命令不改）
 - 回归触发条件：内建集与 commands.json 再次不一致
 - 触发时机：本步
+
+### 收尾：ACCEPTANCE 待裁项处置（2026-09-30）
+- Q4-A 1314/1375/1454/1589：归「真机必跑」不需 GPU
+  （「真机交互」= UI 流程无回归，不含出图）
+- Q4-A 1729：描述过时，已标注修正（参考图启用）
+- Q4-B B1 MODEL_ROOT：可关闭（env 优先 + 开发默认兜底，当前合理）
+- Q4-B B2 8K 代理：ProxyImageCache 已实现（MaxTotalBytes=500MB+淘汰），
+  (ii) 可关闭；(i) 手轮 Fit<10% / (iii) 设计层归属 保持挂账
+- Q4-B B3 2.5K 坐标：裁切精度 1px≈3.2 原图px 用户已裁「够用」；
+  MaskSpec W/H 已修订；两者可关闭。极小羽化 round 到 0 → 保持观察
+- Q4-C 70 条真机必跑：按功能域分 7 组，6-8 次批量会话可覆盖
