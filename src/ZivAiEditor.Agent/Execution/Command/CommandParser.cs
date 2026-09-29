@@ -56,7 +56,7 @@ public sealed partial class CommandParser : ICommandParser
     /// <summary>Name-based trigger for the crop-tool outpaint follow-up (never handler/tool based).</summary>
     private const string OutpaintCommandName = "/扩图";
 
-    private readonly IReadOnlyList<CommandDefinition> _commands;
+    private IReadOnlyList<CommandDefinition> _commands;
 
     /// <summary>
     /// Builds a parser over an already-resolved command set (T5/S1: the built-in + user merged

@@ -125,13 +125,25 @@ internal sealed class AppContext : IDisposable
 
     /// <summary>
     /// The built-in + user merged command template store (T5/S1). The parser is built from
-    /// <see cref="ICommandTemplateService.List"/> at startup; edits through this service take
-    /// effect on the next restart (hot reload is Z-030).
+    /// <see cref="ICommandTemplateService.List"/> at startup; <see cref="ReloadCommands"/>
+    /// re-reads it at runtime and hot-swaps the parser in place (Z-030 复议).
     /// </summary>
     public ICommandTemplateService CommandTemplates { get; }
 
     /// <summary>The loaded command set (single / multi template variants), for the /生成 flow.</summary>
     public IReadOnlyList<CommandDefinition> Commands => _commandParser.Commands;
+
+    /// <summary>
+    /// Re-reads the built-in + user command templates and hot-swaps the parser's command set
+    /// in place (Z-030 复议). Holders of the parser instance (the Executor / FlowRunner) observe
+    /// the new commands immediately; the UI refreshes its own snapshot on
+    /// <see cref="CommandsReloaded"/>. Expected to run on the UI thread with no parse in flight.
+    /// </summary>
+    public void ReloadCommands()
+    {
+        _commandParser.Reload(CommandTemplates.List().Select(dto => dto.Definition).ToList());
+        CommandsReloaded?.Invoke(this, EventArgs.Empty);
+    }
 
     /// <summary>Prompt rewriter for <c>/生成</c> (prompt-rewriter flow).</summary>
     public IPromptExpander PromptExpander { get; }
@@ -174,6 +186,9 @@ internal sealed class AppContext : IDisposable
 
     /// <summary>Raised when the backend performed an L1/L2 recovery (Step 9C.20); the shell updates the bubble.</summary>
     public event Action? StuckRecovery;
+
+    /// <summary>Raised after <see cref="ReloadCommands"/> hot-swapped the command set (Z-030 复议).</summary>
+    public event EventHandler? CommandsReloaded;
 
     public static AppContext Create(IShellContext shell)
     {

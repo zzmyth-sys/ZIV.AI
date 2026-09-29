@@ -1,5 +1,6 @@
 using ZivAiEditor.Agent.Execution;
 using ZivAiEditor.Agent.Session;
+using ZivAiEditor.Contracts.Execution;
 using ZivAiEditor.Contracts.Imaging;
 using Xunit;
 
@@ -534,5 +535,44 @@ public class CommandParserTests
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task Reload_Swaps_Command_Set_In_Place()
+    {
+        // Z-030 复议 (段 1): Reload replaces the held set in place. A command unknown to the
+        // original set becomes parseable and a previously-known command disappears — observed
+        // through the original parser reference, which is how the Executor / FlowRunner hold it.
+        var parser = ParserWithoutFile(); // built-in set
+        ICommandParser reference = parser;
+
+        var before = await reference.ParseAsync("/去水印", SessionWithImage(), 1, resolution: null);
+        Assert.True(before.Success);
+
+        parser.Reload(new[]
+        {
+            new CommandDefinition
+            {
+                Name = "/新命令",
+                Params = new List<string> { "description" },
+                Tool = "QW21edit",
+                Template = "do {description}",
+            },
+        });
+
+        var oldCommand = await reference.ParseAsync("/去水印", SessionWithImage(), 1, resolution: null);
+        Assert.False(oldCommand.Success);
+
+        var newCommand = await reference.ParseAsync("/新命令 你好", SessionWithImage(), 1, resolution: null);
+        Assert.True(newCommand.Success);
+        Assert.Equal("/新命令", newCommand.MatchedCommand);
+    }
+
+    [Fact]
+    public void Reload_Null_Throws()
+    {
+        var parser = ParserWithoutFile();
+
+        Assert.Throws<ArgumentNullException>(() => parser.Reload(null!));
     }
 }

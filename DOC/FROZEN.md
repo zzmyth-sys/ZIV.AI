@@ -5954,3 +5954,22 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 本特性是命令级 LoRA 微控件，不恢复完整模板编辑器
 - 二者不冲突；CommandTemplateService 复用为写回后端
 - 触发时机：本步
+
+---
+
+## Z-030 复议：命令模板 / LoRA 热重载（日期：2026-09-30）
+
+> **追加（只增不改）**。用户授权复议 Z-030。原 Z-030 段（:4741 / :4762）不改，以本段为准。
+
+### Z-030 复议结论
+- 原 Z-030（FROZEN.md:4673）：命令模板无热重载，永久关闭（:4741 / :4762）。
+- 用户授权复议（2026-09-30）：除环境变量外，配置项应热重载，且**不用点保存**。
+- 复议结论：**放开**。技术路径 = `CommandParser._commands` 原地替换 +
+  `AppContext.ReloadCommands()`；持有 parser 引用的 `Executor` / `FlowRunner` / `MainWindow`
+  无需改动。
+- 分期：
+  - 段 1（本步）：`CommandParser.Reload` + `AppContext.ReloadCommands` + `CommandsReloaded` 事件。
+  - 段 2：`LoraControl` Flyout 关闭时自动保存 + 调 `ReloadCommands`。
+- 原 Z-030 段不改（铁律 4），以本段为准。
+- 生效范围：命令模板（含 LoRA 命令级参数）。
+- 不做（挂账）：文件 watcher 自动监控；滑块拖动过程实时生效。
