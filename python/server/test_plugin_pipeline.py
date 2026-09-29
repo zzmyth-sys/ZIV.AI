@@ -46,11 +46,15 @@ if COMFY_AVAILABLE:  # only importable on the inference host
 
 CALLS = {}
 MASK_OUT = [None]
+LAST_SIGMAS = [None]
 
 
 def _rec(name):
     def fn(*args, **kwargs):
         CALLS[name] = CALLS.get(name, 0) + 1
+        if name == "sample_custom":
+            # sample_custom(model, noise, cfg, sampler_obj, sigmas, positive, ...): capture sigmas
+            LAST_SIGMAS[0] = args[4]
         return "SAMPLES"
 
     return fn
@@ -114,6 +118,7 @@ class PluginPipelineRoutingTests(unittest.TestCase):
     def _run(self, op, image_path, mask=None, denoise=1.0):
         CALLS.clear()
         MASK_OUT[0] = mask
+        LAST_SIGMAS[0] = None
         _FakeModel.instances = []
         pipeline._run_once(
             _FakeModel(), "CLIP", "VAE", "prompt",
@@ -133,14 +138,17 @@ class PluginPipelineRoutingTests(unittest.TestCase):
             "patch_aura": CALLS.get("patch_aura", 0),
         }
 
-    def _enable(self):
+    def _enable(self, sigmas=None):
         loader._MODULES.clear()
         os.environ[ENV] = "1"
         plugin, status = loader.load_plugin(PLUGIN_ID)
         self.assertIsNotNone(plugin, status)
-        # the 1.3 GB weight + real sigmas are irrelevant to routing; stub them.
+        # the 1.3 GB weight + real sigmas are irrelevant to routing; stub them. The sigmas stub
+        # must be 1-D (``_fit_sigmas`` rejects a bare string), mirroring the real 7-element
+        # schedule (diffusers N nodes + trailing 0) while ``steps`` stays 6.
         plugin._load_lora = lambda path: {}
-        plugin._build_sigmas = lambda latent: "SIGMAS"
+        shape = (7,) if sigmas is None else sigmas
+        plugin._build_sigmas = lambda latent: mock.Mock(shape=shape)
         return plugin
 
     def _edit(self):
@@ -161,6 +169,28 @@ class PluginPipelineRoutingTests(unittest.TestCase):
             {"sample": 0, "sample_custom": 1, "patch_aura": 0},
         )
         self.assertTrue(any(clone.removed for clone in _FakeModel.instances))
+
+    def test_enabled_edit_sigmas_not_swallowed_by_fit_sigmas(self):
+        """回归守卫（S3 `_fit_sigmas`）：Viggle 是 7 个 sigmas / steps=6（diffusers N+1）。若 sigmas
+        误被吞，路径会退回 legacy ``sample``（40 步）+ AuraFlow。断言走 ``sample_custom`` 且
+        ``len(sigmas)==7``、AuraFlow 未施力（``skip_shift=True``）。"""
+        self._enable()
+        self.assertEqual(
+            self._run("inpaint", self._edit()),
+            {"sample": 0, "sample_custom": 1, "patch_aura": 0},
+        )
+        self.assertIsNotNone(LAST_SIGMAS[0])
+        self.assertEqual(len(LAST_SIGMAS[0].shape), 1)
+        self.assertEqual(LAST_SIGMAS[0].shape[0], 7)
+
+    def test_enabled_edit_matching_sigmas_still_custom(self):
+        """6 个 sigmas / steps=6（长度相等）同样走 ``sample_custom``。"""
+        self._enable(sigmas=(6,))
+        self.assertEqual(
+            self._run("inpaint", self._edit()),
+            {"sample": 0, "sample_custom": 1, "patch_aura": 0},
+        )
+        self.assertEqual(LAST_SIGMAS[0].shape[0], 6)
 
     def test_cleanup_runs_when_sampler_raises(self):
         self._enable()

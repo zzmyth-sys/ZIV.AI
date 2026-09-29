@@ -86,6 +86,18 @@ foreach ($builtinName in @('commands.json', 'loras.json', 'models.json', 'plugin
     }
 }
 
+# P2-3: the same PreserveNewest caveat applies to the content-file trees copied into the
+# output: python\server\*.py (backend pipeline) and plugin_packs\** (executable plugins).
+# A *newly added* file in an existing tree (e.g. seams.py) is not seen as a change for the
+# whole-tree incremental copy, so the publish silently kept the old set. Delete the two trees
+# first so every publish re-copies them (dirs are recreated by the publish target).
+foreach ($tree in @('python\server', 'plugin_packs')) {
+    $treePath = Join-Path $OutputDir $tree
+    if (Test-Path -LiteralPath $treePath) {
+        Remove-Item -LiteralPath $treePath -Recurse -Force
+    }
+}
+
 # Publish without debug symbols: a NativeAOT Release build otherwise emits a large .pdb
 # (plus package-shipped native symbols). DebugType=None suppresses the managed symbols;
 # the residual *.pdb (native package symbols) are deleted as a backstop.

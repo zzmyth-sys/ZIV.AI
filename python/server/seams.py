@@ -85,22 +85,28 @@ def _apply_after_encode(ctx, patch):
 
 
 def _fit_sigmas(sigmas, steps):
-    """Plan sigmas 的 token 数须等于采样步数；不等则视为**某一方误读**并忽略 sigmas（等价旧行为）。
+    """校验 plan sigmas：合法（1-D、非空）原样返回；非法 → warning + ``None``（走 legacy 采样器）。
 
-    旧路径从不检查，误读的 sigmas 会在 ``sample_custom`` 里炸；这里安全降级到旧采样器路径。
+    采样步数由 ``len(sigmas)`` 决定（``sample_custom`` 语义），**不比对** ``steps``：diffusers 惯例是
+    ``N`` 节点 sigmas + 末尾 0 = ``N+1`` 个元素（如 Viggle ``steps=6`` ↔ 7 个 sigmas），比对会误吞。
+    ``steps`` 仅作进度显示（:func:`plugin_sampling.report_steps`），不参与本校验。
     """
-    if sigmas is None or not hasattr(sigmas, "shape") or len(sigmas.shape) != 1:
-        return sigmas
+    if sigmas is None:
+        return None
+    shape = getattr(sigmas, "shape", None)
+    if shape is None or len(shape) != 1:
+        _LOG.warning(
+            "before_sample: sigmas is not a 1-D tensor (shape=%s); ignoring sigmas", shape
+        )
+        return None
     try:
-        if int(sigmas.shape[0]) == int(steps):
-            return sigmas
+        if int(shape[0]) <= 0:
+            _LOG.warning("before_sample: sigmas is empty; ignoring sigmas")
+            return None
     except (TypeError, ValueError):
-        return sigmas
-    _LOG.warning(
-        "before_sample: sigmas token count %s != steps %s; ignoring sigmas",
-        tuple(sigmas.shape), steps,
-    )
-    return None
+        _LOG.warning("before_sample: sigmas length %r is not an int; ignoring sigmas", shape[0])
+        return None
+    return sigmas
 
 
 def _apply_before_sample(ctx, patch):
@@ -110,7 +116,7 @@ def _apply_before_sample(ctx, patch):
 
     - ``model``：插件已在本 ctx 上施力完毕，此处只归一（falsy → 施力前的 model）；
     - ``steps``：归一（falsy / 非 int → 施力前的值），进度与采样共用；
-    - ``sigmas``：仅当 token 数 == steps 时保留（:func:`_fit_sigmas`）；
+    - ``sigmas``：合法性校验（1-D、非空）后保留（:func:`_fit_sigmas`）；步数由 ``len(sigmas)`` 决定；
     - ``skip_shift``：缺省 = 无 sigmas（旧 ``applies_shift`` 语义，sigmas 自带 schedule）；
     - AuraFlow ``patch_aura``：``applies_shift`` 为真且 schedule 为 ``auraflow`` → 对模型克隆施力。
 

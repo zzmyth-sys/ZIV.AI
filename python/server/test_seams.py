@@ -256,7 +256,7 @@ class BeforeSampleForceTests(unittest.TestCase):
         self.assertIsNone(out["sigmas"])
 
     def test_explicit_sigmas_skip_shift_keeps_custom_model(self):
-        sigmas = [1.0, 0.0]
+        sigmas = mock.Mock(shape=(2,))
         out = self._apply(self._ctx(), {"model": "MP", "sigmas": sigmas, "skip_shift": True})
         self.assertEqual(out["model"], "MP")
         self.assertIs(out["sigmas"], sigmas)
@@ -266,10 +266,15 @@ class BeforeSampleForceTests(unittest.TestCase):
         self.assertEqual(self._apply(self._ctx(), {"steps": "6"})["steps"], 6)
         self.assertEqual(self._apply(self._ctx(), {"steps": None})["steps"], 40)
 
-    def test_sigmas_token_count_mismatch_ignored(self):
-        sigmas = mock.Mock(shape=(3,))
-        out = self._apply(self._ctx(), {"sigmas": sigmas, "skip_shift": True})
-        self.assertIsNone(out["sigmas"])
+    def test_viggle_shape_sigmas_not_swallowed(self):
+        # 回归守卫：diffusers 惯例 N 节点 + 末尾 0 -> 7 个 sigmas 而 steps=6，不得被吞。
+        sigmas = mock.Mock(shape=(7,))
+        out = self._apply(
+            self._ctx(),
+            {"model": "MP", "steps": 6, "sigmas": sigmas, "skip_shift": True},
+        )
+        self.assertIs(out["sigmas"], sigmas)
+        self.assertEqual(out["steps"], 6)
 
     def test_falsy_patch_model_keeps_base(self):
         out = self._apply(self._ctx(), {"model": None})
@@ -279,6 +284,37 @@ class BeforeSampleForceTests(unittest.TestCase):
         fns = [lambda: None]
         out = self._apply(self._ctx(), {seams.CLEANUPS_KEY: fns})
         self.assertEqual(seams.collect_cleanup(out), fns)
+
+
+class FitSigmasTests(unittest.TestCase):
+    """``_fit_sigmas`` 语义：只挡非法值（非 1-D / 空 / None），**不比对** steps。"""
+
+    def test_seven_sigmas_with_six_steps_passes(self):
+        # Viggle 实况：steps=6，sigmas=7（N+1）。核心回归用例。
+        sigmas = mock.Mock(shape=(7,))
+        self.assertIs(seams._fit_sigmas(sigmas, 6), sigmas)
+
+    def test_matching_length_passes(self):
+        sigmas = mock.Mock(shape=(6,))
+        self.assertIs(seams._fit_sigmas(sigmas, 6), sigmas)
+
+    def test_any_positive_1d_passes(self):
+        for n in (1, 2, 40, 41):
+            sigmas = mock.Mock(shape=(n,))
+            self.assertIs(seams._fit_sigmas(sigmas, 6), sigmas)
+
+    def test_two_d_rejected(self):
+        self.assertIsNone(seams._fit_sigmas(mock.Mock(shape=(7, 1)), 6))
+
+    def test_empty_rejected(self):
+        self.assertIsNone(seams._fit_sigmas(mock.Mock(shape=(0,)), 6))
+
+    def test_none_rejected(self):
+        self.assertIsNone(seams._fit_sigmas(None, 6))
+
+    def test_plain_object_without_shape_rejected(self):
+        self.assertIsNone(seams._fit_sigmas("SIGMAS", 6))
+        self.assertIsNone(seams._fit_sigmas([1.0, 0.0], 2))
 
 
 @unittest.skipUnless(_comfy_available(), "ComfyUI stack not available (CPU-only interpreter)")
@@ -296,7 +332,7 @@ class BeforeSampleAuraFlowTests(unittest.TestCase):
 
     def test_shift_skipped_with_sigmas(self):
         ctx = {"model": "M0", "steps": 2, "sampler_preset": {"type": "auraflow", "shift": 3.1}}
-        with mock.patch.object(dispatch, "call_chain", return_value={"sigmas": [1.0, 0.0]}), \
+        with mock.patch.object(dispatch, "call_chain", return_value={"sigmas": mock.Mock(shape=(3,))}), \
                 mock.patch.object(seams, "ModelSamplingAuraFlow") as fake:
             out = seams.apply("before_sample", ctx)
         fake.return_value.patch_aura.assert_not_called()
