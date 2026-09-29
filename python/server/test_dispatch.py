@@ -265,6 +265,32 @@ class SeamsForTests(unittest.TestCase):
             self.assertEqual(dispatch._seams_for("p", object()), ["after_sample"])
 
 
+class ViggleSeamMigrationTests(unittest.TestCase):
+    """S6：Viggle 从 legacy capabilities 映射迁到 seams 直读（行为不变）。
+
+    数据声明 ``seams`` 优先；函数名仍为旧 ``sampling_plan``，靠 :func:`dispatch._fn_for`
+    的接缝名→旧函数名回退解析（D6/D7）。不 mock 全局 config，直接读仓库真实
+    ``Template/plugins.json``（未启用插件不加载重栈，见 QwenPluginTests）。
+    """
+
+    def setUp(self):
+        loader._MODULES.clear()
+        os.environ.pop(config.plugin_env_name(PLUGIN_ID), None)
+
+    def test_registry_entry_declares_seams_and_resolves_to_before_sample(self):
+        entry = loader.load_registry().get(PLUGIN_ID)
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.get("seams"), ["before_sample"])
+        # 迁移后 _seams_for 走 seams 直读，而非 capabilities → _LEGACY_CAPABILITY_MAP。
+        self.assertEqual(dispatch._seams_for(PLUGIN_ID, None, entry), ["before_sample"])
+
+    def test_before_sample_routes_to_legacy_sampling_plan_fn(self):
+        module, status = loader.load_plugin(PLUGIN_ID)
+        self.assertIsNotNone(module, status)
+        # 接缝名 before_sample 无同名函数 → 回退旧函数名 sampling_plan。
+        self.assertIs(dispatch._fn_for(module, "before_sample"), module.sampling_plan)
+
+
 class CallChainTests(unittest.TestCase):
     """S2 ``call_chain``：数组序链式、patch 累积、异常隔离、旧函数名别名。"""
 

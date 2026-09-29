@@ -7801,3 +7801,31 @@ invent a new identity.`
 - `dotnet test src\ZIV.AI.sln -c Release --no-build --filter "FullyQualifiedName!~Ipc"` → **747 通过 /
   0 失败**（未跑无过滤 dotnet test）。
 - 真机对照（headroom 各值 / 峰值 VRAM / thrash）由用户执行。
+
+## Viggle 插件接缝迁移（S6，2026-09-29，只增不改）
+
+> 把 qwen21-viggle-6step 的**声明路径**从 legacy capability 迁到 seam：数据文件与
+> `PLUGIN_META` 均加 `"seams": ["before_sample"]`，函数名**保留** `sampling_plan`，
+> 靠 `plugins.dispatch._fn_for` 的「接缝名 → 旧函数名」回退解析。**行为不变**（只改声明）。
+
+### 改动
+- `Template/plugins.json`：qwen21-viggle-6step 条目在 `capabilities` 旁加 `"seams": ["before_sample"]`；
+  `capabilities` 保留不动（兼容期双声明）。
+- `plugin_packs/qwen21-viggle-6step/__init__.py`：`PLUGIN_META` 加 `"seams": ["before_sample"]`
+  （纯元数据同步；`dispatch._seams_for` 明确不读 `PLUGIN_META`）。
+- 函数名仍是模块级 `sampling_plan`，未改。
+
+### 解析链（为什么行为不变）
+- `_seams_for`：`entry["seams"]` 优先，返回 `["before_sample"]`，不再走 `_LEGACY_CAPABILITY_MAP`
+  （`sampling_plan → before_sample`）；两条路径结果同一接缝。
+- `_fn_for(module, "before_sample")`：先找 `module.before_sample`（不存在）→ 回退
+  `_LEGACY_FN_BY_SEAM["before_sample"] = "sampling_plan"` → 命中，返回原函数。
+- 因此 `call_chain("before_sample", ctx)` 路由结果与迁移前完全一致；legacy 回退路径**保留**。
+
+### 验证（Z29 / Z30，CPU-only）
+- `python -m py_compile plugins/dispatch.py` + `py_compile plugin_packs/qwen21-viggle-6step/__init__.py`：exit 0。
+- `python -m unittest test_dispatch test_seams test_plugins`：**114 通过 / 0 失败，3 skip**（含新增 2 项）。
+- `dotnet build src\ZIV.AI.sln -c Release`：**0 错误 / 0 警告**。
+- `dotnet test src\ZivAiEditor.Tests\ZivAiEditor.Tests.csproj -c Release --no-build --filter "FullyQualifiedName!~Ipc"`：
+  **749 通过 / 0 失败**（未跑无过滤 dotnet test）。
+- **未跑 GPU**（行为不变，无需真机）。
