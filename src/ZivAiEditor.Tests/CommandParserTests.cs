@@ -70,7 +70,7 @@ public class CommandParserTests
     {
         var parser = ParserWithoutFile();
 
-        var missing = await parser.ParseAsync("/换背景", SessionWithImage());
+        var missing = await parser.ParseAsync("/换装", SessionWithImage());
         var extra = await parser.ParseAsync("/去水印 多余参数", SessionWithImage());
 
         Assert.False(missing.Success);
@@ -400,12 +400,13 @@ public class CommandParserTests
     [Fact]
     public async Task SlashCommand_Variadic_Empty_Returns_Error()
     {
+        // /换背景 opts into allow_empty_prompt; a variadic command that does NOT keeps the guard.
         var parser = ParserWithoutFile();
 
-        var result = await parser.ParseAsync("/换背景", SessionWithImage(), 1, resolution: null);
+        var result = await parser.ParseAsync("/换装", SessionWithImage(), 1, resolution: null);
 
         Assert.False(result.Success);
-        Assert.Contains("你要换成什么背景", result.ErrorMessage);
+        Assert.Contains("你要换成什么服装", result.ErrorMessage);
     }
 
     [Fact]
@@ -420,14 +421,14 @@ public class CommandParserTests
     }
 
     [Fact]
-    public async Task SlashCommand_ChangeBackground_Without_Description_Hints_Example()
+    public async Task SlashCommand_ChangeClothing_Without_Description_Hints_Example()
     {
         var parser = ParserWithoutFile();
 
-        var result = await parser.ParseAsync("/换背景", SessionWithImage(), 1, resolution: null);
+        var result = await parser.ParseAsync("/换装", SessionWithImage(), 1, resolution: null);
 
         Assert.False(result.Success);
-        Assert.Contains("例如：/换背景 森林", result.ErrorMessage);
+        Assert.Contains("例如：/换装 红色连衣裙", result.ErrorMessage);
     }
 
     [Fact]

@@ -5841,3 +5841,12 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 触发时机：本步
 - 注：内建命令集 `CommandParser.BuiltIn.cs` 的 `/换背景` 未同步该标识（不在本步允许清单）；
   生产走 `commands.json`（已加），内建集仅在无数据文件时兜底。
+
+### 修正：BuiltIn.cs /换背景 同步 allow_empty_prompt
+- 背景：eddd05b 在 Template/commands.json 加 allow_empty_prompt:true，
+  但 CommandParser.BuiltIn.cs 内建集未同步（该文件不在允许清单）。
+  → 无 commands.json 时（内建兜底），/换背景 空描述仍被拒。
+- 修复：BuiltIn.cs 的 /换背景 加 AllowEmptyPrompt = true，与数据文件一致。
+- 生效范围：仅 /换背景（其它 variadic 命令不改）
+- 回归触发条件：内建集与 commands.json 再次不一致
+- 触发时机：本步

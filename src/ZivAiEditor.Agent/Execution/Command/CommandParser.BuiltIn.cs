@@ -18,6 +18,7 @@ public sealed partial class CommandParser
             Name = "/换背景",
             Params = new List<string> { "description" },
             Variadic = true,
+            AllowEmptyPrompt = true,
             Tool = "QW21edit",
             DefaultVariant = "single",
             Variants = new Dictionary<string, string>(StringComparer.Ordinal)
