@@ -5707,3 +5707,46 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
     != B3_new（53DF2DB7…）→ 修复生效
 - 限制：新金标仅在「上述替代图 + 上述参数」下有效。
   若将来原 IMG2 恢复，须以原图重取并覆盖本段。
+
+### 更正：Z-035 前提不成立（sampler_name 实际生效）
+- 背景：Z-035 原述「sigmas 分支的 sampler_name 读 ctx 顶层，seams 不写顶层
+  → sigmas 插件的 sampler_name 不生效」。
+- 代码核实（2026-09-29 T5 调查）：
+  - sampler_name 在 seams 白名单（seams.py:56）
+  - seams._merge（seams.py:160）会把插件 patch 的 sampler_name 写入
+    顶层 merged["sampler_name"]
+  - plugin_sampling.py:99 读 plan.get("sampler_name")（plan=ctx）
+    → 实际拿到插件值
+- 结论：Z-035 原描述与代码相反。sampler_name 在 sigmas 分支**生效**。
+  viggle 的 "euler" 与 config.SAMPLER_NAME="euler" 同串是巧合，
+  但不是「失效」。
+- 真正残留（推断，更窄）：sigmas 插件**省略** sampler_name 而
+  models.json 有 profile 值时，sigmas 分支读不到 policy-resolved 值。
+- Z-035 状态：原描述作废；残留窄版待后续独立步（若未来出现触发场景）。
+
+### 更正：Z-026 描述修正（PLUGIN_META 为死元数据）
+- 背景：Z-026 原述「plugins.json ↔ PLUGIN_META 无跨语言校验
+  → C# 显示 vs Python 行为分叉」。
+- 代码核实（2026-09-29 T2 调查）：
+  - PLUGIN_META 当前零生产消费者：C# 不读（PluginRegistry.cs:75-112
+    只解析 JSON）；Python 不读（loader.py:59-88 / dispatch.py:88/93
+    明写不读 META）；「检查安装」仅查目录（SettingsWindow.Plugins.cs:206-209）
+  - 故不一致无运行期后果，「C# 显示 vs Python 行为分叉」不成立
+- 真正缺口：**plugins.json ↔ 插件模块函数名**不一致
+  → call_chain 静默跳过（dispatch.py:147-148，无 warning）→ 静默失效
+- 已知漂移：DEVLOG:7808 / FROZEN:5533 称 META 已加 "seams"，
+  实际 __init__.py:27-32 无该键（无消费，无影响）
+- Z-026 状态：原描述修正为「plugins.json↔模块函数名校验缺失」；
+  修复触发条件 = 引入第二个插件或出现静默失效。
+
+### 补充：Z-033 调查结论（当前无真实 bug）
+- 背景：Z-033 登记 4 个 C# 属性活引用点。
+- 代码核实（2026-09-29 T2 调查）：
+  - PluginRegistry.cs:114 All=>_plugins：ctor 后零写，UI 换实例 → 无害
+  - CommandParser.cs:82 Commands=>_commands：readonly，无别名 → 无害
+  - AppContext.cs:126：纯转发 → 无害
+  - ImageImportBar.axaml.cs:48 Paths=>_list.Paths：消费者均在 Clear
+    前完成（Send.cs:207 ToArray / :233 经 ChatFlowRules 快照 / :238；
+    Import.cs:74 先 .ToArray()）→ 有 mutate 但当前无害
+- 结论：4 点当前均无真实 bug；点 4 是残留易碎用法（同 Step A 模式）。
+- Z-033 状态：保持挂账；若未来消费者改变 Clear 时序 → 触发。
