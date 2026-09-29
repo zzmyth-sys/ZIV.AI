@@ -5815,3 +5815,15 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 生效：加载/调用期日志可见（zivai.server WARNING）。
 - Z-026 状态：已修（原描述已更正）。
 - 回归触发条件：插件声明 seam 但模块函数缺失/改名。
+
+### 小挂账处理（Z-013 / Z-014 / Z-015）
+- Z-013（`MaskSpec` 注释不符）：经核 `MaskSpec.cs` 注释已含「Revised from …」
+  （`Width`/`Height`/`FeatherPx`），与当前代码一致 → **已闭环**，无需再改。
+- Z-014（脏标记用 mtime 代理）：`SessionSignature.cs:116` 以
+  `LastWriteTimeUtc.Ticks`+`Length` 作源图签名（驱动 `IsDirty`）。改内容哈希需
+  SHA256 + 缓存（dirty 检查频繁，直哈希大图退化）→ 改动面 >30 行 → **保持挂账**。
+- Z-015（打包/参考/用图拷贝「无条件记名」）：`CopyReferenceImages` /
+  `CopyUsedImages`（`SessionStore.Images.cs:44-45/123-124`）在 `CopyNodeImage`
+  失败后仍 `names.Add`；同模式亦见 pack/crop/mask（`SessionStore.cs:224/232/267`）
+  → 多处改 + 测试，改动面 >30 行 → **保持挂账**。
+  （R4 已防 `Remember` dangling；下游 `SessionLoader` 加载时忽略缺失 + warning，危害有限。）
