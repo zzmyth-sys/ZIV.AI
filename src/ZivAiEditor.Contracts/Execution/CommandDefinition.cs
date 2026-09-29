@@ -34,6 +34,15 @@ public sealed class CommandDefinition
     [JsonPropertyName("variadic")]
     public bool Variadic { get; init; }
 
+    /// <summary>
+    /// When <c>true</c>, a variadic command may be invoked with fewer than the declared parameters —
+    /// the missing trailing parameter is filled with an empty string (e.g. <c>/换背景</c> with a
+    /// reference image and no description). Default <c>false</c> keeps the "argument required" guard.
+    /// Serialized by name (JSON <c>allow_empty_prompt</c>).
+    /// </summary>
+    [JsonPropertyName("allow_empty_prompt")]
+    public bool AllowEmptyPrompt { get; init; }
+
     /// <summary>Text-to-image: the plan never carries a main image, regardless of the session.</summary>
     [JsonPropertyName("t2i")]
     public bool T2i { get; init; }

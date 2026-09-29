@@ -431,6 +431,39 @@ public class CommandParserTests
     }
 
     [Fact]
+    public async Task SlashCommand_AllowEmptyPrompt_Parses_Without_Description()
+    {
+        // A command that opts in via allow_empty_prompt parses with no description; the
+        // missing-argument guard is skipped (the tool layer decides based on references).
+        var directory = Path.Combine(Path.GetTempPath(), "zivai_aep_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "commands.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "version": "1.1",
+              "commands": [
+                { "name": "/换背景", "params": ["description"], "variadic": true,
+                  "allow_empty_prompt": true, "tool": "QW21edit", "defaultVariant": "single",
+                  "variants": { "single": "Replace the background of <image1> with: {description}." } }
+              ]
+            }
+            """);
+
+        try
+        {
+            var parser = new CommandParser(path);
+
+            var result = await parser.ParseAsync("/换背景", SessionWithImage(), 1, resolution: null);
+
+            Assert.True(result.Success);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Variadic_Command_Without_Params_Reports_Config_Error()
     {
         // A malformed command (variadic but declares no parameter) must report a config error

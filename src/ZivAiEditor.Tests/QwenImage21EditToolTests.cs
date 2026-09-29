@@ -73,6 +73,51 @@ public class QwenImage21EditToolTests
     }
 
     [Fact]
+    public async Task Execute_EmptyPrompt_Without_References_Fails()
+    {
+        var client = new FakeInferenceClient();
+        var tool = new QwenImage21EditTool(client);
+        var input = new ToolInput
+        {
+            StepId = "s1",
+            MainImagePath = @"C:\img\main.png",
+            Parameters = new Dictionary<string, string>
+            {
+                ["prompt"] = "",
+                ["output_path"] = @"C:\out\r.png",
+            },
+        };
+
+        var result = await tool.ExecuteAsync(input);
+
+        Assert.False(result.Success);
+        Assert.Null(client.LastRequest);
+    }
+
+    [Fact]
+    public async Task Execute_EmptyPrompt_With_Reference_Passes()
+    {
+        var client = new FakeInferenceClient();
+        var tool = new QwenImage21EditTool(client);
+        var input = new ToolInput
+        {
+            StepId = "s1",
+            MainImagePath = @"C:\img\main.png",
+            AdditionalImages = new[] { @"C:\img\ref.png" },
+            Parameters = new Dictionary<string, string>
+            {
+                ["prompt"] = "",
+                ["output_path"] = @"C:\out\r.png",
+            },
+        };
+
+        var result = await tool.ExecuteAsync(input);
+
+        Assert.True(result.Success);
+        Assert.NotNull(client.LastRequest);
+    }
+
+    [Fact]
     public async Task Execute_WithoutOutputPath_Derives_From_WorkingDirectory()
     {
         var client = new FakeInferenceClient();

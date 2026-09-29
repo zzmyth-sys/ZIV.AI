@@ -5827,3 +5827,17 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
   失败后仍 `names.Add`；同模式亦见 pack/crop/mask（`SessionStore.cs:224/232/267`）
   → 多处改 + 测试，改动面 >30 行 → **保持挂账**。
   （R4 已防 `Remember` dangling；下游 `SessionLoader` 加载时忽略缺失 + warning，危害有限。）
+
+### 特性：有参考图时 prompt 可空（allow_empty_prompt）
+- 背景：CommandParser.cs:316-320 解析层守卫 + QwenImage21EditTool.cs:70-74
+  工具层守卫均要求 prompt 非空；解析层在 refs 回填之前执行，无法感知「有图」。
+- 方案：命令级标识 allow_empty_prompt（数据驱动）
+  - Template/commands.json：/换背景 条目加 "allow_empty_prompt": true
+  - CommandDefinition 加可选属性（默认 false，向后兼容）
+  - CommandParser 按标识放宽解析层守卫
+  - QwenImage21EditTool 工具层兜底：prompt 空 + 无 additional_images → 仍 Fail
+- 生效范围：仅标记 allow_empty_prompt:true 的命令（当前 /换背景）
+- 回归触发条件：命令数据加该标识但工具层未同步兜底
+- 触发时机：本步
+- 注：内建命令集 `CommandParser.BuiltIn.cs` 的 `/换背景` 未同步该标识（不在本步允许清单）；
+  生产走 `commands.json`（已加），内建集仅在无数据文件时兜底。

@@ -313,8 +313,9 @@ public sealed partial class CommandParser : ICommandParser
             return null;
         }
 
-        // R1: a variadic command requires at least the declared parameters (non-empty input).
-        if (rawArgs.Count < command.Params.Count)
+        // R1: a variadic command requires at least the declared parameters (non-empty input),
+        // unless it opts in via allow_empty_prompt — then a missing trailing parameter is "".
+        if (rawArgs.Count < command.Params.Count && !command.AllowEmptyPrompt)
         {
             return null;
         }
@@ -323,7 +324,7 @@ public sealed partial class CommandParser : ICommandParser
         var args = new string[command.Params.Count];
         for (var i = 0; i < fixedCount; i++)
         {
-            args[i] = rawArgs[i];
+            args[i] = i < rawArgs.Count ? rawArgs[i] : "";
         }
 
         args[fixedCount] = string.Join(' ', rawArgs.Skip(fixedCount));

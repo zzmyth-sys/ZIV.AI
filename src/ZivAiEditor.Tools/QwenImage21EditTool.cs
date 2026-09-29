@@ -68,9 +68,14 @@ public sealed class QwenImage21EditTool : IEditTool
         var parameters = input.Parameters;
 
         var prompt = ToolParameters.GetString(parameters, "prompt") ?? "";
-        if (string.IsNullOrWhiteSpace(prompt))
+        var hasReferences = !string.IsNullOrWhiteSpace(input.ReferenceImagePath)
+            || input.AdditionalImages.Count > 0;
+        if (string.IsNullOrWhiteSpace(prompt) && !hasReferences)
         {
-            return Failure(input.StepId, "QW21edit requires a non-empty 'prompt' parameter.", started.Elapsed);
+            return Failure(
+                input.StepId,
+                "QW21edit requires a non-empty 'prompt' parameter or at least one reference image.",
+                started.Elapsed);
         }
 
         var op = string.IsNullOrWhiteSpace(input.MainImagePath)
