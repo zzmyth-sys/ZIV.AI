@@ -228,6 +228,18 @@ SAGE_ATTENTION = os.environ.get("ZIV_AI_SAGE_ATTENTION", "1") not in ("", "0", "
 #   传统 ModelPatcher（粗粒度 offload、卸载不彻底），16GB 卡上高分辨率会冲顶（实测 side 1536）。
 #   启用后权重由 vbar 按需换入换出，与官方流一致。回退：设 ZIV_AI_DYNAMIC_VRAM=0（或 false）。
 DYNAMIC_VRAM = os.environ.get("ZIV_AI_DYNAMIC_VRAM", "1") not in ("", "0", "false", "False")
+
+# ---- host-RAM / 共享显存守卫（mem_guard）----
+# 专用 VRAM 打满后，Windows 会把权重外溢到「共享 GPU 内存」(= 系统 RAM)，DynamicVRAM 还会额外把
+# 权重 pin 在 host RAM（≈2× 模型）。二者叠加会让 host RAM / commit 激增，严重时整机卡死。
+# 采样每一步检查：可用物理内存 / 可用 commit 低于下限、或本进程 RSS 高于上限 → 当作 OOM 中止
+# （触发分辨率降级），在系统崩之前干净退出。任一阈值置 0 = 关闭该项；全部为 0 = 守卫整体关闭。
+# 回退方式：设 ZIV_AI_MEM_GUARD=0。
+GUARD_ENABLED = os.environ.get("ZIV_AI_MEM_GUARD", "1") not in ("", "0", "false", "False")
+GUARD_MIN_FREE_RAM_GB = float(os.environ.get("ZIV_AI_MEM_GUARD_MIN_FREE_RAM_GB", "4"))
+GUARD_MIN_FREE_COMMIT_GB = float(os.environ.get("ZIV_AI_MEM_GUARD_MIN_FREE_COMMIT_GB", "4"))
+# 0 = 不检查进程 RSS（默认关：不同机器/模型差异大，误杀风险高）。
+GUARD_MAX_RSS_GB = float(os.environ.get("ZIV_AI_MEM_GUARD_MAX_RSS_GB", "0"))
 # ---- 启动预热（优化 §10.2.1）----
 # 进程连上管道后，在后台线程 import comfy/torch + DynamicVRAM init（纯 CPU、不加载权重、不占显存），
 # 把首次 submit 的 ~4.1s 移出用户等待路径。C# 侧可在 App 启动时提前拉起本进程（[backend] prewarm）。

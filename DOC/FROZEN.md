@@ -5431,3 +5431,41 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 非 GPU filter 全量（排除 `BackendTimeoutTests` / `Ipc*` / `PythonProcessManagerTests`）→ **747 通过 / 0 失败**（729 + 新增 18）。
 - Python：`py_compile config.py loras.py plugins/loader.py` → **0**；`test_loras` **21**（原 15）、`test_plugins` **29**（原 24）全通过。
 - 未动 IPC 契约 / 命令集 / `PythonProcessManager` / `pipeline.py` / `handlers.py` / TE-Speed / WD14；未 commit。
+
+## 登记（2026-09-29）：接缝系统 S3 `_fit_sigmas` 语义（回归修复）
+
+### D1 `seams._fit_sigmas`：只挡非法值，**不比对** `steps`
+
+- **位置**：`python/server/seams.py`（`_fit_sigmas`，S3 施力段）。
+- **语义（冻结）**：plan `sigmas` 合法性 = 非 `None` + 1-D（`len(shape)==1`）+ 长度 > 0。
+  - 合法 → **原样返回**，不因长度与 `steps` 不等而拒绝。
+  - 非法（非 1-D / 空 / 无 `shape`）→ `warning` + 返回 `None`（下游走 legacy 采样器路径）。
+- **步数口径**：采样步数由 **`len(sigmas)`** 决定（`comfy.sample.sample_custom` 语义）；
+  `steps` 仅作进度显示（`plugin_sampling.report_steps`），**不参与** sigmas 校验。
+- **为什么（错误假设修正）**：diffusers 惯例是 `N` 个节点 sigmas + 末尾 0 = **`N+1`** 个元素
+  （如 Viggle `steps=6` ↔ 7 个 sigmas）。S3 原实现校验 `len(sigmas) == steps` → `7 != 6` → 误吞
+  sigmas → 退回 40 步 + AuraFlow → 1536 显存冲顶。**已修**（D-2026-09-29）。
+- **兼容性**：与 S3 前（batch 3）行为一致——`plugin_sampling.plan_sigmas` 从无长度校验，sigmas 原样进
+  `sample_custom`。
+- **契约不变**：不改 `seams.SEAMS` / `apply` 签名 / `dispatch.py` / `plugin_sampling.sample` 的
+  `sigmas` 参数语义；仅收紧「非法值」判定。
+
+## 登记（2026-09-29）：host-RAM 守卫阈值与语义（mem_guard）
+
+### E1 `mem_guard` 越线判定（冻结）
+- **位置**：`python/server/mem_guard.py`；总开关 `config.GUARD_ENABLED`（env `ZIV_AI_MEM_GUARD`，默认 1）。
+- **检查时机**：`pipeline._run_once` 的 `moving_to_gpu` 前 1 次 + sampler callback **每步** 1 次。
+- **命中任一 → 抛 `mem_guard.HostMemoryError`**（`RuntimeError` 子类）→ 被 `_oom_types()` 当作 OOM
+  → `run()` 触发分辨率降级（1024→768→640）并 `_free_vram()`，**在系统崩之前**干净退出：
+  - 可用物理内存 < `GUARD_MIN_FREE_RAM_GB`（env `ZIV_AI_MEM_GUARD_MIN_FREE_RAM_GB`，默认 **4 GB**）；
+  - 可用 commit / pagefile < `GUARD_MIN_FREE_COMMIT_GB`（env `..._MIN_FREE_COMMIT_GB`，默认 **4 GB**）；
+  - 本进程 RSS > `GUARD_MAX_RSS_GB`（env `..._MAX_RSS_GB`，默认 **0 = 不检查**，避免误杀）。
+- **平台**：仅 Windows（`os.name == "nt"`）生效；非 Windows 全部 no-op（返回 `None`，不抛）。
+- **依赖**：纯 `ctypes`（stdlib）；**无新 NuGet / Python 依赖**；不改 IPC / 契约。
+
+### E2 `_oom_types()` 兜底补全（冻结）
+- `pipeline._oom_types()` 现含：`mm.OOM_EXCEPTION`、`torch.cuda.OutOfMemoryError`、
+  **`torch.AcceleratorError`（torch>=2.4 的 `CUDA error: out of memory` 包装）**、
+  **`mem_guard.HostMemoryError`**。
+- 目的：host/共享显存溢出与 AcceleratorError 都能走分辨率降级，而不是冒泡硬崩（原先 `AcceleratorError`
+  不在列，见 DEVLOG Step 9C.6-E 遗留）。

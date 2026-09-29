@@ -7692,3 +7692,82 @@ invent a new identity.`
 - 「一个插件一条 registry entry + 单模块」的两条隐性不变量（**数组序**与 `seams` / `capabilities`
   互斥）以断言形式记录，未加显式校验（避免把 valid 配置变成失败）。
 - 未 commit（用户决定）。
+
+## S3 回归修复：`_fit_sigmas` 误吞 Viggle sigmas（2026-09-29，只增）
+
+> 现象：启用 Viggle 6-step + `/换背景`（多图）+ 1536 → 显存冲顶。诊断（只读）定位为 S3（`4fd0d94`）
+> 引入的回归，非「Viggle + 多图叠加」本身。
+
+### A · 根因（诊断结论）
+- Viggle `sampling_plan` 返回 `steps=6` 但 `sigmas` 为 **7** 个元素（diffusers 惯例：`N` 节点 +
+  末尾 0；`plugin_packs/qwen21-viggle-6step/__init__.py:42` / `:125-133` / `:218`）。
+- S3 的 `seams._fit_sigmas`（原 `seams.py:95`）校验 `int(sigmas.shape[0]) == int(steps)` → `7 != 6`
+  → **吞掉 sigmas**（返回 None）。
+- 后果链：`sigmas=None` → `report_steps(ctx, 40)` 返回 40（`plugin_sampling.py:151-153`）→
+  `sample_from` 走 `legacy_sample`（`plugin_sampling.py:109-114`）= `comfy.sample.sample` **40 步 +
+  AuraFlow 施力**，且 Viggle LoRA 侧支路仍挂 → 1536 显存冲顶。
+- S3 前无此校验：7 个 sigmas 原样进 `sample_custom`（步数 = `len(sigmas)` = **7**，`skip_shift=True`
+  跳过 AuraFlow）→ 不爆。
+
+### B · 修复（`seams._fit_sigmas` 重写，`python/server/seams.py:87-110`）
+- **保留**：非 `None` / 是 1-D（`len(shape)==1`）/ 长度 > 0 的合法性检查。
+- **删除**：`len(sigmas) == steps` 的比对（错误假设：sigmas 数 == 步数）。
+- 非法（非 1-D / 空 / 无 `shape`）→ `warning` + 返回 `None`（走 legacy 采样器）；合法 → **原样返回**。
+- `steps` 语义澄清：仅作进度显示（`report_steps`），**不参与** sigmas 校验；采样步数由
+  `len(sigmas)` 决定（`sample_custom` 语义，与 S3 前一致）。
+- `_apply_before_sample` docstring 同步（`seams.py:119`）。
+
+### C · 测试（补盲区）
+- `python/server/test_seams.py`：新增 `FitSigmasTests`（7 例）：`7 sigmas + steps=6` 通过 / 长度相等
+  通过 / 任意正整数长度通过 / 2-D 拒绝 / 空拒绝 / `None` 拒绝 / 无 `shape` 拒绝（字符串、list）。
+  新增 `test_viggle_shape_sigmas_not_swallowed`（reducer 级回归守卫）。**删除**过时的
+  `test_sigmas_token_count_mismatch_ignored`（该行为即 bug）。
+- `python/server/test_plugin_pipeline.py`：原 `_enable()` 桩 `_build_sigmas = lambda: "SIGMAS"`（裸字符串
+  无 `.shape`）→ 现被 `_fit_sigmas` 拒绝，**曾掩盖此回归**；改为 `mock.Mock(shape=(7,))`（真实 7 元素
+  1-D）。新增 `test_enabled_edit_sigmas_not_swallowed_by_fit_sigmas`（断言走 `sample_custom` 且
+  `len(sigmas)==7`、AuraFlow 未施力）与 `test_enabled_edit_matching_sigmas_still_custom`（6/6）。
+
+### D · 验证（Z29 / Z30：CPU-only，无 GPU、不启动后端 / App）
+- `python -m py_compile seams.py plugin_sampling.py` → exit 0。
+- `python -m unittest test_seams test_dispatch`（cwd `python/server`）→ **83 通过 / 0 失败（3 skip）**。
+- `python -m unittest test_plugin_pipeline` → **8 通过（全 skip：GPU 端到端）**，import 干净。
+- `python -m unittest discover -p "test_*.py"` → **194 通过 / 0 失败（11 skip）**。
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 警告 / 0 错误**。
+- `dotnet test src\ZIV.AI.sln -c Release --no-build --filter "FullyQualifiedName!~Ipc"` → **747 通过 /
+  0 失败**（未跑无过滤 dotnet test）。
+- **未跑 GPU**：真机验收（Viggle + `/换背景` + 1536 不爆、`_cache/backend.log` 步数=7）由用户执行。
+
+### E · 未决 / 遗留
+- 真机步数以 `_cache/backend.log` 为准（`sample_custom` 按 `len(sigmas)` 采样为 comfy 语义推断，
+  未在 GPU host 现场核对）。
+- 未 commit（用户决定）。
+
+## host-RAM / 共享显存守卫（mem_guard）+ OOM 兜底补全（2026-09-29，只增）
+
+### 背景（真机诊断）
+- 现象：Viggle + 单图 1536 编辑，采样中 host RAM / 进程 RSS 激增（RSS 31.8GB、`resv` 39–43GB），
+  整机卡死只能强关。
+- 根因：专用 VRAM 打满后 Windows 外溢到「共享 GPU 内存」= **系统 RAM**；DynamicVRAM 另把权重 pin
+  在 host（`comfy/model_management.py` `pinned_hostbuf_size = min(size, ram*0.4)*2`，96GB 机 ≈ 38GB
+  上限）。二者叠加吃光内存。
+- 且无兜底：`pipeline._oom_types()` 只含 `mm.OOM_EXCEPTION` + `torch.cuda.OutOfMemoryError`
+  （**不含 `AcceleratorError`**，也**不含 comfy_aimdo 的 `HostBuffer` RuntimeError**）；采样每步都发
+  progress → C# 侧 60s watchdog 永不触发 → 一直 thrash 到把机器拖死。
+
+### 改动
+- 新 `python/server/mem_guard.py`（纯 `ctypes`，顶层无 torch / comfy；非 Windows no-op）：
+  `snapshot()` / `check()` / `enforce()` + `HostMemoryError(RuntimeError)`。
+- `python/server/config.py`：`GUARD_ENABLED`（env `ZIV_AI_MEM_GUARD`，默认 1）/
+  `GUARD_MIN_FREE_RAM_GB`（默认 4）/ `GUARD_MIN_FREE_COMMIT_GB`（默认 4）/ `GUARD_MAX_RSS_GB`（默认 0=关）。
+- `python/server/pipeline.py`：`import mem_guard`；`_run_once` 的 `moving_to_gpu` 前 + sampler callback
+  每步调 `mem_guard.enforce()`；`_oom_types()` 追加 `mem_guard.HostMemoryError` 与 `torch.AcceleratorError`。
+- 新 `python/server/test_mem_guard.py`（12 例，注入 snapshot 测阈值逻辑）。
+- 验证 harness：`E:\temp\opencode\guard.ps1`（外部看门狗，轮询目标进程 RSS + 系统可用 RAM/commit，
+  越线 `taskkill /T /F` 整棵进程树）。
+
+### 验证（Z29 / Z30：CPU-only）
+- `python -m py_compile mem_guard.py pipeline.py config.py` → exit 0。
+- `python -m unittest test_mem_guard` → 12 通过 / 0 失败。
+- `python -m unittest discover -p "test_*.py"` → **206 通过 / 0 失败（11 skip）**。
+- `mem_guard.snapshot()` 真机只读实测：total 95.9GB / avail 86.4GB / commit 131.2GB / RSS 正常。
+- **未跑 GPU**：真机守卫效果待用户按需验证（且必须带外部看门狗）。

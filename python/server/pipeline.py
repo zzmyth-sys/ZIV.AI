@@ -24,6 +24,7 @@ import sys
 import time
 
 import config
+import mem_guard
 import model_loader
 import models
 import multi_image
@@ -277,11 +278,15 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
     # First inference triggers ComfyUI's lazy `load_models_gpu()`; announce the
     # sampling stage before sampling so that cost shows up client-side.
     _emit(on_progress, 0, steps, 0.0, "sampling", "moving_to_gpu")
+    mem_guard.enforce()  # pre-flight: don't start the (weight-staging) first step already over budget
 
     def callback(step, x0, x, total_steps):
         if poll_cancel is not None:
             poll_cancel()
         mm.throw_exception_if_processing_interrupted()
+        # host-RAM guard: bail out at the top of each step, before DynamicVRAM thrashes shared GPU
+        # memory / host RAM to the point of freezing the machine (mem_guard, no-op off Windows).
+        mem_guard.enforce()
         total = total_steps or steps
         _emit(
             on_progress,
@@ -394,8 +399,16 @@ def _oom_types():
         import torch
 
         types.append(torch.cuda.OutOfMemoryError)
+        # torch >= 2.4 wraps some CUDA OOMs as AcceleratorError ("CUDA error: out of memory");
+        # without it the error bubbles past the resolution fallback (see DEVLOG Step 9C.6-E).
+        accel = getattr(torch, "AcceleratorError", None)
+        if isinstance(accel, type):
+            types.append(accel)
     except Exception:
         pass
+    # host-RAM guard abort: treated as OOM so `run()` degrades resolution instead of letting the
+    # comfy_aimdo host buffer / shared GPU memory blow up the machine.
+    types.append(mem_guard.HostMemoryError)
     return tuple(set(types)) or (RuntimeError,)
 
 
