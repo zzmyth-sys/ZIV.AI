@@ -5806,3 +5806,12 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 生效方式：下次任务（dispatch 每任务重读注册表）
 - 回归触发条件：settings.ini 写入格式变化；插件 id 大小写规则变化
 - 触发时机：本步
+
+### 更新：Z-026 修复（plugins.json ↔ 模块函数名校验）
+- 背景：Z-026 原描述为「plugins.json ↔ PLUGIN_META 无跨语言校验」，
+  经 T2 调查更正为「plugins.json ↔ 模块函数名不一致 → 静默跳过」。
+- 修复：dispatch.call_chain 声明的 seam 无对应可调用对象时，
+  由静默 continue 改为 warning（插件名 + seam）。
+- 生效：加载/调用期日志可见（zivai.server WARNING）。
+- Z-026 状态：已修（原描述已更正）。
+- 回归触发条件：插件声明 seam 但模块函数缺失/改名。

@@ -145,6 +145,11 @@ def call_chain(seam, context):
             continue
         fn = _fn_for(module, seam)
         if not callable(fn):
+            _LOG.warning(
+                "plugin %r declares seam %r but exposes no callable; skipped",
+                plugin_id,
+                seam,
+            )
             continue
         try:
             patch = fn(dict(context))

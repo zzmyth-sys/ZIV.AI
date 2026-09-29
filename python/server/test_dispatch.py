@@ -399,6 +399,19 @@ class CallChainTests(unittest.TestCase):
         self.assertEqual(out["prompt"], "y")
         self.assertEqual(ctx, {"prompt": "x"})
 
+    def test_chain_warns_when_declared_seam_has_no_callable(self):
+        # Z-026：声明了 seam 但模块无对应可调用对象 → warning（不再静默跳过）。
+        self._make_plugin("ghost", "MARKER = 1\n")
+        self._install([
+            {"id": "ghost", "dir": "plugins/ghost", "enabled_by_default": True,
+             "seams": ["before_sample"]},
+        ])
+        with self.assertLogs("zivai.server", level="WARNING") as captured:
+            out = dispatch.call_chain("before_sample", {"steps": 40})
+        self.assertEqual(out, {"steps": 40})
+        self.assertTrue(any("ghost" in line for line in captured.output))
+        self.assertTrue(any("before_sample" in line for line in captured.output))
+
     def test_chain_aggregates_cleanups_from_multiple_plugins(self):
         self._make_plugin(
             "c1", "def before_sample(ctx):\n    return {'cleanup': lambda: 'c1'}\n"
