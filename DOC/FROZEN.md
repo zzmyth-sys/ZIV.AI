@@ -5638,3 +5638,23 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 独立于 Z-034（Z-034 是 legacy 分支；本条是 sigmas 分支）。
 - 回归触发条件：出现「sigmas 插件希望显式覆盖 sampler_name」的场景。
 - 触发时机：后续独立步。
+
+### 修正：test_seams.BeforeSampleAuraFlowTests mock 失配 + Z-027 债务标注
+- 背景：失配自 S3（4fd0d94）引入——seams.py:193 采用函数内懒 import
+  （from comfy_extras.nodes_model_advanced import ModelSamplingAuraFlow），
+  但 test_seams.py:327/336/344 误用 mock.patch.object(seams, "ModelSamplingAuraFlow")，
+  seams 模块级无此属性 → 3 ERROR（GPU-host 环境）；
+  CPU 环境被 @skipUnless 掩盖。
+- 修复 1：3 处 mock 目标改为
+  mock.patch("comfy_extras.nodes_model_advanced.ModelSamplingAuraFlow")。
+  验证：GPU-host 环境 3 ERROR → 0；CPU 环境 skip 不变。
+- 修复 2（债务标注）：mock 修复后暴露 2 个测试 FAIL
+  （test_shift_applied_without_sigmas / test_shift_skipped_with_sigmas），
+  期望与实现相反。此矛盾即 Z-027（skip_shift 默认值疑似倒置）。
+  本步给 2 个测试加 @unittest.expectedFailure + 注释，指向 Z-027。
+  不加 skip（避免回到掩盖状态）；行为一旦改变会报 unexpected success。
+- 待办：Z-027 修复（改 sampling_policy + 重取 B3 金标）属独立步。
+- 教训：mock 目标必须与被测代码实际的 import 路径一致；
+  函数内懒 import 时模块级属性 patch 无效。
+  另：@skipUnless 会掩盖 mock 失配 + 语义失配，
+  写 GPU-host 测试时应至少跑一次真环境。
