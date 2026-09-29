@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 
-from . import gpu, runner, verify
+from . import batch, gpu, runner, verify
 
 
 def build_parser():
@@ -49,6 +49,15 @@ def build_parser():
         action="store_true",
         help="caller has obtained explicit user consent (Z30)",
     )
+
+    bt = sub.add_parser("batch", help="run a JSON list of scenarios")
+    bt.add_argument("list_file")
+    bt.add_argument("--out-dir", dest="out_dir", default=batch.DEFAULT_OUT_DIR)
+    bt.add_argument(
+        "--yes",
+        action="store_true",
+        help="caller has obtained explicit user consent (Z30)",
+    )
     return parser
 
 
@@ -77,6 +86,19 @@ def main(argv=None):
             out_dir=args.out_dir,
         )
         print(json.dumps(verdict, ensure_ascii=False, indent=2))
+        return code
+
+    if args.command == "batch":
+        try:
+            entries = batch.load_list(args.list_file)
+        except (OSError, ValueError) as exc:
+            print(json.dumps({"error": "bad_list_file", "reason": str(exc)},
+                             ensure_ascii=False))
+            return 2
+        code, summary = batch.run_batch(
+            entries, out_dir=args.out_dir, run_scenario_fn=runner.run_scenario
+        )
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
         return code
 
     opts = runner.RunOptions(

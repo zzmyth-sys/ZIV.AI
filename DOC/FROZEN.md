@@ -5871,3 +5871,11 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 背景：原金标输入 IMG2（D:\temp\7a5ba...) 已丢失，本次重取基于替代图
 - 限制：新金标仅在「上述 fixture + 上述参数」下有效
 - 触发时机：本步
+
+### 新增：zivcli batch
+- tools/zivcli/batch.py：批量执行 list-file（JSON 数组）
+- 支持 golden 引用（"golden": "b3"）+ 内联参数两种
+- --yes 闸门（Z30）
+- 任一项 FAIL 不中断，末尾汇总
+- 退出码：0 全 PASS / 1 有 FAIL / 2 Z30 未授权
+- runs/ 与 *.result.json 已 gitignore（不进库）
