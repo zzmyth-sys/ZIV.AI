@@ -25,6 +25,7 @@ torch / comfy（顶层保持 CPU-only，重型 import 延迟到函数内）。
 import logging
 
 import config
+import sampling_policy
 
 _LOG = logging.getLogger("zivai.server")
 
@@ -109,43 +110,89 @@ def _fit_sigmas(sigmas, steps):
     return sigmas
 
 
+def _extract_plugin_patch(ctx, working):
+    """Heuristic for the plugin layer: whitelisted keys that ``working`` changed vs ``ctx``.
+
+    ``dispatch.call_chain`` returns the **accumulated ctx** (not a sparse plugin patch), so a
+    key counts as plugin-set only when it is new or differs from the ctx value. ``sampler_name``
+    / ``scheduler`` are excluded on purpose (kept inert, matching the legacy path).
+    """
+    keys = ("model", "skip_shift", "sigmas", "cfg", "steps")
+    out = {}
+    for key in keys:
+        if key not in working:
+            continue
+        if key not in ctx:
+            out[key] = working[key]
+            continue
+        try:
+            if working[key] != ctx[key]:
+                out[key] = working[key]
+        except Exception:  # noqa: BLE001 - a tensor / opaque == may not return a bool
+            if working[key] is not ctx[key]:
+                out[key] = working[key]
+    return out
+
+
+def _sampler_preset_to_model_entry(preset):
+    """Map the resolved ``sampler_preset`` onto the policy's model_profile layer shape.
+
+    Key rename ``type`` -> ``sampler_type``; ``None`` values are treated as "not declared".
+    """
+    if not isinstance(preset, dict):
+        return None
+    return {
+        "sampler_type": preset.get("type"),
+        "shift": preset.get("shift"),
+        "sampler_name": preset.get("sampler_name"),
+        "scheduler": preset.get("scheduler"),
+        "cfg": preset.get("cfg"),
+    }
+
+
 def _apply_before_sample(ctx, patch):
     """S3：``before_sample`` reducer = 白名单合并 **+ 施力**（等价旧 ``pipeline`` 直调）。
 
-    施力归属（S3 迁移，逐项等价）：
-
-    - ``model``：插件已在本 ctx 上施力完毕，此处只归一（falsy → 施力前的 model）；
-    - ``steps``：归一（falsy / 非 int → 施力前的值），进度与采样共用；
-    - ``sigmas``：合法性校验（1-D、非空）后保留（:func:`_fit_sigmas`）；步数由 ``len(sigmas)`` 决定；
-    - ``skip_shift``：缺省 = 无 sigmas（旧 ``applies_shift`` 语义，sigmas 自带 schedule）；
-    - AuraFlow ``patch_aura``：``applies_shift`` 为真且 schedule 为 ``auraflow`` → 对模型克隆施力。
-
-    ``MODEL`` 符号延迟到函数内 import（顶层仍 CPU-only）；看护②：pipeline 不再持有 AuraFlow 类。
+    Step 2：决策（steps / cfg / sampler 块 / sigmas 让位 / AuraFlow shift）委托
+    :func:`sampling_policy.resolve`；本 reducer 只保留**执行**（白名单合并、``patch_aura``
+    调用、ctx 落地）。等价重构，行为与旧实现逐字节一致。
     """
     merged = _merge(ctx, patch, _WHITELIST["before_sample"])
     base_model = ctx.get("model")
-    model = merged.get("model") or base_model
+    if not merged.get("model"):
+        merged["model"] = base_model
 
-    steps = merged.get("steps")
-    try:
-        steps = max(1, int(steps))
-    except (TypeError, ValueError):
-        steps = ctx.get("steps")
+    plugin_patch = _extract_plugin_patch(ctx, patch)
+    raw_sigmas = plugin_patch.get("sigmas")
+    if raw_sigmas is not None and _fit_sigmas(
+        raw_sigmas, plugin_patch.get("steps", ctx.get("steps"))
+    ) is None:
+        plugin_patch = {key: value for key, value in plugin_patch.items() if key != "sigmas"}
 
-    sigmas = _fit_sigmas(merged.get("sigmas"), steps)
-    if sigmas is None:
-        skip = bool(merged.get("skip_shift", True))
-    elif "skip_shift" in merged:
-        skip = bool(merged.get("skip_shift"))
+    resolved = sampling_policy.resolve(
+        model_entry=_sampler_preset_to_model_entry(ctx.get("sampler_preset")),
+        payload={key: ctx[key] for key in ("steps",) if key in ctx},
+        plugin_patch=plugin_patch,
+    )
+
+    merged["steps"] = resolved.steps
+    merged["sigmas"] = resolved.sigmas
+    merged["cfg"] = resolved.cfg
+
+    new_preset = dict(ctx.get("sampler_preset") or {})
+    new_preset["sampler_name"] = resolved.sampler_name
+    new_preset["scheduler"] = resolved.scheduler
+    new_preset["cfg"] = resolved.cfg
+    if resolved.shift is None:
+        new_preset.pop("shift", None)
     else:
-        skip = False
-    if not skip and (ctx.get("sampler_preset") or {}).get("type", "auraflow") == "auraflow":
+        new_preset["shift"] = resolved.shift
+    merged["sampler_preset"] = new_preset
+
+    if resolved.shift is not None and new_preset.get("type") == "auraflow":
         from comfy_extras.nodes_model_advanced import ModelSamplingAuraFlow
 
-        shift = float((ctx.get("sampler_preset") or {}).get("shift", config.AURAFLOW_SHIFT))
-        model = ModelSamplingAuraFlow().patch_aura(model, shift)[0]
-
-    merged["model"], merged["steps"], merged["sigmas"] = model, steps, sigmas
+        merged["model"] = ModelSamplingAuraFlow().patch_aura(merged["model"], resolved.shift)[0]
     return merged
 
 

@@ -5571,3 +5571,21 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 金标仅供**回归检测**——不用于「必须产出特定图」的验收
 - 金标失效条件：模型权重更新 / torch 大版本 / CUDA 驱动大版本 → 需重跑取新金标
 - 不在 CI 里硬断言（GPU 敏感）；由真机维护者手动对照
+
+## 登记（2026-09-29）：sampling_policy 决策迁移（Step 2）· 挂账 Z-027 / Z-031
+
+> Step 2 把 `seams._apply_before_sample` 的决策迁入 `sampling_policy.resolve`（等价重构）。
+> 下列两段为**挂账登记**，只增不改。
+
+### Z-027：`seams.py` `skip_shift` 默认值疑似倒置（本步复刻不修）
+- **现状（冻结，B3 金标依赖）**：`before_sample` reducer 旧逻辑「无 sigmas 时 `skip_shift` 默认 `True` ⇒ 不施 AuraFlow」。Step 2 在 `sampling_policy` 内**逐字复刻**该判定（`skip_shift` 缺省 = 无 sigmas 时跳过；有 sigmas 且未声明时施力），以保持 B3/B4 输出逐字节不变。
+- **疑似 bug**：`test_plugin_pipeline.py:157-163 / :226-239`（GPU host 路由测试）期望「无 sigmas 时**施** AuraFlow（`patch_aura: 1`）」，与旧 reducer 默认 `True` 冲突；`test_seams.py:324-331` 亦期望施力，但 `test_seams._comfy_available()` 未把 `COMFY_ROOT` 加入 `sys.path`，该用例**恒被 skip**，从未验证。
+- **处置**：**本步不修**（修则改 B3 行为、金标失效）。是否修为独立步，待裁决。
+- **复刻点**：`sampling_policy.resolve` 终结器（`if "skip_shift" in raw_plugin: ... else: skip = not sigmas_legal`）。
+
+### Z-031：plugin 层启发式提取的脆弱性
+- 位置：`seams._extract_plugin_patch`（Step 2 新增）。
+- **背景**：`dispatch.call_chain` 返回**累积 ctx**（非稀疏插件 patch），故用「白名单键在 `working` 与 `ctx` 间有差异」启发式判定插件声明。
+- **脆弱点**：① 与 ctx 值相等的插件覆盖识别不出；② `model` 为不透明对象，比较依赖 `!=` / `is not` 回退；③ `skip_shift=None` 与「未设置」的边界依赖 policy 对 raw patch 的键存在性判定。
+- **影响**：B3（无插件）/ B4（Viggle）路径已验算等价；异构 / 多插件叠加场景未验证。
+- **处置**：Step 2 接受该启发式；是否改用「暴露原始 patch」（需改 `apply` / `call_chain`）待裁决。
