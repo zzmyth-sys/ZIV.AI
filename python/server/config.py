@@ -1,3 +1,4 @@
+import configparser
 import logging
 import os
 import sys
@@ -197,12 +198,59 @@ def plugin_env_name(plugin_id):
     return "ZIV_AI_PLUGIN_" + normalized.upper()
 
 
-def plugin_enabled(plugin_id, entry=None):
-    """插件是否启用：env ``ZIV_AI_PLUGIN_<ID>`` 优先，否则用 ``entry`` 的 ``enabled_by_default``。
+_PLUGIN_STATE_CACHE = {}  # settings.ini path -> (mtime, {plugin_id: bool})
 
+
+def _settings_ini_path():
+    """settings.ini 的绝对路径：env ``ZIV_AI_SETTINGS_PATH``（C# 注入）> 插件基准目录。"""
+    return os.environ.get("ZIV_AI_SETTINGS_PATH") or os.path.join(
+        PLUGINS_BASE_DIR, "settings.ini"
+    )
+
+
+def _read_plugin_states(path):
+    """读 settings.ini ``[plugins]`` → ``{id: bool}``；缺失 / 读失败 → ``{}``（回退 env）。
+
+    ``optionxform=str`` 保留插件 id 大小写（与 C# ``PluginRegistry`` 的 Ordinal 一致）；
+    结果按文件 mtime 缓存，文件未变不重读。坏 ini 绝不抛（异常一律回退 env）。
+    """
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return {}
+    cached = _PLUGIN_STATE_CACHE.get(path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    states = {}
+    parser = configparser.ConfigParser()
+    parser.optionxform = str
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+            parser.read_string(fh.read())
+        if parser.has_section("plugins"):
+            for key, value in parser.items("plugins"):
+                norm = value.strip().lower()
+                if norm in ("1", "true", "yes", "on"):
+                    states[key] = True
+                elif norm in ("0", "false", "no", "off"):
+                    states[key] = False
+    except Exception:  # noqa: BLE001 - 坏 ini 回退 env，绝不抛
+        states = {}
+    _PLUGIN_STATE_CACHE[path] = (mtime, states)
+    return states
+
+
+def plugin_enabled(plugin_id, entry=None):
+    """插件是否启用，优先级：settings.ini ``[plugins]``（键存在）> env ``ZIV_AI_PLUGIN_<ID>`` >
+    ``entry`` 的 ``enabled_by_default``。
+
+    settings.ini 优先使「UI 改启用状态」无需重启 App 即生效（每任务重读；env 成为后备）。
     注册表读取由调用方负责（loader 传入 ``entry``），避免 config ↔ loader 循环导入。
     假值拼写 ``0`` / ``false`` / ``False`` 表示禁用。
     """
+    states = _read_plugin_states(_settings_ini_path())
+    if plugin_id in states:
+        return states[plugin_id]
     value = os.environ.get(plugin_env_name(plugin_id))
     if value is not None and value != "":
         return value not in ("0", "false", "False")

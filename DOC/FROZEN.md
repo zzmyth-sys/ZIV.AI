@@ -5792,3 +5792,17 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 | Z-033 | C# 属性活引用模式 | 保持挂账 | 5593 + 补充段 |
 | Z-034 | 非 sigmas 插件 sampler_name/scheduler 未生效 | 保持挂账 | 5618 |
 | Z-035 | sigmas 分支 sampler_name（原描述作废） | 已更正 | 更正段 |
+
+### 特性：插件启用/禁用热切换（方案 1）
+- 背景：原实现 env 冻结（AppContext.cs:303-313 启动时注入
+  ZIV_AI_PLUGIN_<ID>）+ Python env 优先（config.py:206-208）
+  → 需重启 App 才生效。
+- 方案 1（已实施）：Python 直读 settings.ini [plugins]
+  - 新增 env ZIV_AI_SETTINGS_PATH（C# 注入）
+  - config.plugin_enabled 优先级改为：
+    settings.ini（键存在）> env > enabled_by_default
+  - optionxform=str（保留大小写）；mtime 缓存
+  - per-plugin env 注入保留（后备，不再是覆盖）
+- 生效方式：下次任务（dispatch 每任务重读注册表）
+- 回归触发条件：settings.ini 写入格式变化；插件 id 大小写规则变化
+- 触发时机：本步

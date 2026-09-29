@@ -100,6 +100,55 @@ class EnabledTests(unittest.TestCase):
             os.environ.pop("ZIV_AI_PLUGIN_MISSING", None)
             self.assertFalse(loader.enabled("missing", {}))
 
+    def test_settings_ini_overrides_env(self):
+        # settings.ini [plugins] 优先于 env（热切换）：ini=0 即使 env=1 也禁用。
+        entry = {"id": "pose-map", "enabled_by_default": True}
+        with tempfile.TemporaryDirectory() as tmp:
+            ini = os.path.join(tmp, "settings.ini")
+            with open(ini, "w", encoding="utf-8") as fh:
+                fh.write("[plugins]\npose-map = 0\n")
+            config._PLUGIN_STATE_CACHE.clear()
+            with mock.patch.dict(
+                os.environ, {"ZIV_AI_SETTINGS_PATH": ini, "ZIV_AI_PLUGIN_POSE_MAP": "1"}
+            ):
+                self.assertFalse(config.plugin_enabled("pose-map", entry))
+
+    def test_env_used_when_settings_ini_missing(self):
+        # settings.ini 不存在 → 回退 env。
+        entry = {"id": "pose-map", "enabled_by_default": True}
+        missing = os.path.join(tempfile.gettempdir(), "ziv_no_such_settings_ini.ini")
+        config._PLUGIN_STATE_CACHE.clear()
+        with mock.patch.dict(
+            os.environ, {"ZIV_AI_SETTINGS_PATH": missing, "ZIV_AI_PLUGIN_POSE_MAP": "0"}
+        ):
+            self.assertFalse(config.plugin_enabled("pose-map", entry))
+
+    def test_env_used_when_key_absent_in_settings_ini(self):
+        # settings.ini 存在但无该键 → 回退 env。
+        entry = {"id": "pose-map", "enabled_by_default": True}
+        with tempfile.TemporaryDirectory() as tmp:
+            ini = os.path.join(tmp, "settings.ini")
+            with open(ini, "w", encoding="utf-8") as fh:
+                fh.write("[plugins]\nother-plugin = 1\n")
+            config._PLUGIN_STATE_CACHE.clear()
+            with mock.patch.dict(
+                os.environ, {"ZIV_AI_SETTINGS_PATH": ini, "ZIV_AI_PLUGIN_POSE_MAP": "0"}
+            ):
+                self.assertFalse(config.plugin_enabled("pose-map", entry))
+
+    def test_settings_ini_key_is_case_sensitive(self):
+        # 键大小写不符 → 不命中 settings.ini → 回退 env（与 PluginRegistry 的 Ordinal 一致）。
+        entry = {"id": "pose-map", "enabled_by_default": False}
+        with tempfile.TemporaryDirectory() as tmp:
+            ini = os.path.join(tmp, "settings.ini")
+            with open(ini, "w", encoding="utf-8") as fh:
+                fh.write("[plugins]\nPose-Map = 1\n")
+            config._PLUGIN_STATE_CACHE.clear()
+            with mock.patch.dict(
+                os.environ, {"ZIV_AI_SETTINGS_PATH": ini, "ZIV_AI_PLUGIN_POSE_MAP": "0"}
+            ):
+                self.assertFalse(config.plugin_enabled("pose-map", entry))
+
 
 class CheckDepsTests(unittest.TestCase):
     def test_all_satisfied(self):

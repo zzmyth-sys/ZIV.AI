@@ -300,6 +300,15 @@ internal sealed class AppContext : IDisposable
 
         AddDirectoryIfPresent(environment, "ZIV_AI_COMFY_ROOT", settings.ComfyRoot);
 
+        // Plugin hot-switch (plan 1): hand Python the settings.ini path so it can read
+        // [plugins] live; otherwise only the startup-frozen per-plugin env reaches Python
+        // and a UI toggle needs an App restart. Injected only when the file exists.
+        var settingsIni = Path.Combine(System.AppContext.BaseDirectory, "settings.ini");
+        if (File.Exists(settingsIni))
+        {
+            environment["ZIV_AI_SETTINGS_PATH"] = settingsIni;
+        }
+
         // settings.ini [plugins] wins; otherwise the registry's enabled_by_default.
         if (plugins is { } registry)
         {
