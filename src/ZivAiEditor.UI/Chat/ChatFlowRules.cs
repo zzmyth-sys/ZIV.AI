@@ -137,7 +137,7 @@ public static class ChatFlowRules
                 return new AttachmentSendPlan(true, refs, refs.Length > 0);
             }
 
-            return new AttachmentSendPlan(false, attachments, false);
+            return new AttachmentSendPlan(false, attachments.ToArray(), false);
         }
 
         if (attachments.Count > 1)

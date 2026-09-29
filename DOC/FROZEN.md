@@ -5589,3 +5589,14 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **脆弱点**：① 与 ctx 值相等的插件覆盖识别不出；② `model` 为不透明对象，比较依赖 `!=` / `is not` 回退；③ `skip_shift=None` 与「未设置」的边界依赖 policy 对 raw patch 的键存在性判定。
 - **影响**：B3（无插件）/ B4（Viggle）路径已验算等价；异构 / 多插件叠加场景未验证。
 - **处置**：Step 2 接受该启发式；是否改用「暴露原始 patch」（需改 `apply` / `call_chain`）待裁决。
+
+### Z-033：C# 属性活引用模式（潜在同类 bug）
+- **背景**：Step A 修复 `ChatFlowRules.cs:140` 的 `AttachmentSendPlan.References` 活引用 bug——`ImageImportList.Paths` 返回内部 `List` 的活引用，经 `MainWindow.Send` 编排被 `_importBar.Clear()` 清空，提交时 references 为空（N=1、变体=single、按文字自编）。
+- **同类潜在点（本步不修，仅挂账）**：
+  1. `PluginRegistry.cs:114` `IReadOnlyList<PluginDescriptor> All => _plugins;`（装载后未见 mutate）
+  2. `CommandParser.cs:82` `IReadOnlyList<CommandDefinition> Commands => _commands;`（命令集装载后静态）
+  3. `AppContext.cs:126`（转发上一条）
+  4. `ImageImportBar.axaml.cs:48` `IReadOnlyList<string> Paths => _list.Paths;`（转发 `ImageImportList.Paths`，本次修复源头）
+- **不计入**：`CommandUsageStore.cs:47` `Counts => _counts;`——有意设计（注释明写 "live counts updated in place by Record"）。
+- **回归触发条件**：上述任一属性被 mutate / `Clear()`，或被传入可能清空它的下游。
+- **处置**：后续独立步（不夹带修）。

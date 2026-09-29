@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using ZivAiEditor.UI.Chat;
 using Xunit;
 
@@ -73,5 +74,15 @@ public class ChatFlowRulesTests
         Assert.False(plan.StartNewSession);
         Assert.Empty(plan.References);
         Assert.False(plan.ShowReferenceHint);
+    }
+
+    [Fact]
+    public void ResolveAttachmentSend_Reference_IsSnapshot_NotLiveReference()
+    {
+        var source = new List<string> { "a.png", "b.png" };
+        var plan = ChatFlowRules.ResolveAttachmentSend(
+            AttachmentPreparation.NeedsDecision, source, startNewSession: false);
+        source.Clear();
+        Assert.Equal(new[] { "a.png", "b.png" }, plan.References);
     }
 }
