@@ -615,3 +615,17 @@
   模块；不一致时 UI 只反映 `plugins.json`（与 §39 capabilities 同一约定）。
 - **不做**：不校验 `seams` 是否为合法接缝名（S3 教训：不做语义校验）；不改 `plugins.json` / `plugin_packs`
   / Python 侧；不改契约 / 冻结模块。
+
+## 44. 追加/更正说明（2026-09-29）
+
+- 登记 4 个已在 FROZEN 冻结但本清单缺失的接口：
+  - `ILlmPreflight`（`src/ZivAiEditor.App/LlmPreflight.cs:35`；FROZEN:3013）
+  - `IPromptExpander`（`src/ZivAiEditor.Agent/Execution/Planner/PromptExpander.cs:10`；FROZEN:3012）
+  - `PluginOverrideStore`（`src/ZivAiEditor.Backend/PluginOverrideStore.cs:24`；FROZEN:5410）
+  - `CrashLog`（`src/ZivAiEditor.App/CrashLog.cs:14`；FROZEN:5149）
+- 更正 §3 名称笔误：`ModelProfileFileDto` → `ModelsFileDto`
+  （实际定义在 `src/ZivAiEditor.Backend/ModelProfileFileDto.cs:12`，类型名 `ModelsFileDto`）
+- 补 §5 缺项：`loras`（`Template/loras.json`）
+- 补 §6 缺项：`plugins.json` / `[models]` / `[plugins]`（settings.ini 段）
+
+（不删旧行、不改 §3 原文——按 INTERFACES 只增惯例；本节为「更正说明」）
