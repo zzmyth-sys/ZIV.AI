@@ -26,8 +26,10 @@ public sealed class LoraUiState
 }
 
 /// <summary>
-/// Command-level LoRA control (fixed to the input row; shown only for commands whose effective
-/// LoRA list is non-empty). Mirrors <see cref="ResolutionPicker"/>: a small Button that opens a
+/// Command-level LoRA control (fixed to the input row; shown for a LoRA-capable command — its
+/// built-in template declares a LoRA — or any command that currently carries one, including a
+/// capability command whose LoRA is turned off, so it can be re-enabled). Mirrors
+/// <see cref="ResolutionPicker"/>: a small Button that opens a
 /// Flyout. The Flyout content is built eagerly in the constructor so <see cref="CurrentState"/> /
 /// <see cref="RequestSave"/> / <see cref="RequestPickFileAsync"/> work without opening the Flyout
 /// (which also keeps headless tests simple). The control never touches the backend / IPC; the

@@ -2,8 +2,9 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="ZivAiEditor.App.Controls.LoraControl">
   <!-- Command-level LoRA control (MVP): a small Button that opens a Flyout with the toggle,
-       strength slider and weight path (auto-saved on Flyout close). Shown only for commands whose effective LoRA
-       list is non-empty (today /换脸). The Flyout content is built eagerly in the code-behind
+       strength slider and weight path (auto-saved on Flyout close). Shown for a LoRA-capable command
+       (its built-in template declares a LoRA, e.g. /换脸), even when its LoRA is turned off so it can be
+       re-enabled. The Flyout content is built eagerly in the code-behind
        (mirrors ResolutionPicker), so its state is readable without opening the Flyout. -->
   <Button x:Name="PART_Btn"
           Background="Transparent"

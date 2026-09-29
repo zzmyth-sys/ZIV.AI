@@ -14,16 +14,17 @@ namespace ZivAiEditor.App;
 
 /// <summary>
 /// Command-level LoRA half of <see cref="MainWindow"/>: it shows the <see cref="LoraControl"/>
-/// only for the command whose effective LoRA list is non-empty (today <c>/换脸</c>), fills it from
-/// that command's current LoRA, and writes an edited value back through the template store
-/// (<c>commands.user.json</c>). A save hot-reloads the command set through
-/// <see cref="AppContext.ReloadCommands"/> (Z-030 复议), so it takes effect without an App
-/// restart. Split out of the main file to stay under the Z8 budget.
+/// for a LoRA-capable command (its built-in template declares a LoRA, e.g. <c>/换脸</c>) or any
+/// command that currently carries one, fills it from that command's current LoRA, and writes an
+/// edited value back through the template store (<c>commands.user.json</c>). A save hot-reloads
+/// the command set through <see cref="AppContext.ReloadCommands"/> (Z-030 复议), so it takes
+/// effect without an App restart. Split out of the main file to stay under the Z8 budget.
 /// </summary>
 public partial class MainWindow
 {
     private LoraControl? _loraControl;
     private string? _loadedLoraCommand;
+    private readonly HashSet<string> _loraCapableNames = new(StringComparer.Ordinal);
 
     private void InitLora()
     {
@@ -40,9 +41,15 @@ public partial class MainWindow
         {
             input.TextChanged += (_, _) => UpdateLoraVisibility();
         }
+
+        RefreshLoraCapabilities();
     }
 
-    /// <summary>Shows the LoRA panel only for a command whose effective LoRA list is non-empty.</summary>
+    /// <summary>
+    /// Shows the LoRA panel for a LoRA-capable command (its built-in template declares a LoRA) or
+    /// any command that currently carries one. A capability command whose LoRA was turned off stays
+    /// visible with the control in the off state, so it can be re-enabled from the UI (Z-030 P2).
+    /// </summary>
     private void UpdateLoraVisibility()
     {
         if (_loraControl is null)
@@ -51,7 +58,7 @@ public partial class MainWindow
         }
 
         var command = FindLoraCommand(CommandText.FirstToken(FindInput()?.Text));
-        if (command is null)
+        if (command is null || !IsLoraCapable(command))
         {
             _loraControl.IsVisible = false;
             _loadedLoraCommand = null;
@@ -69,13 +76,33 @@ public partial class MainWindow
 
     private CommandDefinition? FindLoraCommand(string? token)
         => token is { Length: > 0 }
-            ? _commands.FirstOrDefault(c =>
-                string.Equals(c.Name, token, StringComparison.Ordinal) && c.EffectiveLoras.Count > 0)
+            ? _commands.FirstOrDefault(c => string.Equals(c.Name, token, StringComparison.Ordinal))
             : null;
+
+    /// <summary>
+    /// A command is LoRA-capable when its built-in template declares a LoRA (the <c>/换脸</c>
+    /// "HasLora" extension point) or it currently carries one; the latter keeps a hand-authored
+    /// LoRA on a non-capability command visible.
+    /// </summary>
+    private bool IsLoraCapable(CommandDefinition command)
+        => _loraCapableNames.Contains(command.Name) || command.EffectiveLoras.Count > 0;
 
     private LoraUiState BuildInitialState(CommandDefinition command)
     {
-        var lora = command.EffectiveLoras[0];
+        var loras = command.EffectiveLoras;
+        if (loras.Count == 0)
+        {
+            // Capability command with the LoRA turned off: show the control off (no path); the user
+            // can toggle on and pick a file (Z-030 P2). Does not change the OFF=null semantics.
+            return new LoraUiState
+            {
+                Enabled = false,
+                Strength = LoraControl.DefaultStrength,
+                Path = "",
+            };
+        }
+
+        var lora = loras[0];
         var path = lora.Path ?? "";
         return new LoraUiState
         {
@@ -84,6 +111,32 @@ public partial class MainWindow
             Path = path,
             DisplayName = _loraRegistry?.TryGet(path)?.Description,
         };
+    }
+
+    /// <summary>
+    /// Rebuilds the LoRA-capable command-name set from the built-in <c>commands.json</c> (the
+    /// product data file, which keeps a LoRA on <c>/换脸</c> even when the user override turns it
+    /// off in <c>commands.user.json</c>). Best-effort: a missing / unreadable file leaves the set
+    /// empty, degrading to the pre-P2 "only commands with a live LoRA" behavior.
+    /// </summary>
+    private void RefreshLoraCapabilities()
+    {
+        _loraCapableNames.Clear();
+        try
+        {
+            var path = Path.Combine(_shell.TemplateDirectory, "commands.json");
+            foreach (var command in new CommandParser(path).Commands)
+            {
+                if (command.EffectiveLoras.Count > 0)
+                {
+                    _loraCapableNames.Add(command.Name);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[lora] capability scan failed: {ex.Message}");
+        }
     }
 
     private Task<string?> PickLoraFileAsync()
@@ -153,6 +206,10 @@ public partial class MainWindow
         }
 
         RefreshCommands(context.Commands);
+        RefreshLoraCapabilities();
+        // Re-sync the control from the reloaded template (the edit was already saved and the Flyout
+        // is closed), so an OFF shows the off state and an ON shows the new value.
+        _loadedLoraCommand = null;
         UpdateLoraVisibility();
     }
 

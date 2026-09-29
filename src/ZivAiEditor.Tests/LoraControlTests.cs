@@ -62,6 +62,24 @@ public class LoraControlTests
     }
 
     [Fact]
+    public void Picking_A_File_Enables_The_Toggle()
+    {
+        // Z-030 P2: a capability command shown in the off state can be re-enabled by picking a
+        // file, which flips the toggle on.
+        HeadlessTest.Run(() =>
+        {
+            var control = new LoraControl { FilePicker = () => Task.FromResult<string?>(@"C:\lora\x.safetensors") };
+            control.LoadFrom(new LoraUiState { Enabled = false, Strength = 1.0, Path = "" });
+            Assert.False(control.CurrentState.Enabled);
+
+            control.RequestPickFileAsync().GetAwaiter().GetResult();
+
+            Assert.True(control.CurrentState.Enabled);
+            Assert.Equal(@"C:\lora\x.safetensors", control.CurrentState.Path);
+        });
+    }
+
+    [Fact]
     public void Cancelled_Pick_Keeps_The_Path()
     {
         HeadlessTest.Run(() =>

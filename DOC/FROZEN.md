@@ -5997,3 +5997,32 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - `dotnet build src\ZIV.AI.sln -c Release` → **0 警告 0 错误**。
 - `dotnet test --filter "FullyQualifiedName!~Ipc"` → **780 通过 / 0 失败**（段 1 基线 777 + 3：
   Flyout 有变化触发保存 / 无变化不触发 / `CommandsReloaded` 刷新快照）。
+
+---
+
+## Z-030 P2 修复：LoRA 能力命令面板常驻（日期：2026-09-30）
+
+> **追加（只增不改）**。接段 1（`9d3a897`）与段 2（`a3c2530`）。修复段 2 报告的 P2：OFF 后面板消失、无法从 UI 重新启用。
+
+### Z30P2.1 问题
+- 可见性原谓词 = `EffectiveLoras.Count > 0`（`MainWindow.Lora.cs` `FindLoraCommand`）。OFF 写 `Loras=null` 后合并条目无 LoRA → 面板隐藏，且无其它启用入口 → 死锁（须手改 `commands.user.json`）。
+
+### Z30P2.2 修复
+- **能力驱动可见性**：`MainWindow` 由内置 `commands.json`（`TemplateDirectory/commands.json`，经 `CommandParser(path)` 读）构建「LoRA 能力命令名」集合；可见性谓词改为 `能力命令 || EffectiveLoras.Count > 0`。
+- 能力命令无 LoRA 时：面板可见，`LoraControl` 初值 `Enabled=false`、空 path，用户可重新勾选 + 选文件，走既有 `SaveRequested` 写回。
+- 能力集在 `InitLora()` 与 `CommandsReloaded`（段 2 接线）各重算一次；重载时重置 `_loadedLoraCommand`，从新模板重同步控件。
+- **不改** `LoraOptions` / `CommandDefinition` / `NormalizeLora` / IPC / Python。
+
+### Z30P2.3 与原冻结语义的关系
+- **保留** `FROZEN.md:5944`（「开关语义 B：OFF → Loras=null」）——OFF 仍写 `null`，执行链零改动。
+- **覆盖** `FROZEN.md:5941` / `:5947` 的可见性边界（「仅带 loras 的命令显示」）——本段将可见性从「有 LoRA」改为「LoRA 能力命令」，即 `:5941` 预留的「HasLora 通用谓词扩展点」。以本段为准。
+
+### Z30P2.4 已知代价与边界
+- OFF 后原权重路径丢失，重新启用需重选文件（产品已接受；若日后裁定「记住路径」需另立任务，可能碰 `LoraOptions` 契约）。
+- 能力集仅来自内置 `commands.json`；**仅存在于 `commands.user.json` 的非内置 LoRA 命令**在 OFF 后仍不可恢复（范围更窄，手改 JSON 兜底）。
+- `CommandParser(string)` 缺失文件时回退 `BuiltInCommands()`（含 `/换脸`），故能力集至少含 `/换脸`。
+
+### Z30P2.5 验证
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 警告 0 错误**。
+- `dotnet test --filter "FullyQualifiedName!~Ipc"` → **782 通过 / 0 失败**（段 2 基线 780 + 2：
+  OFF 后面板常驻且 `Enabled=false` / OFF 后选文件重新启用）。
