@@ -5861,3 +5861,13 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - Q4-B B3 2.5K 坐标：裁切精度 1px≈3.2 原图px 用户已裁「够用」；
   MaskSpec W/H 已修订；两者可关闭。极小羽化 round 到 0 → 保持观察
 - Q4-C 70 条真机必跑：按功能域分 7 组，6-8 次批量会话可覆盖
+
+### 新增：zivcli 金标登记（B3 / B4）
+- tools/zivcli/goldens.json 钉死 B3 / B4：
+  - 全参数（op/side/nref/steps/viggle）
+  - 全输入路径（harness/fixtures/img1.jpg + img2.png）
+  - 期望 SHA256（大写；比对时归一）
+- 输入为 vendor 快照（tools/zivcli/harness/fixtures/），不依赖 D:\temp
+- 背景：原金标输入 IMG2（D:\temp\7a5ba...) 已丢失，本次重取基于替代图
+- 限制：新金标仅在「上述 fixture + 上述参数」下有效
+- 触发时机：本步

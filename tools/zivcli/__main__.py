@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 
-from . import gpu, runner
+from . import gpu, runner, verify
 
 
 def build_parser():
@@ -40,6 +40,15 @@ def build_parser():
         action="store_true",
         help="caller has obtained explicit user consent (Z30)",
     )
+
+    vf = sub.add_parser("verify", help="run a golden scenario and compare SHA256")
+    vf.add_argument("golden")
+    vf.add_argument("--out-dir", dest="out_dir", default=verify.DEFAULT_OUT_DIR)
+    vf.add_argument(
+        "--yes",
+        action="store_true",
+        help="caller has obtained explicit user consent (Z30)",
+    )
     return parser
 
 
@@ -60,6 +69,15 @@ def main(argv=None):
     if not args.yes:
         print("Z30: 需用户明确同意（GPU 任务），加 --yes", file=sys.stderr)
         return 2
+
+    if args.command == "verify":
+        code, verdict = verify.run_verify(
+            args.golden,
+            run_scenario_fn=runner.run_scenario,
+            out_dir=args.out_dir,
+        )
+        print(json.dumps(verdict, ensure_ascii=False, indent=2))
+        return code
 
     opts = runner.RunOptions(
         op=args.op,

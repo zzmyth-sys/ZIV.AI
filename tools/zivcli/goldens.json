@@ -1,0 +1,26 @@
+{
+  "b3": {
+    "description": "S4-G1 金标 B3（无 Viggle，施 AuraFlow）",
+    "op": "inpaint",
+    "side": 1536,
+    "nref": 2,
+    "steps": 40,
+    "viggle": 0,
+    "img1": "harness/fixtures/img1.jpg",
+    "img2": "harness/fixtures/img2.png",
+    "img3": "harness/fixtures/img2.png",
+    "sha256": "53DF2DB71C76908394B354BEBDCC585CE0FE820524A2273D4C4AF058B396BBC9"
+  },
+  "b4": {
+    "description": "S4-G1 金标 B4（Viggle ON）",
+    "op": "inpaint",
+    "side": 1536,
+    "nref": 2,
+    "steps": 40,
+    "viggle": 1,
+    "img1": "harness/fixtures/img1.jpg",
+    "img2": "harness/fixtures/img2.png",
+    "img3": "harness/fixtures/img2.png",
+    "sha256": "5AD34D51D48779243CF6CEA99526584DA682C355C6FC09946C058C97976A26C8"
+  }
+}

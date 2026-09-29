@@ -23,10 +23,11 @@ from dataclasses import dataclass
 from . import gpu
 
 HOME = r"D:\devlop\ZIV.AI"
+ZIVCLI_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PYTHON = os.path.join(HOME, "Comfyui", "python_embeded", "python.exe")
-DEFAULT_DRIVER = os.path.join(HOME, "_test_step2", "s5s6_scenarios.py")
-DEFAULT_CWD = os.path.join(HOME, "_test_step2")
-DEFAULT_HARNESS = r"E:\temp\opencode"
+DEFAULT_HARNESS = os.path.join(ZIVCLI_DIR, "harness")
+DEFAULT_DRIVER = os.path.join(DEFAULT_HARNESS, "s5s6_scenarios.py")
+DEFAULT_CWD = DEFAULT_HARNESS
 
 GIB = float(1 << 30)
 POLL_INTERVAL = 0.5
