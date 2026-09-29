@@ -179,6 +179,7 @@ public sealed class CommandTemplateService : ICommandTemplateService
             Variants = command.Variants,
             DefaultVariant = command.DefaultVariant,
             Variadic = command.Variadic,
+            AllowEmptyPrompt = command.AllowEmptyPrompt,
             T2i = command.T2i,
             Description = command.Description,
             Handler = command.Handler,

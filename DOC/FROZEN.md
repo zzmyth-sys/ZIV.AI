@@ -5912,3 +5912,17 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 生效：仅标记命令；单图 + 空 prompt 工具层拒；多图 + 空 prompt 放行
 - 不做（挂账）：变体级标记（命令级 + 工具层守卫已足够）
 - 触发时机：本步
+
+### 修复：NormalizeLora 保留 AllowEmptyPrompt
+- 背景：CommandTemplateService.NormalizeLora（重建初始化器）重建命令定义时
+  漏复制 AllowEmptyPrompt 字段。触发条件：commands.user.json 含单槽 lora
+  的命令 → 重建路径会静默丢弃 allow_empty_prompt。
+- 修复：重建初始化器加 AllowEmptyPrompt = command.AllowEmptyPrompt（1 行）
+- 回归触发条件：重建初始化器新增字段时再次遗漏
+- 触发时机：本步
+
+### 新增：Backend LoraRegistry
+- LoraFileDto / LoraJsonContext / LoraRegistry（仿 ModelProfileRegistry）
+- 供 App 层读取 loras.json 显示真实路径/描述
+- 降级：读取失败 → 空表 + Debug.WriteLine（不抛）
+- 触发时机：本步

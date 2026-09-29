@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ZivAiEditor.Agent.Execution;
 using ZivAiEditor.Contracts.Execution;
+using ZivAiEditor.Contracts.Inference;
 using Xunit;
 
 namespace ZivAiEditor.Tests;
@@ -208,5 +209,32 @@ public class CommandTemplateServiceTests : IDisposable
         var reloaded = Service().List();
 
         Assert.Equal(CommandHandler.Tag, Entry(reloaded, "/tag").Definition.Handler);
+    }
+
+    [Fact]
+    public void NormalizeLora_Preserves_AllowEmptyPrompt_On_Legacy_SingleSlot_RoundTrip()
+    {
+        // Regression: a legacy single-slot `lora` forces NormalizeLora to rebuild the definition
+        // on the write path (Add -> Upsert -> WriteUserEntries); AllowEmptyPrompt must survive the
+        // rebuild (it was silently dropped when the rebuild initializer omitted it). Built via the
+        // service (NOT WriteUser, which bypasses NormalizeLora) so the bug would actually reproduce.
+        var service = Service();
+        service.Add(new CommandDefinition
+        {
+            Name = "/legacy",
+            Tool = "QW21edit",
+            Template = "tpl",
+            Variadic = true,
+            AllowEmptyPrompt = true,
+            Lora = new LoraOptions { Path = "face-swap", StrengthModel = 0.8, StrengthClip = 0.7 },
+        });
+
+        var definition = Entry(Service().List(), "/legacy").Definition;
+
+        Assert.True(definition.AllowEmptyPrompt);
+        var lora = Assert.Single(definition.EffectiveLoras);
+        Assert.Equal("face-swap", lora.Path);
+        Assert.Equal(0.8, lora.StrengthModel!.Value);
+        Assert.Equal(0.7, lora.StrengthClip!.Value);
     }
 }
