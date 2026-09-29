@@ -174,6 +174,25 @@ class RunBatchTests(unittest.TestCase):
             self.assertIn("error", summary["results"][0])
             self.assertTrue(summary["results"][1]["pass"])
 
+    def test_relative_out_dir_absolutized(self):
+        with tempfile.TemporaryDirectory() as td:
+            old = os.getcwd()
+            os.chdir(td)
+            try:
+                code, summary = batch.run_batch(
+                    [inline("a", A)],
+                    out_dir="out",
+                    goldens={},
+                    run_scenario_fn=fake_runner({"a": A}),
+                    check_gpu_fn=lambda: {"free": True},
+                )
+                self.assertEqual(code, 0)
+                self.assertTrue(
+                    os.path.isfile(os.path.join(td, "out", "a.result.json"))
+                )
+            finally:
+                os.chdir(old)
+
     def test_gpu_busy_blocks_batch(self):
         with tempfile.TemporaryDirectory() as td:
             code, summary = batch.run_batch(

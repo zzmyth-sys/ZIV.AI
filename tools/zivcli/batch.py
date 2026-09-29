@@ -95,6 +95,7 @@ def run_batch(
 ):
     check_gpu_fn = check_gpu_fn or gpu.check_gpu
     goldens = verify.load_goldens() if goldens is None else goldens
+    out_dir = os.path.abspath(os.path.expanduser(out_dir))
 
     try:
         verdict = check_gpu_fn()

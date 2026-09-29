@@ -79,6 +79,11 @@ class BuildEnvTests(unittest.TestCase):
         self.assertIn("SCN_IMG2", env)
         self.assertNotIn("SCN_IMG3", env)
 
+    def test_out_is_absolutized(self):
+        env = runner.build_env(make_opts(out="rel/b3.png"), base={})
+        self.assertTrue(os.path.isabs(env["SCN_OUT"]))
+        self.assertTrue(env["SCN_OUT"].endswith(os.path.join("rel", "b3.png")))
+
     def test_input_env_subset(self):
         env = runner.build_env(make_opts(), base={})
         subset = runner.input_env(env)

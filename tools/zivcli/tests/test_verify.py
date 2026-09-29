@@ -106,6 +106,25 @@ class RunGoldenTests(unittest.TestCase):
             self.assertFalse(v["pass"])
 
 
+    def test_relative_out_dir_absolutized(self):
+        with tempfile.TemporaryDirectory() as td:
+            old = os.getcwd()
+            os.chdir(td)
+            try:
+                code, v = verify.run_golden(
+                    "b3",
+                    verify.load_goldens()["b3"],
+                    run_scenario_fn=fake_run(sha256=B3),
+                    out_dir="out",
+                )
+                self.assertEqual(code, 0)
+                self.assertTrue(
+                    os.path.isfile(os.path.join(td, "out", "b3.result.json"))
+                )
+            finally:
+                os.chdir(old)
+
+
 class RunVerifyTests(unittest.TestCase):
     def test_unknown_golden_returns_2(self):
         code, v = verify.run_verify(

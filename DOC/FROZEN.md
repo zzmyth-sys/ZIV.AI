@@ -5880,6 +5880,22 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 退出码：0 全 PASS / 1 有 FAIL / 2 Z30 未授权
 - runs/ 与 *.result.json 已 gitignore（不进库）
 
+### 验收：zivcli 真跑自验（Step 5）
+- B3 SHA256 = 53DF2DB7...（与 goldens.json / FROZEN 一致）
+- B4 SHA256 = 5AD34D51...（同上）
+- batch 2/2 PASS
+- wall：B3 ≈52s / B4 ≈26s（与历史同量级）
+- gpu-check 跑前后回落基线
+- 结论：CLI 可信；harness vendor 快照可独立复现
+- E:\temp\opencode 运行时依赖已消除
+
+### 修复：zivcli 相对路径绝对化（Step 6）
+- 问题：s5s6/repro_viggle 把 chdir 切到 ComfyUI，
+  相对 SCN_OUT 落在 ComfyUI\tools\...，非 --out-dir
+- 修复：runner / verify / batch 对输出路径取 os.path.abspath
+- 影响：仅路径解析；SHA 判定逻辑不变
+- 触发时机：Step 6
+
 ### 修正：allow_empty_prompt 工具层守卫 + B 类命令扩展
 - 背景：Q1 给 /换背景 加 allow_empty_prompt，但 QwenImage21EditTool
   守卫看的是已替换的 template 串（非空）→ 实际不可达（D3-1 发现）。

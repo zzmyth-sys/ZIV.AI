@@ -51,6 +51,7 @@ def run_golden(
     out_dir=DEFAULT_OUT_DIR,
     write_verdict=True,
 ):
+    out_dir = os.path.abspath(os.path.expanduser(out_dir))
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, name + ".png")
     opts = golden_to_opts(name, golden, out)
