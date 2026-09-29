@@ -67,7 +67,7 @@ MAX_FRAME_BYTES = 256 * 1024 * 1024
 MAX_RESOLUTION = int(os.environ.get("ZIV_AI_MAX_RESOLUTION", "1024"))
 # 旧字段：保留以兼容，实际采样目标分辨率改由 MAX_RESOLUTION 决定。
 DEFAULT_RESOLUTION = MAX_RESOLUTION
-DEFAULT_STEPS = int(os.environ.get("ZIV_AI_DEFAULT_STEPS", "40"))
+DEFAULT_STEPS = int(os.environ.get("ZIV_AI_DEFAULT_STEPS", "25"))
 # OOM 降级：从 MAX_RESOLUTION 起，逐级回退到这些分辨率（面积口径）。
 RESOLUTION_FALLBACK = [
     int(x)

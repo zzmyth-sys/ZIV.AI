@@ -5600,3 +5600,10 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **不计入**：`CommandUsageStore.cs:47` `Counts => _counts;`——有意设计（注释明写 "live counts updated in place by Record"）。
 - **回归触发条件**：上述任一属性被 mutate / `Clear()`，或被传入可能清空它的下游。
 - **处置**：后续独立步（不夹带修）。
+
+### 修正：DEFAULT_STEPS 40 → 25（口径统一）
+- 背景：Python `config.py:70` `DEFAULT_STEPS=40` 是死默认（C# 恒发 25，`request.get("steps")` 永不为 falsy）。
+- 本步改为 25，与 C# 侧口径统一。
+- 影响：无运行时行为变化（死默认仍不触发）。
+- 回归触发条件：任何让 payload `steps` 为 falsy 的路径（当前无）。
+- 触发时机：本步。
