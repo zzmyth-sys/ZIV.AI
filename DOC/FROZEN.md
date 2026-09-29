@@ -5512,3 +5512,36 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 ### S4-4 布局与行数（冻结）
 - `pipeline_stages.py` 每函数 < 200 行、文件 < 600 行；`pipeline.py` 保编排 + 原语。
 - 新测试：`python/server/test_pipeline_stages.py`（CPU；`_stage_sample` 用注入的假 `comfy.*`）。
+
+## S5/S6：插件 seams 字段上线 + Viggle 迁 seams（日期：2026-09-29）
+
+> 两条并行子任务，零文件交集，均通过。**seams 字段三处落地（C# DTO / 数据 / PLUGIN_META）**，
+> Viggle 从 legacy capability 映射迁到 seams 直读；**legacy 回退路径保留**，行为不变。只增不改。
+
+### S5（C# 展示）
+- `src/ZivAiEditor.Backend/PluginFileDto.cs`：`PluginDto.Seams`（`[JsonPropertyName("seams")]`）。
+- `src/ZivAiEditor.Backend/PluginRegistry.cs`：`PluginDescriptor.Seams`（`IReadOnlyList<string>`）；
+  `ToDescriptor` 仿 `Capabilities` 过滤空白，缺省空数组。
+- `src/ZivAiEditor.App/SettingsWindow.Plugins.cs`：`PluginMetaLabel` 于 capabilities 段后追加
+  `seams: a, b`；**空 seams 隐藏**（无 `seams: ` 前缀，与 capabilities 一致）。
+- 测试：`PluginRegistryTests`（seams 解析 + 空白过滤 + 缺省空）、`SettingsWindowSmokeTests`
+  （`PluginMetaLabel` 显示 seams / 空隐藏）。
+- 文档：`DOC/INTERFACES.md` 尾部 §43「seams 字段说明」。
+
+### S6（Viggle 迁 seams）
+- `Template/plugins.json`：qwen21-viggle-6step 加 `"seams": ["before_sample"]`（`capabilities` 保留，兼容期双声明）。
+- `plugin_packs/qwen21-viggle-6step/__init__.py`：`PLUGIN_META` 加 `"seams": ["before_sample"]`；函数名仍 `sampling_plan`。
+- `python/server/test_dispatch.py`：新增 `ViggleSeamMigrationTests`（entry 走 seams；`_fn_for` 回退命中 `sampling_plan`）。
+- 文档：`DOC/DEVLOG.md` 尾部「Viggle 插件接缝迁移（S6）」。
+
+### 兼容 / 行为
+- Python `plugins.dispatch._seams_for` 解析优先级不变：entry `seams` > `capabilities` → `LEGACY_CAPABILITY_MAP`；
+  `_fn_for` 回退表 `_LEGACY_FN_BY_SEAM` 保留。迁移前后均路由到 `before_sample`，**行为不变**。
+- `PLUGIN_META.seams` 解析器**不读**（D2），仅为元数据同步。
+
+### 验证（CPU-only，未跑 GPU）
+- S5：`dotnet build src\ZIV.AI.sln -c Release` → 0/0；非 GPU 全量
+  `--filter "FullyQualifiedName!~Ipc"` → **749 通过 / 0 失败**（基线 747 + 新增 2）。
+- S6：`python -m unittest test_dispatch test_seams test_plugins` → **114 通过 / 0 失败 / 3 skip**；
+  同一非 GPU 全量 → **749 通过 / 0 失败**；`dotnet build` → 0/0。
+- 未 commit（两份报告交用户裁决）。
