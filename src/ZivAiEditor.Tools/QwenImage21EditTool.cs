@@ -70,11 +70,20 @@ public sealed class QwenImage21EditTool : IEditTool
         var prompt = ToolParameters.GetString(parameters, "prompt") ?? "";
         var hasReferences = !string.IsNullOrWhiteSpace(input.ReferenceImagePath)
             || input.AdditionalImages.Count > 0;
-        if (string.IsNullOrWhiteSpace(prompt) && !hasReferences)
+        // The guard looks at the user's raw description, not the substituted template: a
+        // command that opted into allow_empty_prompt fills the template with fixed English
+        // text even when the description is empty, so checking `prompt` alone cannot tell a
+        // meaningful edit from a degenerate one. A missing "description" key means the
+        // command owns a fixed template (e.g. /去水印), so fall back to the prompt itself.
+        var description = ToolParameters.GetString(parameters, "description");
+        var hasText = description is not null
+            ? !string.IsNullOrWhiteSpace(description)
+            : !string.IsNullOrWhiteSpace(prompt);
+        if (!hasText && !hasReferences)
         {
             return Failure(
                 input.StepId,
-                "QW21edit requires a non-empty 'prompt' parameter or at least one reference image.",
+                "QW21edit requires a non-empty description or prompt, or at least one reference image.",
                 started.Elapsed);
         }
 

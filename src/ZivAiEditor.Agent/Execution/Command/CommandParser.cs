@@ -249,6 +249,10 @@ public sealed partial class CommandParser : ICommandParser
         }
 
         var prompt = ApplyTemplate(template, command.Params, effectiveArgs);
+        // Forward the raw (pre-substitution) description for the tool-layer guard; its absence
+        // means the command has no description param (fixed-template commands).
+        var descriptionIndex = command.Params.IndexOf("description");
+        var description = descriptionIndex >= 0 ? effectiveArgs[descriptionIndex] : null;
         var mainImage = handler == CommandHandler.T2I ? "" : session.GetCurrentPipelineImagePath();
         if (isOutpaint && DiagLog.IsEnabled)
         {
@@ -266,7 +270,7 @@ public sealed partial class CommandParser : ICommandParser
         {
             Order = 1,
             ToolName = command.Tool,
-            Parameters = BuildParameters(prompt, outputPath),
+            Parameters = BuildParameters(prompt, outputPath, description),
             // T3.2: carry the command's LoRAs (multi-slot, de-duplicated) to the executor / tool.
             Loras = BuildLoras(command.EffectiveLoras),
         };
@@ -380,7 +384,7 @@ public sealed partial class CommandParser : ICommandParser
         return new ParseResult { Success = true, Plan = plan };
     }
 
-    private static Dictionary<string, string> BuildParameters(string prompt, string? outputPath)
+    private static Dictionary<string, string> BuildParameters(string prompt, string? outputPath, string? description = null)
     {
         var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -388,6 +392,10 @@ public sealed partial class CommandParser : ICommandParser
             ["steps"] = FallbackPlanner.DefaultSteps,
             ["denoise"] = FallbackPlanner.DefaultDenoise,
         };
+
+        // Raw description for the tool guard; absent = fixed-template command.
+        if (description is not null)
+            parameters["description"] = description;
 
         // Bridge §4.1-4: a quick-edit caller pins the absolute output path, consumed downstream by
         // ToolOutputPath.Resolve → EditRequest.OutputPath → IPC submit.payload.output_path.

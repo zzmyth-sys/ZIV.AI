@@ -5879,3 +5879,20 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 任一项 FAIL 不中断，末尾汇总
 - 退出码：0 全 PASS / 1 有 FAIL / 2 Z30 未授权
 - runs/ 与 *.result.json 已 gitignore（不进库）
+
+### 修正：allow_empty_prompt 工具层守卫 + B 类命令扩展
+- 背景：Q1 给 /换背景 加 allow_empty_prompt，但 QwenImage21EditTool
+  守卫看的是已替换的 template 串（非空）→ 实际不可达（D3-1 发现）。
+  且原命令级标记会放开 single 变体（无参考图）→ 退化执行。
+- 修复：
+  1. CommandParser.BuildParameters 为声明了 description 的命令增传
+     parameters["description"]=原始值；QwenImage21EditTool 守卫改为
+     「原始 description 空 且 additional_images 空 → Fail」（无 description
+     键 = 固定模板命令，回退看 prompt，不误杀 /去水印 等）。
+  2. /换装 /合照 /换脸 加 allow_empty_prompt: true（commands.json + BuiltIn.cs）。
+  3. /换脸 由 flat template 改为 variants.multi + defaultVariant=multi，
+     数据驱动复用 /合照 的 multi-only 守卫（≥2 图，parser + App 双覆盖）。
+- 归类：/合照 归 B（代码句干自述，{description} 可选尾句）
+- 生效：仅标记命令；单图 + 空 prompt 工具层拒；多图 + 空 prompt 放行
+- 不做（挂账）：变体级标记（命令级 + 工具层守卫已足够）
+- 触发时机：本步

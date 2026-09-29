@@ -70,7 +70,7 @@ public class CommandParserTests
     {
         var parser = ParserWithoutFile();
 
-        var missing = await parser.ParseAsync("/换装", SessionWithImage());
+        var missing = await parser.ParseAsync("/去物体", SessionWithImage());
         var extra = await parser.ParseAsync("/去水印 多余参数", SessionWithImage());
 
         Assert.False(missing.Success);
@@ -400,35 +400,75 @@ public class CommandParserTests
     [Fact]
     public async Task SlashCommand_Variadic_Empty_Returns_Error()
     {
-        // /换背景 opts into allow_empty_prompt; a variadic command that does NOT keeps the guard.
+        // /换背景 /换装 /合照 /换脸 opt into allow_empty_prompt; a variadic command that
+        // does NOT (e.g. /换发色) keeps the guard.
         var parser = ParserWithoutFile();
 
-        var result = await parser.ParseAsync("/换装", SessionWithImage(), 1, resolution: null);
+        var result = await parser.ParseAsync("/换发色", SessionWithImage(), 1, resolution: null);
 
         Assert.False(result.Success);
-        Assert.Contains("你要换成什么服装", result.ErrorMessage);
+        Assert.Contains("你要换成什么发色", result.ErrorMessage);
     }
 
     [Fact]
-    public async Task SlashCommand_GroupPhoto_Without_Description_Hints_Example()
+    public async Task SlashCommand_GroupPhoto_Without_Description_Parses_With_TwoImages()
     {
+        // /合照 opts into allow_empty_prompt: the two identities carry the content and the
+        // description is an optional tail sentence.
         var parser = ParserWithoutFile();
 
         var result = await parser.ParseAsync("/合照", SessionWithImage(), 2, resolution: null);
 
-        Assert.False(result.Success);
-        Assert.Contains("例如：/合照 两人在森林握手", result.ErrorMessage);
+        Assert.True(result.Success);
+        Assert.Contains("stand together", Assert.Single(result.Plan!.Steps).Parameters["prompt"]);
     }
 
     [Fact]
-    public async Task SlashCommand_ChangeClothing_Without_Description_Hints_Example()
+    public async Task SlashCommand_GroupPhoto_Without_Description_Still_Needs_TwoImages()
     {
+        var parser = ParserWithoutFile();
+
+        var result = await parser.ParseAsync("/合照", SessionWithImage(), 1, resolution: null);
+
+        Assert.False(result.Success);
+        Assert.Contains("at least 2 images", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SlashCommand_ChangeClothing_Without_Description_Parses()
+    {
+        // /换装 opts into allow_empty_prompt; the missing-argument guard is skipped (the tool
+        // layer rejects an empty description with no reference image).
         var parser = ParserWithoutFile();
 
         var result = await parser.ParseAsync("/换装", SessionWithImage(), 1, resolution: null);
 
+        Assert.True(result.Success);
+        Assert.Equal("", Assert.Single(result.Plan!.Steps).Parameters["description"]);
+    }
+
+    [Fact]
+    public async Task SlashCommand_FaceSwap_Without_Description_Parses_With_TwoImages()
+    {
+        var parser = ParserWithoutFile();
+
+        var result = await parser.ParseAsync("/换脸", SessionWithImage(), 2, resolution: null);
+
+        Assert.True(result.Success);
+        var prompt = Assert.Single(result.Plan!.Steps).Parameters["prompt"];
+        Assert.Contains("head_swap", prompt);
+        Assert.Contains("Picture 2", prompt);
+    }
+
+    [Fact]
+    public async Task SlashCommand_FaceSwap_Without_Description_Needs_TwoImages()
+    {
+        var parser = ParserWithoutFile();
+
+        var result = await parser.ParseAsync("/换脸", SessionWithImage(), 1, resolution: null);
+
         Assert.False(result.Success);
-        Assert.Contains("例如：/换装 红色连衣裙", result.ErrorMessage);
+        Assert.Contains("at least 2 images", result.ErrorMessage);
     }
 
     [Fact]

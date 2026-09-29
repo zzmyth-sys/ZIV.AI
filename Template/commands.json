@@ -18,6 +18,7 @@
       "name": "/换装",
       "params": ["description"],
       "variadic": true,
+      "allow_empty_prompt": true,
       "tool": "QW21edit",
       "defaultVariant": "single",
       "variants": {
@@ -63,6 +64,7 @@
       "name": "/合照",
       "params": ["description"],
       "variadic": true,
+      "allow_empty_prompt": true,
       "tool": "QW21edit",
       "defaultVariant": "multi",
       "variants": {
@@ -141,8 +143,12 @@
       "handler": "Edit",
       "params": ["description"],
       "variadic": true,
+      "allow_empty_prompt": true,
       "tool": "QW21edit",
-      "template": "head_swap: start with Picture 1 as the base image, keeping its lighting, environment, and background. Remove the head from Picture 1 completely and replace it with the head from Picture 2. Ensure the head and body have correct anatomical proportions and natural blending. {description}",
+      "defaultVariant": "multi",
+      "variants": {
+        "multi": "head_swap: start with Picture 1 as the base image, keeping its lighting, environment, and background. Remove the head from Picture 1 completely and replace it with the head from Picture 2. Ensure the head and body have correct anatomical proportions and natural blending. {description}"
+      },
       "loras": [{ "path": "face-swap", "strength_model": 1.0, "strength_clip": 1.0 }],
       "description": "换脸：把参考图（<image2>）的脸换到主图（<image1>）人物上（需自备换脸 LoRA）"
     }

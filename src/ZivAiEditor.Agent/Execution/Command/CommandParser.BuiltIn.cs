@@ -33,6 +33,7 @@ public sealed partial class CommandParser
             Name = "/换装",
             Params = new List<string> { "description" },
             Variadic = true,
+            AllowEmptyPrompt = true,
             Tool = "QW21edit",
             DefaultVariant = "single",
             Variants = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -86,6 +87,7 @@ public sealed partial class CommandParser
             Name = "/合照",
             Params = new List<string> { "description" },
             Variadic = true,
+            AllowEmptyPrompt = true,
             Tool = "QW21edit",
             DefaultVariant = "multi",
             Variants = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -179,8 +181,13 @@ public sealed partial class CommandParser
             Handler = CommandHandler.Edit,
             Params = new List<string> { "description" },
             Variadic = true,
+            AllowEmptyPrompt = true,
             Tool = "QW21edit",
-            Template = "head_swap: start with Picture 1 as the base image, keeping its lighting, environment, and background. Remove the head from Picture 1 completely and replace it with the head from Picture 2. Ensure the head and body have correct anatomical proportions and natural blending. {description}",
+            DefaultVariant = "multi",
+            Variants = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["multi"] = "head_swap: start with Picture 1 as the base image, keeping its lighting, environment, and background. Remove the head from Picture 1 completely and replace it with the head from Picture 2. Ensure the head and body have correct anatomical proportions and natural blending. {description}",
+            },
             Loras = new List<LoraOptions>
             {
                 new LoraOptions { Path = "face-swap", StrengthModel = 1.0, StrengthClip = 1.0 },

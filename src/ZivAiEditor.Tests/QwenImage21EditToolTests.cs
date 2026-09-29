@@ -118,6 +118,79 @@ public class QwenImage21EditToolTests
     }
 
     [Fact]
+    public async Task Execute_EmptyDescription_Without_References_Fails()
+    {
+        // The prompt is the substituted template (non-empty); the guard must look at the raw
+        // description instead, otherwise an empty-description command looks like a real edit.
+        var client = new FakeInferenceClient();
+        var tool = new QwenImage21EditTool(client);
+        var input = new ToolInput
+        {
+            StepId = "s1",
+            MainImagePath = @"C:\img\main.png",
+            Parameters = new Dictionary<string, string>
+            {
+                ["prompt"] = "Change the clothing of the person in <image1> to: . Keep the facial identity.",
+                ["description"] = "",
+                ["output_path"] = @"C:\out\r.png",
+            },
+        };
+
+        var result = await tool.ExecuteAsync(input);
+
+        Assert.False(result.Success);
+        Assert.Null(client.LastRequest);
+    }
+
+    [Fact]
+    public async Task Execute_EmptyDescription_With_Reference_Passes()
+    {
+        var client = new FakeInferenceClient();
+        var tool = new QwenImage21EditTool(client);
+        var input = new ToolInput
+        {
+            StepId = "s1",
+            MainImagePath = @"C:\img\main.png",
+            AdditionalImages = new[] { @"C:\img\ref.png" },
+            Parameters = new Dictionary<string, string>
+            {
+                ["prompt"] = "Dress the person in <image1> with the garment from <image2>: .",
+                ["description"] = "",
+                ["output_path"] = @"C:\out\r.png",
+            },
+        };
+
+        var result = await tool.ExecuteAsync(input);
+
+        Assert.True(result.Success);
+        Assert.NotNull(client.LastRequest);
+    }
+
+    [Fact]
+    public async Task Execute_FixedTemplate_Without_Description_Still_Passes()
+    {
+        // A command with no "description" param (e.g. /去水印) keeps the fixed template as its
+        // content; a missing description key must not trip the guard.
+        var client = new FakeInferenceClient();
+        var tool = new QwenImage21EditTool(client);
+        var input = new ToolInput
+        {
+            StepId = "s1",
+            MainImagePath = @"C:\img\main.png",
+            Parameters = new Dictionary<string, string>
+            {
+                ["prompt"] = "Remove all watermarks, logos and subtitles from <image1>.",
+                ["output_path"] = @"C:\out\r.png",
+            },
+        };
+
+        var result = await tool.ExecuteAsync(input);
+
+        Assert.True(result.Success);
+        Assert.NotNull(client.LastRequest);
+    }
+
+    [Fact]
     public async Task Execute_WithoutOutputPath_Derives_From_WorkingDirectory()
     {
         var client = new FakeInferenceClient();
