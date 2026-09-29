@@ -5935,3 +5935,22 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 修复：LoraRegistry 改 StringComparer.Ordinal + 入参 trim
 - 验证：对齐 Python；新增两条测试（Case Sensitive / Trims）
 - 触发时机：本步
+
+### 特性：LoRA 控制（命令级 MVP）
+- 背景：/换脸 的 LoRA 无 GUI 入口，硬编码在 commands.json:152
+- 实现：LoraControl 条件显示（仅带 loras 的命令；HasLora 通用谓词留扩展点）
+  - 开关 / 强度 0.0–2.0 步 0.05 / 文件选择器（Q1：必选文件，不自动回落）
+  - 写回 commands.user.json（命令级语义，复用 CommandTemplateService）
+  - 开关语义 B：OFF → Loras=null（移除条目，不校验文件）
+  - 回读校验：要求 Source==User（内置 /换脸 本就带 LoRA，仅比对值会假阳性）
+- 生效：重启 App 后（Z-030（命令模板无热重载））
+- 边界：仅带 loras 的命令显示（当前仅 /换脸）；保存后内存命令集不刷新（重启生效）
+- 不做（挂账）：全局 LoRA 槽（Z-022）、模板热重载（Z-030）、完整模板编辑器（Z-021）、
+  多 LoRA 叠加（Z-025）、插件声明 LoRA
+- 触发时机：本步
+
+### Z-021 边界澄清
+- Z-021 关闭的是「命令模板增删改查 UI」（完整模板编辑器）
+- 本特性是命令级 LoRA 微控件，不恢复完整模板编辑器
+- 二者不冲突；CommandTemplateService 复用为写回后端
+- 触发时机：本步

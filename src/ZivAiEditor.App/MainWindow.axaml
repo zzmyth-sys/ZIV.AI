@@ -111,7 +111,7 @@
                            VerticalContentAlignment="Top"
                            PlaceholderText="输入编辑指令（Enter 发送，Shift+Enter 换行）…"
                            Foreground="{StaticResource ZivTextBrush}" />
-                  <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto" Margin="0,6,0,0">
+                  <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto" Margin="0,6,0,0">
                     <Button x:Name="PART_BtnAddImage"
                             Grid.Column="0"
                             Classes="oc"
@@ -136,9 +136,14 @@
                                  VerticalAlignment="Center"
                                  Foreground="{StaticResource ZivTextSecondaryBrush}" />
                     </Button>
-                    <TextBlock x:Name="PART_ModeHint" Grid.Column="3" Margin="8,0" VerticalAlignment="Center" FontSize="11" Foreground="#E06C4A" IsVisible="False" TextWrapping="NoWrap" />
+                    <c:LoraControl x:Name="PART_LoraControl"
+                                   Grid.Column="3"
+                                   Margin="6,0,0,0"
+                                   VerticalAlignment="Center"
+                                   IsVisible="False" />
+                    <TextBlock x:Name="PART_ModeHint" Grid.Column="4" Margin="8,0" VerticalAlignment="Center" FontSize="11" Foreground="#E06C4A" IsVisible="False" TextWrapping="NoWrap" />
                     <Button x:Name="PART_BtnSend"
-                            Grid.Column="4"
+                            Grid.Column="5"
                             Classes="ocSend"
                             ToolTip.Tip="发送">
                       <Path Classes="sendIcon" Data="{StaticResource IconArrowUp}" />

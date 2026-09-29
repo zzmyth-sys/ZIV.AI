@@ -54,7 +54,8 @@ internal sealed class AppContext : IDisposable
         LocalLlmClient rewriterLlm,
         IPromptExpander promptExpander,
         ILlmPreflight llmPreflight,
-        PluginRegistry pluginRegistry)
+        PluginRegistry pluginRegistry,
+        LoraRegistry loraRegistry)
     {
         _backend = backend;
         Client = client;
@@ -82,6 +83,7 @@ internal sealed class AppContext : IDisposable
         PromptExpander = promptExpander;
         LlmPreflight = llmPreflight;
         PluginRegistry = pluginRegistry;
+        Loras = loraRegistry;
     }
 
     private readonly HttpClient _llmHttp;
@@ -111,6 +113,12 @@ internal sealed class AppContext : IDisposable
     /// injection and the settings-window plugin tab; empty when the file is missing.
     /// </summary>
     public PluginRegistry PluginRegistry { get; }
+
+    /// <summary>
+    /// Read-only view of <c>Template/loras.json</c> (display-only: the LoRA control shows an id's
+    /// real path / description). The Python backend still resolves ids at use-time.
+    /// </summary>
+    public LoraRegistry Loras { get; }
 
     /// <summary>Deterministic slash-command / prompt parser (Step 8).</summary>
     public ICommandParser CommandParser => _commandParser;
@@ -174,6 +182,7 @@ internal sealed class AppContext : IDisposable
         // Batch 1: the plugin registry is data next to commands.json; it feeds both the backend
         // env injection (below) and the settings-window plugin tab.
         var pluginRegistry = new PluginRegistry(Path.Combine(shell.TemplateDirectory, "plugins.json"));
+        var loraRegistry = new LoraRegistry(Path.Combine(shell.TemplateDirectory, "loras.json"));
 
         // R-4: grouped by domain (backend → tools → agent → llm → persistence → imaging).
         var (backend, client) = BuildBackend(settings, shell.TemplateDirectory, pluginRegistry);
@@ -187,7 +196,7 @@ internal sealed class AppContext : IDisposable
         var context = new AppContext(
             backend, client, llm.Http, llm.PlannerLlm, llm.Planner, tools, executor, executionQueue,
             modelProfiles, commandParser, commandTemplates, session, session, sessionStore, projects, imaging,
-            llm.RewriterLlm, llm.PromptExpander, llm.LlmPreflight, pluginRegistry);
+            llm.RewriterLlm, llm.PromptExpander, llm.LlmPreflight, pluginRegistry, loraRegistry);
 
         // Optimization §10.2.1: start the Python backend now (background) so its ~4 s
         // `import comfy` + DynamicVRAM init run while the user is still setting up,
