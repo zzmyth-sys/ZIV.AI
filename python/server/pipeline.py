@@ -31,6 +31,7 @@ import multi_image
 import outpaint
 import pipeline_hooks
 import pipeline_io
+import pipeline_stages
 import plugin_sampling
 import preview as preview_module
 import seams
@@ -240,104 +241,69 @@ def _run_once(model, clip, vae, prompt, image_path, mask_path, output_path,
               spec, steps, seed, denoise, started,
               on_progress, on_preview, poll_cancel, mask_binary=True,
               additional_images=None, sampler=None, op="inpaint", model_id=None):
-    import comfy.model_management as mm
-    import comfy.sample
-    from comfy_extras.nodes_model_advanced import ModelSamplingAuraFlow
+    """Orchestrate one attempt: assemble the ctx, run the three stage functions, save.
 
+    Behavior-equivalent split of the former monolithic body: the stage boundaries
+    (``pipeline_stages._stage_encode`` / ``_stage_sample`` / ``_stage_decode``) are the
+    seam positions wired in S4-B. ``cfg`` / ``need_negative`` stay here because the
+    encode inputs depend on them but no seam may override them.
+    """
     sampler = sampler or {}
 
-    # Stage 2: encode the prompt + optional reference image (clip is patched).
     # cfg==1.0 discards the negative conditioning in the sampler
     # (comfy/samplers.py:610 `math.isclose(cond_scale, 1.0) -> uncond_=None`), so skip
     # its encode entirely (optimization §10.2.2). Mirror the sampler's exact predicate
     # (math.isclose, rel_tol=1e-9) so we never skip when the sampler would still use it.
     cfg = float(sampler.get("cfg", 1.0))
     need_negative = not (config.SKIP_NEGATIVE_AT_CFG1 and math.isclose(cfg, 1.0))
-    positive, negative, latent_image, mask = encode_prompt(
-        clip, vae, prompt, image_path, mask_path, spec=spec, mask_binary=mask_binary,
-        additional_images=additional_images, need_negative=need_negative,
-    )
 
-    # batch 3 / S3: the plugin's ``before_sample`` force (model patch / sigmas / schedule /
-    # steps / skip_shift) is now applied through the seam system (``seams.apply``), replacing
-    # the old hardcoded ``plugin_sampling.resolve_plan`` + ``plan_*`` (behaviorally equivalent).
-    # Runs after ``encode_prompt`` because the plan needs the latent (schedule token count) and
-    # the mask (edit-only predicate); a declining / disabled plugin leaves every step unchanged.
-    sample_ctx = seams.apply("before_sample", plugin_sampling.build_context(
-        op=op, model=model, clip=clip, vae=vae, latent=latent_image, mask=mask,
-        prompt=prompt, image_path=image_path, mask_path=mask_path, steps=steps,
-        denoise=denoise, seed=seed, cfg=cfg, sampler_preset=sampler, model_id=model_id,
-    ))
-    model = sample_ctx["model"]
-    steps = plugin_sampling.report_steps(sample_ctx, steps)
-    plan_sigmas = sample_ctx.get("sigmas")
-
-    previewer = preview_module.get_previewer(model)
-    preview_every = max(1, int(config.PREVIEW_EVERY))
-
-    # First inference triggers ComfyUI's lazy `load_models_gpu()`; announce the
-    # sampling stage before sampling so that cost shows up client-side.
-    _emit(on_progress, 0, steps, 0.0, "sampling", "moving_to_gpu")
-    mem_guard.enforce()  # pre-flight: don't start the (weight-staging) first step already over budget
-
-    def callback(step, x0, x, total_steps):
-        if poll_cancel is not None:
-            poll_cancel()
-        mm.throw_exception_if_processing_interrupted()
-        # host-RAM guard: bail out at the top of each step, before DynamicVRAM thrashes shared GPU
-        # memory / host RAM to the point of freezing the machine (mem_guard, no-op off Windows).
-        mem_guard.enforce()
-        total = total_steps or steps
-        _emit(
-            on_progress,
-            step + 1,
-            total,
-            min(1.0, (step + 1) / float(total)),
-            "sampling",
-            "sampling",
-        )
-        if on_preview is not None and previewer is not None and step % preview_every == 0:
-            jpeg = preview_module.encode_jpeg(previewer, x0)
-            if jpeg:
-                on_preview(step, total, jpeg)
-
-    noise = comfy.sample.prepare_noise(latent_image, seed)
-    vram_probe.stage("sample BEG (first call loads weights)")
-
-    # S3: the plugin installs its LoRA side-branch during the `before_sample` seam; its
-    # cleanup must run even on OOM because `run()` retries `_run_once` per resolution
-    # fallback and must not leak / double-apply hooks. `cleanup_ctx` runs the ctx's cleanup
-    # (single `cleanup` key + aggregated `cleanups` list) and never raises.
-    try:
-        samples = plugin_sampling.sample_from(
-            sample_ctx, noise=noise, positive=positive, negative=negative,
-            latent=latent_image, mask=mask, seed=seed, callback=callback, steps=steps,
-            denoise=denoise, legacy_sample=sample,
-        )
-    finally:
-        plugin_sampling.cleanup_ctx(sample_ctx)
-    vram_probe.stage("sample END")
-
-    # A cancel that lands after the last sampling step still aborts here; the
-    # VAE decode itself is not interruptible (it is short, see contract §3.3).
-    if poll_cancel is not None:
-        poll_cancel()
-    mm.throw_exception_if_processing_interrupted()
-    _emit(on_progress, steps, steps, 1.0, "vae_decode", "vae_decode")
-    decoded = vae_decode(vae, samples)
-    vram_probe.stage("vae_decode END")
-    image, height, width = to_pil(decoded[0])
-
-    save_png(image, output_path)
-
-    return {
-        "output_path": output_path,
+    ctx = {
+        "op": op,
+        "model": model,
+        "clip": clip,
+        "vae": vae,
+        "prompt": prompt,
+        "image_path": image_path,
+        "mask_path": mask_path,
+        "additional_images": additional_images,
+        "spec": spec,
+        "steps": steps,
+        "denoise": denoise,
         "seed": seed,
-        "width": width,
-        "height": height,
-        "resolution": spec.get("value", spec.get("width")),
-        "duration_ms": int(round((time.time() - started) * 1000)),
+        "cfg": cfg,
+        "sampler_preset": sampler,
+        "model_id": model_id,
+        "mask_binary": mask_binary,
+        "need_negative": need_negative,
+        seams.CLEANUPS_KEY: [],
     }
+
+    try:
+        ctx = pipeline_stages._stage_encode(ctx)
+        ctx = pipeline_stages._stage_sample(
+            ctx, on_progress=on_progress, on_preview=on_preview, poll_cancel=poll_cancel
+        )
+        ctx = pipeline_stages._stage_decode(ctx)
+
+        save_png(ctx["image"], output_path)
+
+        return {
+            "output_path": output_path,
+            "seed": seed,
+            "width": ctx["width"],
+            "height": ctx["height"],
+            "resolution": spec.get("value", spec.get("width")),
+            "duration_ms": int(round((time.time() - started) * 1000)),
+        }
+    finally:
+        # Seam cleanups run LIFO so a plugin side-branch is torn down even when a stage
+        # raised. `run()` retries `_run_once` per resolution fallback; each attempt gets a
+        # fresh ctx/list, so cleanup is once-per-attempt and never leaks into the next.
+        for fn in reversed(seams.collect_cleanup(ctx)):
+            try:
+                fn()
+            except Exception as exc:  # noqa: BLE001 - cleanup must never fail the task
+                _LOG.warning("seam cleanup failed: %s", exc)
 
 
 def encode_prompt(clip, vae, prompt, image_path, mask_path, resolution=None, mode=None, spec=None,

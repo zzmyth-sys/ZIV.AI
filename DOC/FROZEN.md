@@ -5486,3 +5486,29 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **非法 env**：非整数 → 0（`config._env_int_mb`），不抛。
 - **默认**：两者均默认 0 = 完全不注入，与官方 `main.py` 未传 CLI 参数时逐字等价。
 - **依赖**：纯 stdlib（`os`）；**无新 NuGet / Python 依赖**；不改 IPC / 契约。
+
+## 登记（2026-09-29）：pipeline 阶段化（S4，还上帝函数债）
+
+> Python 侧：`pipeline._run_once` 从 102 行单体拆为阶段化编排；与 C# 侧 Z-008（MainWindow 上帝类）同病同治，防回潮。
+
+### S4-1 阶段边界 = 接缝位置（冻结）
+- `python/server/pipeline.py::_run_once` = 编排层（装配 ctx + `cfg`/`need_negative` → 调 3 阶段 → `save_png` → return）。
+- 阶段函数在 `python/server/pipeline_stages.py`：`_stage_encode` / `_stage_sample` / `_stage_decode`。
+- 阶段间以**单一 ctx dict** 传递（`stage(ctx, ...) -> ctx`）；6 个接缝锚点分落各阶段首尾：
+  `before_encode`/`after_encode`（encode）、`before_sample`/`after_sample`（sample）、
+  `before_decode`/`after_decode`（decode）。
+
+### S4-2 不可拆耦合（冻结）
+- `callback` 闭包与 `previewer` 属 `_stage_sample`（依赖 patch 后 model 与归一后的 `steps`），不得外提。
+- `mask_binary` / `need_negative` 为阶段参数，**不经**接缝白名单。
+- 每锚点的 ctx **只含**该锚点白名单字段（`CLEANUPS_KEY` 除外，避免与编排层清理列表别名）。
+
+### S4-3 cleanup 统一（冻结）
+- 各阶段把锚点 patch 的 `cleanups` 汇入编排层 ctx 的**共享列表**（浅拷贝共享，段内抛异常也不丢）。
+- `_run_once` 的 `finally` 用 `seams.collect_cleanup(ctx)` **逆序（LIFO）** 执行；
+  替代原 `_stage_sample` 局部 `finally: plugin_sampling.cleanup_ctx`。
+- 语义：任一段抛异常仍执行；`run()` 每个分辨率重试是独立 ctx → 每次重试恰好一次、不跨次泄漏。
+
+### S4-4 布局与行数（冻结）
+- `pipeline_stages.py` 每函数 < 200 行、文件 < 600 行；`pipeline.py` 保编排 + 原语。
+- 新测试：`python/server/test_pipeline_stages.py`（CPU；`_stage_sample` 用注入的假 `comfy.*`）。
