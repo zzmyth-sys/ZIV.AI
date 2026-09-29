@@ -29,7 +29,11 @@ public sealed class LoraRegistry
         _entries = Load(lorasFilePath);
     }
 
-    /// <summary>The entry for <paramref name="id"/>, or <c>null</c> when unknown / blank.</summary>
+    /// <summary>
+    /// The entry for <paramref name="id"/>, or <c>null</c> when unknown / blank. Lookup is
+    /// <b>Ordinal + trim</b>, matching <c>python/server/loras.py</c> (<c>registry[lora_id.strip()]</c>
+    /// / <c>registry.get(id_or_path.strip())</c>) so the UI never accepts an id the backend rejects.
+    /// </summary>
     public LoraEntryDto? TryGet(string? id)
         => !string.IsNullOrWhiteSpace(id) && _entries.TryGetValue(id.Trim(), out var entry)
             ? entry
@@ -40,7 +44,8 @@ public sealed class LoraRegistry
 
     private static Dictionary<string, LoraEntryDto> Load(string? lorasFilePath)
     {
-        var entries = new Dictionary<string, LoraEntryDto>(StringComparer.OrdinalIgnoreCase);
+        // Ordinal (case-sensitive) + trimmed keys, matching python/server/loras.py's dict keys.
+        var entries = new Dictionary<string, LoraEntryDto>(StringComparer.Ordinal);
 
         var path = lorasFilePath ?? Path.Combine(AppContext.BaseDirectory, "Template", LoraFileName);
         if (!File.Exists(path))

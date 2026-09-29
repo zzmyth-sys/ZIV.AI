@@ -5926,3 +5926,12 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 供 App 层读取 loras.json 显示真实路径/描述
 - 降级：读取失败 → 空表 + Debug.WriteLine（不抛）
 - 触发时机：本步
+
+### 修正：LoraRegistry.TryGet 对齐 Python Ordinal + trim
+- 背景：段 2a 落地 LoraRegistry.TryGet 用 OrdinalIgnoreCase；
+  Python loras.py:43/53 实际为 strip + Ordinal。
+  UI（显示）与后端（消费）语义不一致 → 将来手输 id 会出现
+  「UI 显示命中、后端拒绝」。
+- 修复：LoraRegistry 改 StringComparer.Ordinal + 入参 trim
+- 验证：对齐 Python；新增两条测试（Case Sensitive / Trims）
+- 触发时机：本步

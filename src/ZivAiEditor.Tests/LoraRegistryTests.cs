@@ -109,12 +109,23 @@ public class LoraRegistryTests : IDisposable
     }
 
     [Fact]
-    public void TryGet_Is_Case_Insensitive_And_Trims()
+    public void TryGet_Is_Case_Sensitive()
+    {
+        // Matches python/server/loras.py (Ordinal dict keys): "Face-Swap" is NOT "face-swap".
+        var registry = new LoraRegistry(WriteRegistry(
+            """{ "loras": [ { "id": "face-swap", "path": "p" } ] }"""));
+
+        Assert.NotNull(registry.TryGet("face-swap"));
+        Assert.Null(registry.TryGet("Face-Swap"));
+        Assert.Null(registry.TryGet("FACE-SWAP"));
+    }
+
+    [Fact]
+    public void TryGet_Trims_Whitespace()
     {
         var registry = new LoraRegistry(WriteRegistry(
             """{ "loras": [ { "id": "face-swap", "path": "p" } ] }"""));
 
-        Assert.NotNull(registry.TryGet("FACE-SWAP"));
         Assert.NotNull(registry.TryGet(" face-swap "));
         Assert.Null(registry.TryGet(""));
     }
