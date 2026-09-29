@@ -42,7 +42,8 @@ public partial class App : Application
                 _context.CreateExecutor,
                 _context.PluginRegistry,
                 _context.CommandTemplates,
-                _context.Loras);
+                _context.Loras,
+                _context);
             desktop.MainWindow = window;
 
             // Backend preview frames (0x02) → pending bubble, marshalled to the UI thread.

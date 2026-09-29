@@ -63,9 +63,10 @@ public partial class MainWindow : Window
     private readonly PluginRegistry? _plugins;
     private readonly ICommandTemplateService? _commandTemplates;
     private readonly LoraRegistry? _loraRegistry;
+    private readonly AppContext? _appContext;
     private IEditSession _session = null!;
     private IEditSessionWriter _writer = null!;
-    private readonly IReadOnlyList<CommandDefinition> _commands = Array.Empty<CommandDefinition>();
+    private IReadOnlyList<CommandDefinition> _commands = Array.Empty<CommandDefinition>();
     private readonly IPromptExpander? _promptExpander;
     private readonly ILlmPreflight? _llmPreflight;
 
@@ -118,7 +119,8 @@ public partial class MainWindow : Window
         Func<IEditSession, IEditSessionWriter, IExecutor>? createExecutor = null,
         PluginRegistry? plugins = null,
         ICommandTemplateService? commandTemplates = null,
-        LoraRegistry? loraRegistry = null)
+        LoraRegistry? loraRegistry = null,
+        AppContext? appContext = null)
     {
         _store = sessionStore ?? throw new ArgumentNullException(nameof(sessionStore));
         _projects = projects ?? throw new ArgumentNullException(nameof(projects));
@@ -135,6 +137,7 @@ public partial class MainWindow : Window
         _plugins = plugins;
         _commandTemplates = commandTemplates;
         _loraRegistry = loraRegistry;
+        _appContext = appContext;
 
         // Step 9C.5: the same session instance is passed as both the read-only view and the
         // writer (it implements IEditSession / IEditSessionWriter); the UI view model never
@@ -157,6 +160,13 @@ public partial class MainWindow : Window
         InitSend();
         InitCommandList();
         InitLora();
+
+        // Z-030 复议: mirror a runtime command reload into the UI snapshot (the parser swaps in
+        // place, so the Executor already sees it; this keeps suggestions / the LoRA panel fresh).
+        if (_appContext is { } context)
+        {
+            context.CommandsReloaded += OnCommandsReloaded;
+        }
 
         _vm.Messages.CollectionChanged += (_, _) => RenderChat();
         _vm.History.CollectionChanged += (_, _) => RenderHistory();

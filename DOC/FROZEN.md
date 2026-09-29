@@ -5973,3 +5973,27 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 原 Z-030 段不改（铁律 4），以本段为准。
 - 生效范围：命令模板（含 LoRA 命令级参数）。
 - 不做（挂账）：文件 watcher 自动监控；滑块拖动过程实时生效。
+
+---
+
+## Z-030 复议 · 段 2：LoRA 控件自动保存（日期：2026-09-30）
+
+> **追加（只增不改）**。接段 1（commit `9d3a897`）。本段实现 `LoraControl` Flyout 关闭自动保存 + 即时热生效。
+
+### Z30R2.1 行为
+- `LoraControl` 移除「保存」按钮；Flyout `Opened` 快照初值，`Closed` 时比对，**有变化才**触发 `SaveRequested`（无变化不写盘）。
+- `MainWindow.Lora.cs` 保存成功（回读校验通过）后调 `AppContext.ReloadCommands()`，移除「重启 App 后生效」提示；失败仍弹错。
+- `MainWindow` 订阅 `AppContext.CommandsReloaded` → 原地刷新 `_commands` 快照 + 重算 LoRA 面板可见性（`UpdateLoraVisibility`）。
+- `App.axaml.cs` 向 `MainWindow` 传入 `_context`（构造末尾新可选参）。
+
+### Z30R2.2 边界
+- 复用既有 `SaveRequested` 事件（不新增「控件 → AppContext」直接依赖）。
+- 不做（挂账）：文件 watcher、滑块拖动实时生效、`LoraControl` 直接持有 AppContext。
+
+### Z30R2.3 风格偏差（裁判观察）
+- 段 1 `AppContext.CommandsReloaded` 用 `EventHandler?`，与仓库既有 `PreviewReceived` / `StuckRecovery`（`Action` 系）风格不一致；按裁判观察记录，本段沿用段 1 签名未改。
+
+### Z30R2.4 验证
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 警告 0 错误**。
+- `dotnet test --filter "FullyQualifiedName!~Ipc"` → **780 通过 / 0 失败**（段 1 基线 777 + 3：
+  Flyout 有变化触发保存 / 无变化不触发 / `CommandsReloaded` 刷新快照）。

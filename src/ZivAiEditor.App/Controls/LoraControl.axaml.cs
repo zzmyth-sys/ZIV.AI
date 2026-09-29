@@ -47,9 +47,9 @@ public partial class LoraControl : UserControl
     private readonly TextBlock _strengthLabel;
     private readonly TextBlock _pathLabel;
     private readonly Button _pickButton;
-    private readonly Button _saveButton;
 
     private string _path = "";
+    private LoraUiState? _openedState;
 
     public LoraControl()
     {
@@ -84,8 +84,6 @@ public partial class LoraControl : UserControl
         };
         _pickButton = new Button { Content = "选择文件…", Margin = new Thickness(0, 0, 0, 6) };
         _pickButton.Click += (_, _) => _ = RequestPickFileAsync();
-        _saveButton = new Button { Content = "保存" };
-        _saveButton.Click += (_, _) => RequestSave();
 
         var panel = new StackPanel
         {
@@ -98,10 +96,9 @@ public partial class LoraControl : UserControl
                 _strengthLabel,
                 _pathLabel,
                 _pickButton,
-                _saveButton,
                 new TextBlock
                 {
-                    Text = "重启 App 后生效（Z-030 命令模板无热重载）",
+                    Text = "关闭面板后自动生效",
                     FontSize = 10,
                     TextWrapping = TextWrapping.Wrap,
                     Margin = new Thickness(0, 6, 0, 0),
@@ -109,9 +106,16 @@ public partial class LoraControl : UserControl
             },
         };
 
+        // Auto-save on close (Z-030 复议): snapshot the state when the Flyout opens; on close,
+        // raise SaveRequested only when the state actually changed, so a no-op open/close never
+        // writes. The owner (MainWindow) performs the write-back + hot reload.
+        var flyout = new Flyout { Content = panel };
+        flyout.Opened += (_, _) => _openedState = CurrentState;
+        flyout.Closed += (_, _) => OnFlyoutClosed();
+
         if (_button is not null)
         {
-            _button.Flyout = new Flyout { Content = panel };
+            _button.Flyout = flyout;
         }
 
         UpdateStrengthLabel();
@@ -144,8 +148,30 @@ public partial class LoraControl : UserControl
         UpdateSummary();
     }
 
-    /// <summary>Raises <see cref="SaveRequested"/> with the current state (Save button / tests).</summary>
+    /// <summary>Raises <see cref="SaveRequested"/> with the current state (programmatic / tests).</summary>
     public void RequestSave() => SaveRequested?.Invoke(this, CurrentState);
+
+    /// <summary>
+    /// Flyout-closed handler: raises <see cref="SaveRequested"/> only when the state changed since
+    /// the Flyout opened, so opening and closing without edits never triggers a write.
+    /// </summary>
+    private void OnFlyoutClosed()
+    {
+        var opened = _openedState;
+        _openedState = null;
+        if (opened is null || StateEquals(opened, CurrentState))
+        {
+            return;
+        }
+
+        SaveRequested?.Invoke(this, CurrentState);
+    }
+
+    /// <summary>Value equality for the change check (DisplayName is display-only, excluded).</summary>
+    private static bool StateEquals(LoraUiState a, LoraUiState b)
+        => a.Enabled == b.Enabled
+           && string.Equals(a.Path ?? "", b.Path ?? "", StringComparison.Ordinal)
+           && Math.Abs(a.Strength - b.Strength) < 1e-6;
 
     /// <summary>Runs the picker and, on a non-null result, sets the path (Pick button / tests).</summary>
     public async Task RequestPickFileAsync()

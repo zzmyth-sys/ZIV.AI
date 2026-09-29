@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Threading;
 using Xunit;
@@ -16,6 +18,7 @@ using ZivAiEditor.Contracts.Imaging;
 using ZivAiEditor.Contracts.Inference;
 using ZivAiEditor.Imaging;
 using ZivAiEditor.Tools;
+using ZivAiEditor.UI;
 
 namespace ZivAiEditor.Tests.UI;
 
@@ -75,6 +78,86 @@ public class MainWindowLoraTests
         });
     }
 
+    [Fact]
+    public void CommandsReloaded_Refreshes_MainWindow_Command_Snapshot()
+    {
+        // Z-030 复议: AppContext.ReloadCommands() swaps the parser in place and raises
+        // CommandsReloaded; the window mirrors the new snapshot and recomputes LoRA visibility.
+        var directory = Path.Combine(Path.GetTempPath(), "zivai-lora-reload-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            WriteCommands(directory, loraEnabled: true, extraName: "/旧命令");
+            var shell = new FakeShell(directory, new BackendSettings
+            {
+                Prewarm = false,
+                PythonExe = "python.exe",
+                Script = Path.Combine(directory, "main.py"),
+            });
+            using var context = ZivAiEditor.App.AppContext.Create(shell);
+
+            HeadlessTest.Run(() =>
+            {
+                MainWindow? window = null;
+                try
+                {
+                    window = new MainWindow(
+                        context.Session, context.SessionWriter, context.CommandParser, context.Executor,
+                        context.SessionStore, context.Projects, context.Imaging, new ShellService(),
+                        context.ModelProfiles, commands: context.Commands,
+                        commandTemplates: context.CommandTemplates, appContext: context);
+                    window.Show();
+
+                    var input = window.FindControl<TextBox>("PART_Input")!;
+                    var lora = window.FindControl<LoraControl>("PART_LoraControl")!;
+
+                    input.Text = "/换脸";
+                    Dispatcher.UIThread.RunJobs();
+                    Assert.True(lora.IsVisible);
+
+                    // Rewrite the template so /换脸 loses its LoRA, then hot-reload.
+                    WriteCommands(directory, loraEnabled: false, extraName: "/新命令");
+                    context.ReloadCommands();
+                    Dispatcher.UIThread.RunJobs();
+
+                    Assert.False(lora.IsVisible);
+                }
+                finally
+                {
+                    window?.Close();
+                }
+            });
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    private static void WriteCommands(string directory, bool loraEnabled, string extraName)
+    {
+        var lora = loraEnabled
+            ? "\"loras\": [ { \"path\": \"face-swap\", \"strength_model\": 1.0, \"strength_clip\": 1.0 } ], "
+            : "";
+        var json = $$"""
+            {
+              "version": "1.0",
+              "commands": [
+                { "name": "/换脸", "params": ["description"], "variadic": true, "tool": "QW21edit",
+                  {{lora}}"template": "swap {description}" },
+                { "name": "{{extraName}}", "tool": "QW21edit", "template": "x" }
+              ]
+            }
+            """;
+        File.WriteAllText(Path.Combine(directory, "commands.json"), json);
+    }
+
     private static List<CommandDefinition> Commands() => new()
     {
         new CommandDefinition
@@ -90,6 +173,45 @@ public class MainWindowLoraTests
         },
         new CommandDefinition { Name = "/换装", Tool = "QW21edit", Template = "tpl", Variadic = true },
     };
+
+    private sealed class FakeShell : IShellContext
+    {
+        private readonly BackendSettings _settings;
+
+        public FakeShell(string templateDirectory, BackendSettings settings)
+        {
+            TemplateDirectory = templateDirectory;
+            _settings = settings;
+        }
+
+        public BackendSettings LoadSettings() => _settings;
+
+        public string TemplateDirectory { get; }
+
+        public event Action<LaunchOptions>? LaunchRequested
+        {
+            add { }
+            remove { }
+        }
+
+        public void OpenFolder(string path)
+        {
+        }
+
+        public Task<string?> PickFolderAsync(
+            Window owner,
+            string title,
+            string? suggestedDirectory = null,
+            CancellationToken ct = default)
+            => Task.FromResult<string?>(null);
+
+        public Task<string?> PickFileAsync(
+            Window owner,
+            string title,
+            string? suggestedDirectory = null,
+            CancellationToken ct = default)
+            => Task.FromResult<string?>(null);
+    }
 }
 
 /// <summary>Pure tests for the full-field clone / read-back match (no UI).</summary>

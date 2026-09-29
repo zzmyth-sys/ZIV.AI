@@ -16,9 +16,9 @@ namespace ZivAiEditor.App;
 /// Command-level LoRA half of <see cref="MainWindow"/>: it shows the <see cref="LoraControl"/>
 /// only for the command whose effective LoRA list is non-empty (today <c>/换脸</c>), fills it from
 /// that command's current LoRA, and writes an edited value back through the template store
-/// (<c>commands.user.json</c>). The store's parser snapshot is fixed at startup, so a save takes
-/// effect after an App restart (Z-030（命令模板无热重载）). Split out of the main file to stay under
-/// the Z8 budget.
+/// (<c>commands.user.json</c>). A save hot-reloads the command set through
+/// <see cref="AppContext.ReloadCommands"/> (Z-030 复议), so it takes effect without an App
+/// restart. Split out of the main file to stay under the Z8 budget.
 /// </summary>
 public partial class MainWindow
 {
@@ -130,13 +130,34 @@ public partial class MainWindow
                 return;
             }
 
-            await MessageDialog.ShowAsync(this, "已保存，重启 App 后生效（Z-030 命令模板无热重载）。");
+            // Hot-reload the command set (the parser swaps in place) so the new LoRA takes effect
+            // at once; the window refreshes its own snapshot on CommandsReloaded (Z-030 复议).
+            _appContext?.ReloadCommands();
         }
         catch (Exception ex)
         {
             await MessageDialog.ShowAsync(this, "保存失败：" + ex.Message);
         }
     }
+
+    /// <summary>
+    /// Hot-reload refresh (Z-030 复议): after <see cref="AppContext.ReloadCommands"/> swaps the
+    /// parser's command set in place, mirror it into the UI snapshot and recompute LoRA visibility.
+    /// Raised on the UI thread (the reload is driven from the Flyout-close path).
+    /// </summary>
+    private void OnCommandsReloaded(object? sender, EventArgs e)
+    {
+        if (_appContext is not { } context)
+        {
+            return;
+        }
+
+        RefreshCommands(context.Commands);
+        UpdateLoraVisibility();
+    }
+
+    /// <summary>Replaces the command snapshot in place (reference swap; no new list copy).</summary>
+    private void RefreshCommands(IReadOnlyList<CommandDefinition> commands) => _commands = commands;
 }
 
 /// <summary>
