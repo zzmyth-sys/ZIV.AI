@@ -164,31 +164,22 @@ class LoraUnifiedError(RuntimeError):
     """
 
 
-def _ensure_unified(source):
+def _ensure_unified(source, dest):
     """Return the unified-dir path to load; raise ``LoraUnifiedError`` when not guaranteed.
 
-    Copy-precondition (hard-fail replacement for the old warning fallback): the public LoRA
-    must be loaded from ``<comfy_root>/models/loras`` (``config.LORA_ROOT``) like every other
-    LoRA. Seeds the registry origin into that dir when missing and returns the unified path.
-    A missing source, an unset ``LORA_ROOT``, an unavailable ``config`` or a failed copy
-    raises ``LoraUnifiedError`` — the origin path is **never** returned.
+    Copy-precondition (hard-fail replacement for the old warning fallback): ``dest`` is the
+    unified load path (``<LORA_ROOT>/<basename(path)>``); ``source`` is the registry origin
+    copied there when ``dest`` is missing. A non-absolute ``dest`` (no ``LORA_ROOT``), a missing
+    source or a failed copy raises ``LoraUnifiedError`` — the origin is **never** returned.
     """
+    if not dest or not os.path.isabs(dest):
+        raise LoraUnifiedError("统一目录路径无效（LORA_ROOT 未配置？）：%s" % dest)
+    if os.path.isfile(dest):
+        return dest
     if not source or not os.path.isfile(source):
         raise LoraUnifiedError("LoRA 源文件缺失：%s" % source)
     try:
-        import config
-
-        root = (getattr(config, "LORA_ROOT", "") or "").strip()
-    except Exception as exc:  # noqa: BLE001 - no unified dir available -> refuse
-        raise LoraUnifiedError("LORA_ROOT 不可用：%s" % exc) from exc
-    if not root:
-        raise LoraUnifiedError("未配置统一目录 LORA_ROOT；拒绝从源路径加载：%s" % source)
-
-    dest = os.path.join(root, os.path.basename(source))
-    if os.path.isfile(dest):
-        return dest
-    try:
-        os.makedirs(root, exist_ok=True)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.copyfile(source, dest)
     except OSError as exc:
         raise LoraUnifiedError("复制到统一目录失败（%s）：%s" % (dest, exc)) from exc
@@ -233,15 +224,14 @@ def sampling_plan(context):
     try:
         import loras
 
-        source = loras.resolve_path(_LORA_ID)
+        origin = loras.get_source(_LORA_ID)
+        dest = loras.resolve_path(_LORA_ID)
     except Exception as exc:  # noqa: BLE001 - registry unavailable -> decline (legacy path)
         _LOG.warning("qwen21-viggle-6step: LoRA registry unavailable (%s); declining", exc)
         return None
-    # Hard-fail (2026-09-30 strong-directory rule): copy into <comfy_root>/models/loras before
-    # loading; never fall back to the registry origin. A failure raises LoraUnifiedError, which
-    # the plugin dispatcher isolates (the edit then runs on the legacy path), but the plugin
-    # itself never loads an out-of-directory weight.
-    lora_path = _ensure_unified(source)
+    # Hard-fail (2026-09-30 strong-directory rule): copy the registry origin into
+    # <comfy_root>/models/loras before loading; never load the out-of-directory origin.
+    lora_path = _ensure_unified(origin, dest)
 
     try:
         lora = _load_lora(lora_path)

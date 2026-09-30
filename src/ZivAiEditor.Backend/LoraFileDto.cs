@@ -35,6 +35,13 @@ public sealed class LoraEntryDto
     [JsonPropertyName("path")]
     public string? Path { get; init; }
 
+    /// <summary>
+    /// Origin absolute path copied into the unified directory (2026-09-30 source/path split).
+    /// Only <c>source</c> ever points outside <c>&lt;comfy_root&gt;/models/loras</c>.
+    /// </summary>
+    [JsonPropertyName("source")]
+    public string? Source { get; init; }
+
     [JsonPropertyName("default_strength_model")]
     public double? DefaultStrengthModel { get; init; }
 

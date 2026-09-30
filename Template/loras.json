@@ -1,19 +1,21 @@
 {
   "version": "1",
-  "_comment": "LoRA data table (2026-09-30 owner model). One entry per known LoRA (id / path / owner / default strengths / description). `owner` routes it: 'model' (template-private, e.g. /换脸), 'Plugin' (plugin-owned, e.g. viggle), 'none' (public manager). `path` is the weight origin; a template references the unified-dir relative name (<comfy_root>/models/loras). Absent owner = 'none'. Entries with no owner and runtime-scanned weights are owned by the lora-manager plugin.",
+  "_comment": "LoRA data table (2026-09-30 owner model). One entry per known LoRA. Fields: `id`; `owner` ('model' template-private / 'Plugin' plugin-owned / 'none' public manager; absent = none); `path` = the unified-dir relative name used to LOAD (resolved as <comfy_root>/models/loras/<path>); `source` = the origin absolute path COPIED into the unified dir; `default_strength_*`; `description`. Templates and plugins reference the relative name / id; only `source` ever points outside the unified dir.",
   "loras": [
     {
       "id": "example_lora",
       "owner": "none",
-      "path": "D:\\path\\to\\your\\lora.safetensors",
+      "path": "example_lora.safetensors",
+      "source": "D:\\path\\to\\your\\lora.safetensors",
       "default_strength_model": 1.0,
       "default_strength_clip": 1.0,
-      "description": "示例条目（占位路径，请替换为新 LoRA 权重；commands.json 未引用它）"
+      "description": "示例条目（占位；commands.json 未引用它）"
     },
     {
       "id": "qwen21-viggle-turbo-6step",
       "owner": "Plugin",
-      "path": "E:\\Downloads\\工作流\\姿态编辑流\\lora\\Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors",
+      "path": "Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors",
+      "source": "E:\\Downloads\\工作流\\姿态编辑流\\lora\\Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors",
       "default_strength_model": 1.0,
       "default_strength_clip": 1.0,
       "description": "Qwen-Image-2.1 viggle-turbo v0.2.1 6-step 蒸馏 LoRA（owner=Plugin；插件 qwen21-viggle-6step 专用；r256，diffusers 格式）"
@@ -21,10 +23,11 @@
     {
       "id": "face-swap",
       "owner": "model",
-      "path": "C:\\AI\\ComfyUI_PIC\\ComfyUI\\models\\loras\\qwen_image2\\bfs_head_v1.1_qwen_2.1.safetensors",
+      "path": "bfs_head_v1.1_qwen_2.1.safetensors",
+      "source": "C:\\AI\\ComfyUI_PIC\\ComfyUI\\models\\loras\\qwen_image2\\bfs_head_v1.1_qwen_2.1.safetensors",
       "default_strength_model": 1.0,
       "default_strength_clip": 1.0,
-      "description": "BFS Head V1.1 换头 LoRA（owner=model，归 /换脸；统一目录相对名 bfs_head_v1.1_qwen_2.1.safetensors）"
+      "description": "BFS Head V1.1 换头 LoRA（owner=model，归 /换脸；加载名 bfs_head_v1.1_qwen_2.1.safetensors）"
     }
   ]
 }

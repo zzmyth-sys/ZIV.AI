@@ -73,6 +73,21 @@ def resolve_owner(id_or_path, registry=None):
     return "none"
 
 
+def get_source(id_or_path, registry=None):
+    """The logged origin (copy source) for a LoRA id, or ``None`` when unset / unknown.
+
+    2026-09-30 source/path split: ``path`` is the unified-dir relative **load** name; ``source``
+    is the origin absolute path copied into the unified dir. Seeders (C# App / viggle plugin)
+    copy ``source`` → ``<LORA_ROOT>/<basename(path)>``; loaders only ever use ``path``.
+    """
+    entry = resolve(id_or_path, registry)
+    if isinstance(entry, dict):
+        source = entry.get("source")
+        if isinstance(source, str) and source.strip():
+            return source.strip()
+    return None
+
+
 def resolve_strength(value, entry=None, default_key=None):
     """Resolve one LoRA strength (Step 8-2, semantic-inversion fix).
 

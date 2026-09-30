@@ -6876,3 +6876,40 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - Python `unittest discover -p "test_*.py"` → **303 / 0**（未改 Python）。
 - 环境页不再显示 LoRA 区；LoRA 页签两区就位。
 - 三件套未动；未跑 GPU；未碰 IPC / contracts / seams / 官方 ComfyUI。
+
+---
+
+## LoRA 真机报错修复：source/path 分离 + seeder 目标统一（2026-09-30）
+
+> **追加（只增不改）：** 承接「LoRA 真机报错『LoRA 不在统一目录』只读调查」。根因：①旧 id `face-swap` 经注册表 `path`（源绝对）返回 → 统一目录强约束误伤；②统一目录取值少一层 `ComfyUI`；③seeder 用 `DeriveLoraRoot(ComfyRoot)` 与加载器用 `LORA_ROOT` 不一致。本 commit 见 `git log`。
+
+### loras.json 结构统一（source/path 分离）
+
+- `path` = 统一目录**相对加载名**（解析为 `<comfy_root>/models/loras/<path>`）。
+- `source` = **源绝对路径**（仅供复制）。
+- 三条目均改：`example_lora` / `qwen21-viggle-turbo-6step` / `face-swap`。
+- 效果：`resolve_path(id)` 返回相对名 → 拼 `LORA_ROOT` → 统一目录 → 强约束通过；旧 id `face-swap` 亦如此（兼容 `LEGACY_ID_ALIASES` 保留）。
+
+### 改动
+
+1. `Template/loras.json`：三条目加 `path`（相对名）+ 新增 `source`（源绝对）；`_comment` 更新。
+2. `src/ZivAiEditor.Backend/LoraFileDto.cs`：`LoraEntryDto` 加 `Source`（数据字段）。
+3. `python/server/loras.py`：新增 `get_source(id)`（返回 `source`）；`resolve_path` 语义不变（注册表命中返回 `path`）；`LEGACY_ID_ALIASES` 保留。
+4. `src/ZivAiEditor.App/App.axaml.cs`：`SeedModelLoras` 复制源改读 `entry.Source`；**目标改 `settings.LoraRoot`**（不再 `DeriveLoraRoot(settings.ComfyRoot)`）。
+5. `plugin_packs/qwen21-viggle-6step/__init__.py`：`_ensure_unified(source, dest)` 两参（`source`=origin，`dest`=统一加载路径）；capability 改 `origin = loras.get_source(_LORA_ID)`、`dest = loras.resolve_path(_LORA_ID)`。
+6. 测试同步：`test_dispatch.py`（`_ensure_unified` 两参 + `get_source` mock）、`test_plugin_pipeline.py`（stub 两参）、`test_loras.py`（`SourcePathSplitTests`）、`LoraRegistryTests.cs`（`Parses_Source_Field`）。
+
+### 根因2（少 ComfyUI）诊断与修法
+
+- 本机 `settings.ini` **无** `[backend] comfy_root`、**无** `[models] lora_root` → 走发现链，命中 python_exe 反推 = `...\Comfyui\ComfyUI`（正确）。
+- 真机报错根 = `...\Comfyui\models\loras`（少 `ComfyUI`）⟹ 真机存在 `lora_root` / `comfy_root` **覆盖**（用户值）。旁证：`...\Comfyui\models\loras\` 内有 viggle + face-swap 文件；本机文件无覆盖。
+- **修法（代码部分）**：seeder 目标统一为 `settings.LoraRoot`，与加载器同源。
+- **修法（用户部分）**：覆盖值本身属**用户配置**——按停点「不擅动用户 settings.ini」→ **报告用户自行更正**（改为 `...\Comfyui\ComfyUI` 或不设 `lora_root` 走默认 `DeriveLoraRoot`）。
+
+### 验证（非 GPU）
+
+- `dotnet build src/ZIV.AI.sln -c Release` → 0 警告 / 0 错误。
+- C# 非 GPU `--filter "FullyQualifiedName!~Ipc"` → **823 / 0**（基线 822 + 新增 1）。
+- Python `unittest discover -p "test_*.py"` → **306 / 0**（基线 303 + 新增 3）。
+- 旧 id `face-swap` → `resolve_path` 返回相对名 → 拼 `LORA_ROOT` → `unified_violation` = None（新增测试断言）。
+- 三件套未动；未跑 GPU；未碰 IPC / contracts / seams / 官方 ComfyUI。

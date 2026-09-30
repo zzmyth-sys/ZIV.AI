@@ -138,4 +138,15 @@ public class LoraRegistryTests : IDisposable
 
         Assert.Equal("model", registry.TryGet("face")!.Owner);
     }
+
+    [Fact]
+    public void Parses_Source_Field()
+    {
+        var registry = new LoraRegistry(WriteRegistry(
+            """{ "loras": [ { "id": "face", "path": "bfs.safetensors", "source": "C:/x/bfs.safetensors" } ] }"""));
+
+        var entry = registry.TryGet("face");
+        Assert.Equal("bfs.safetensors", entry!.Path);
+        Assert.Equal("C:/x/bfs.safetensors", entry.Source);
+    }
 }

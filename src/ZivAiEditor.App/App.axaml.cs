@@ -96,7 +96,9 @@ public partial class App : Application
     /// </summary>
     private static void SeedModelLoras(BackendSettings settings, LoraRegistry registry)
     {
-        var loraRoot = ComfyDiscovery.DeriveLoraRoot(settings.ComfyRoot);
+        // Target the SAME unified dir the backend loads from (settings.LoraRoot), not a
+        // re-derivation from ComfyRoot — an explicit lora_root override must be honoured.
+        var loraRoot = settings.LoraRoot;
         if (string.IsNullOrWhiteSpace(loraRoot))
         {
             return;
@@ -109,15 +111,21 @@ public partial class App : Application
                 continue;
             }
 
-            var source = entry.Path;
+            // source/path split (2026-09-30): copy `source` (origin) to `<loraRoot>/<basename(path)>`
+            // so the unified-relative `path` (used to load) resolves.
+            var source = entry.Source;
             if (string.IsNullOrWhiteSpace(source))
             {
                 continue;
             }
 
+            var name = !string.IsNullOrWhiteSpace(entry.Path)
+                ? Path.GetFileName(entry.Path!)
+                : Path.GetFileName(source);
+
             try
             {
-                var dest = Path.Combine(loraRoot!, Path.GetFileName(source));
+                var dest = Path.Combine(loraRoot!, name);
                 if (File.Exists(dest))
                 {
                     continue;

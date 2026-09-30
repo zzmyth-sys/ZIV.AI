@@ -303,5 +303,45 @@ class StrongDirectoryHardFailTests(unittest.TestCase):
         register.assert_called_once()
 
 
+class SourcePathSplitTests(unittest.TestCase):
+    """2026-09-30 source/path 分离：path=统一目录相对加载名；source=源绝对（供复制）。"""
+
+    def test_get_source_returns_origin(self):
+        registry = {
+            "x": {"id": "x", "path": "x.safetensors", "source": "C:/src/x.safetensors"},
+            "n": {"id": "n", "path": "n.safetensors"},
+        }
+        self.assertEqual("C:/src/x.safetensors", loras.get_source("x", registry))
+        self.assertIsNone(loras.get_source("n", registry))
+        self.assertIsNone(loras.get_source("unknown", registry))
+
+    def test_registry_path_is_relative_load_name_joined_with_root(self):
+        registry = {"x": {"id": "x", "path": "x.safetensors", "source": "C:/src/x.safetensors"}}
+        with mock.patch.object(config, "LORA_ROOT", r"D:\c\models\loras"):
+            self.assertEqual(
+                os.path.join(r"D:\c\models\loras", "x.safetensors"),
+                loras.resolve_path("x", registry),
+            )
+
+    def test_legacy_face_swap_id_resolves_to_unified_relative_name(self):
+        # Old commands.user.json may still reference the id "face-swap"; with the source/path
+        # split it resolves through the registry entry's relative `path`, not a source absolute.
+        registry = {
+            "face-swap": {
+                "id": "face-swap",
+                "owner": "model",
+                "path": "bfs_head_v1.1_qwen_2.1.safetensors",
+                "source": r"C:\AI\ComfyUI_PIC\ComfyUI\models\loras\qwen_image2\bfs_head_v1.1_qwen_2.1.safetensors",
+            }
+        }
+        with mock.patch.object(config, "LORA_ROOT", r"D:\c\models\loras"):
+            resolved = loras.resolve_path("face-swap", registry)
+        self.assertEqual(
+            os.path.join(r"D:\c\models\loras", "bfs_head_v1.1_qwen_2.1.safetensors"),
+            resolved,
+        )
+        self.assertIsNone(loras.unified_violation(resolved))
+
+
 if __name__ == "__main__":
     unittest.main()

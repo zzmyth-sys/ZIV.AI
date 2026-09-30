@@ -149,7 +149,8 @@ class PluginPipelineRoutingTests(unittest.TestCase):
         # is the copy-precondition (2026-09-30 hard-fail) — stubbed because routing does not
         # depend on the unified dir / the weight being installed on this host.
         plugin._load_lora = lambda path: {}
-        plugin._ensure_unified = lambda source: source
+        # source/path split (2026-09-30): the unified load path is the 2nd arg now.
+        plugin._ensure_unified = lambda source, dest: dest
         shape = (7,) if sigmas is None else sigmas
         plugin._build_sigmas = lambda latent: mock.Mock(shape=shape)
         return plugin
