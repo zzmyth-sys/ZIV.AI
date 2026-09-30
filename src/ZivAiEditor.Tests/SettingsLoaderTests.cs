@@ -165,6 +165,47 @@ public class SettingsLoaderTests : IDisposable
     }
 
     [Fact]
+    public void Load_Prefers_Env_Settings_Path_Override()
+    {
+        // ZIV_AI_SETTINGS_PATH is honoured only on the default path (programDirectory == null).
+        var overridePath = Path.Combine(_directory, "override.ini");
+        File.WriteAllLines(overridePath, new[] { "[backend]", "pipe_name = from-env" });
+
+        var saved = Environment.GetEnvironmentVariable("ZIV_AI_SETTINGS_PATH");
+        try
+        {
+            Environment.SetEnvironmentVariable("ZIV_AI_SETTINGS_PATH", overridePath);
+            var settings = SettingsLoader.Load();
+
+            Assert.Equal("from-env", settings.PipeName);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ZIV_AI_SETTINGS_PATH", saved);
+        }
+    }
+
+    [Fact]
+    public void Load_Explicit_Directory_Ignores_Env_Override()
+    {
+        File.WriteAllLines(SettingsPath, new[] { "[backend]", "pipe_name = from-dir" });
+
+        var saved = Environment.GetEnvironmentVariable("ZIV_AI_SETTINGS_PATH");
+        try
+        {
+            Environment.SetEnvironmentVariable(
+                "ZIV_AI_SETTINGS_PATH", Path.Combine(_directory, "nope.ini"));
+            var settings = SettingsLoader.Load(_directory);
+
+            Assert.Equal("from-dir", settings.PipeName);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ZIV_AI_SETTINGS_PATH", saved);
+        }
+    }
+
+    [Fact]
     public void Load_Parses_Plugins_Section()
     {
         File.WriteAllLines(SettingsPath, new[]

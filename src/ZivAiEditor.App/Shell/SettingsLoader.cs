@@ -133,6 +133,17 @@ internal static class SettingsLoader
     {
         var directory = programDirectory ?? System.AppContext.BaseDirectory;
         var path = Path.Combine(directory, FileName);
+
+        // Explicit override (user intent): ZIV_AI_SETTINGS_PATH points at a specific settings.ini
+        // (e.g. a dev machine unified onto the portable install's file). Honoured only on the
+        // default path (programDirectory == null) so callers/tests passing a directory are
+        // unaffected; the file's own directory becomes the program directory for defaults.
+        if (programDirectory is null && TryResolveOverride(out var overrideFile))
+        {
+            directory = Path.GetDirectoryName(overrideFile)!;
+            path = overrideFile;
+        }
+
         EnsurePresent(path, directory);
 
         var sections = ParseSections(File.Exists(path) ? path : null);
@@ -200,6 +211,36 @@ internal static class SettingsLoader
                 VramNeedMb = GetDouble(rewriter, "vram_need_mb", rewriterDefaults.VramNeedMb),
             },
         };
+    }
+
+    /// <summary>
+    /// Resolves the <c>ZIV_AI_SETTINGS_PATH</c> override to an absolute file path, or
+    /// <c>false</c> when unset / blank / malformed (then the program directory is used).
+    /// </summary>
+    private static bool TryResolveOverride(out string path)
+    {
+        path = string.Empty;
+        var raw = (Environment.GetEnvironmentVariable("ZIV_AI_SETTINGS_PATH") ?? string.Empty).Trim();
+        if (raw.Length == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            var full = Path.GetFullPath(raw);
+            if (string.IsNullOrEmpty(Path.GetDirectoryName(full)))
+            {
+                return false;
+            }
+
+            path = full;
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     private static void EnsurePresent(string path, string directory)

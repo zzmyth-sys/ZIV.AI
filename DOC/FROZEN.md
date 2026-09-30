@@ -6913,3 +6913,54 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - Python `unittest discover -p "test_*.py"` → **306 / 0**（基线 303 + 新增 3）。
 - 旧 id `face-swap` → `resolve_path` 返回相对名 → 拼 `LORA_ROOT` → `unified_violation` = None（新增测试断言）。
 - 三件套未动；未跑 GPU；未碰 IPC / contracts / seams / 官方 ComfyUI。
+
+---
+
+## settings.ini 多副本统一：env 优先读 + 孤儿清理（2026-09-30）
+
+> **追加（只增不改）：** 承接「settings.ini 多副本统一只读调查」。裁判裁决：**不做物理一份**（跨目录耦合）；做「env 优先读 + 清理孤儿」；`comfy_root` 误值用户手改。本 commit 见 `git log`。
+
+### 裁决（写死）
+
+- 不做「物理唯一一份」；`settings.ini` 默认真源仍 = 程序目录（Z14）。
+- C# `SettingsLoader` 支持 `ZIV_AI_SETTINGS_PATH` **优先读**（此前仅注入给 Python）。
+- 清理孤儿：仓库根 `settings.ini`（App 从不读，untracked + gitignored）。
+- 用户 `settings.ini` 的值（含 `comfy_root` 误值）**不擅动**，由用户手改。
+
+### 读取优先级（最终实现）
+
+1. env `ZIV_AI_SETTINGS_PATH`（非空且可解析为绝对路径）→ 用它；其所在目录作为程序目录（默认值 / 发现链基准）。
+2. 否则 `<AppContext.BaseDirectory>/settings.ini`（现状）。
+3. 播种：`EnsurePresent(最终路径, 目录)`；`FindTemplate` 不变（同目录 `settings.ini.template` > 上溯含 `DOC/FROZEN.md` 的仓库根 template）。
+- 仅当调用方未显式传 `programDirectory`（即 `Load()` 默认）时才应用 env；`Load(dir)` 显式传入不受 env 影响（测试 / 调用方隔离）。
+
+### 改动
+
+1. `src/ZivAiEditor.App/Shell/SettingsLoader.cs`：`Load` 增 `TryResolveOverride`（env 解析）；仅 `programDirectory is null` 时生效。
+2. `启动.bat`：加注释示例 `set "ZIV_AI_SETTINGS_PATH=D:\Program Files\ZIV\ZIV.AI\settings.ini"`（**默认不启用**，行为不变）。
+3. 删除仓库根 `settings.ini`（孤儿，untracked + `.gitignore:37`）→ `git status` 不受影响。
+4. `src/ZivAiEditor.Tests/SettingsLoaderTests.cs`：新增 `Load_Prefers_Env_Settings_Path_Override`、`Load_Explicit_Directory_Ignores_Env_Override`。
+5. `App.csproj`：曾试 `PrivateAssets="all"` 收敛 Tests bin template——**实测无效**（重建后仍在），已**回退**，登记为已知。
+
+### Tests bin template 收敛（结论：未收敛，已知）
+
+- 试法：App.csproj `settings.ini.template` 加 `PrivateAssets="all"` → 删 Tests bin template 后重建**仍重新生成** → 无效，已回退。
+- 原因：`None`/`Content` 内容项经项目引用**传递复制**（`GetCopyToOutputDirectoryItems`）；`PrivateAssets` 只作用于 PackageReference。
+- 处理：**登记为已知**（不阻塞）；Tests bin 的 template 不影响运行（Tests 不读它）。
+
+### comfy_root 误值（用户手改指引，不擅动）
+
+- 开发机 `…\bin\Release\…\settings.ini` 与便携版 `D:\Program Files\ZIV\ZIV.AI\settings.ini` 的 `comfy_root = D:\devlop\ZIV.AI\Comfyui` **少一层 `ComfyUI`**。
+- 手改：`comfy_root = D:\devlop\ZIV.AI\Comfyui\ComfyUI`；**或**清空该键（走发现链：python_exe 反推 `…/Comfyui/ComfyUI`）。
+
+### 已知缺口（超本任务授权，登记）
+
+- `AppContext.cs:330` 仍向 Python 注入 `ZIV_AI_SETTINGS_PATH = <BaseDirectory>/settings.ini`；`SettingsWindow.axaml.cs:43` 仍写 `<BaseDirectory>/settings.ini`。故 env 覆盖**仅 C# 读取生效**，Python 的 `[plugins]` 与 UI 写回仍走程序目录 → 「完全统一到便携版」需同步这两处（本任务未授权）。
+
+### 验证（非 GPU）
+
+- `dotnet build src/ZIV.AI.sln -c Release` → 0 警告 / 0 错误。
+- C# 非 GPU `--filter "FullyQualifiedName!~Ipc"` → **825 / 0**（基线 823 + 新增 2）。
+- Python `unittest discover -p "test_*.py"` → **306 / 0**（未改 Python）。
+- 仓库根 `settings.ini` 已删；`git status` 仅示 3 个预期改动。
+- 三件套未动；未跑 GPU；未碰 IPC / contracts / seams / 官方 ComfyUI。
