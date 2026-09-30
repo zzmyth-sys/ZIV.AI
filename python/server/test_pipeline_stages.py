@@ -127,6 +127,36 @@ class AnchorFieldTests(unittest.TestCase):
         self.assertEqual(out["samples"], "SAMPLES")
 
 
+class PreviewIsolationTests(unittest.TestCase):
+    """B10: a preview failure is an optional-observation failure -- it must not
+    fail the sampling stage (the expensive sampler result is still returned)."""
+
+    def test_preview_exception_does_not_fail_stage(self):
+        rec = _Recorder()
+        preview_calls = []
+
+        def sample_from(ctx, **kw):
+            kw["callback"](0, "X0", "X", 1)  # drive one sampler step -> preview fires
+            return "SAMPLES"
+
+        def boom(step, total, jpeg):
+            preview_calls.append(step)
+            raise RuntimeError("preview boom")
+
+        with mock.patch.object(seams, "apply", rec), \
+                mock.patch.object(plugin_sampling, "sample_from", sample_from), \
+                mock.patch.object(plugin_sampling, "cleanup_ctx", mock.Mock()), \
+                mock.patch.object(preview_module, "get_previewer", lambda model: object()), \
+                mock.patch.object(preview_module, "encode_jpeg", lambda previewer, x0: b"\xff"), \
+                mock.patch.object(mem_guard, "enforce", lambda: None), \
+                _fake_comfy_patch():
+            out = pipeline_stages._stage_sample(
+                _ctx(), on_progress=None, on_preview=boom, poll_cancel=None)
+
+        self.assertEqual(preview_calls, [0])  # preview ran and raised...
+        self.assertEqual(out["samples"], "SAMPLES")  # ...but the stage still succeeded
+
+
 class ReadbackTests(unittest.TestCase):
     def test_before_encode_patch_feeds_encode_prompt(self):
         seen = {}

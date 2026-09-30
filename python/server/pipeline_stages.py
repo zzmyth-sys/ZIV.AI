@@ -116,9 +116,21 @@ def _stage_sample(ctx, *, on_progress, on_preview, poll_cancel):
             "sampling", "sampling",
         )
         if on_preview is not None and previewer is not None and step % preview_every == 0:
-            jpeg = preview_module.encode_jpeg(previewer, x0)
-            if jpeg:
-                on_preview(step, total, jpeg)
+            # B10: a preview is an optional observation. A failure while encoding
+            # it (latent decode) or shipping it (callback / pipe write) must not
+            # fail the whole task, so only this block is guarded. Everything above
+            # (cancel poll / interrupt check / mem_guard) stays outside: a real
+            # cancellation raises InterruptProcessingException, a BaseException
+            # that `except Exception` deliberately does not catch.
+            try:
+                jpeg = preview_module.encode_jpeg(previewer, x0)
+                if jpeg:
+                    on_preview(step, total, jpeg)
+            except Exception as exc:  # noqa: BLE001 - preview must never fail the task
+                _LOG.warning(
+                    "preview failed at step %s (%s: %s); continuing",
+                    step, type(exc).__name__, exc,
+                )
 
     noise = comfy.sample.prepare_noise(ctx["latent"], ctx["seed"])
     vram_probe.stage("sample BEG (first call loads weights)")

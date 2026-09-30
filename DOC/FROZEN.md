@@ -6326,3 +6326,38 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 
 ### G1C.4 状态
 - G1 对照**收尾**（性能结果为准）；**视觉签归用户**。产物落点见 `DOC/ACCEPTANCE.MD`「G1 收尾」段。
+
+---
+
+## B10 预览失败不影响任务（语义登记，2026-09-30）
+
+> **追加（只增不改）**。本条登记审计报告 B10 的修复与随之确立的产品语义；依据 `DOC/全代码分析.md:114`（B10）。
+
+### B10.1 语义
+- **「预览（preview）失败不影响任务」定为产品语义**：采样回调内生成 / 发送预览出错时，记日志并继续采样，
+  任务照常完成并保存结果（保留昂贵的采样产出）。
+- 依据：`contracts/ipc-protocol.md` §3.5 仅定义 preview 帧格式，**无失败语义条款**；审计报告
+  `DOC/全代码分析.md:114`「契约要求预览可选不影响成败」为**推断**，本次据裁决正式登记为本语义。
+
+### B10.2 实现
+- 位置：`python/server/pipeline_stages.py` `_stage_sample` 内 `callback` 的预览块。
+- 仅将预览块（`preview_module.encode_jpeg` + `on_preview` 调用）包进 `try/except Exception`；
+  异常以 `_LOG.warning`（异常类型 + 消息 + 当前 step）记录一次后继续。
+- **约束**：只包预览块；`poll_cancel()` / `throw_exception_if_processing_interrupted()` /
+  `mem_guard.enforce()` 保持在 try 之外（不得吞取消 / 中断 / 内存守卫）。
+- 用 `except Exception`，**不用 `BaseException`**：取消用的 `InterruptProcessingException` 继承
+  `BaseException`（`contracts/ipc-protocol.md:309-311`），必须继续向上传播以触发 `canceled`。
+- 与既有模式一致：`plugin_sampling.cleanup`（cleanup must never fail the task）、
+  `pipeline.run_outpaint` 的 `_remove_tree` 兜底。
+
+### B10.3 不改范围说明
+- **不改 `preview.py`**（只读调查的方案 B 未采纳）：调用点收口已同时覆盖其 `encode_jpeg` 失败源。
+- **不改 `handlers.py`**：生产 `on_preview`（`handlers._make_preview` → `frame_io.write_preview`）的
+  写管道异常同样被该调用点 `try` 覆盖。
+- 不碰 IPC / contracts / 冻结签名 / 公开签名；仅实现层收口。
+
+### B10.4 验证
+- 新增 headless 用例 `test_preview_exception_does_not_fail_stage`（注入抛 `RuntimeError` 的
+  `on_preview`，断言 `_stage_sample` 不抛且返回 samples）；`test_stage_exception_propagates_without_save`
+  仍作反向守卫（非预览异常仍应失败）。
+- 本 commit 随 B10 修复一并提交；不改既有冻结行。
