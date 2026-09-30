@@ -6397,3 +6397,37 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - `internal ChatRenderCount` / `internal ViewModel` 为**测试专用观测缝**（App 已
   `InternalsVisibleTo ZivAiEditor.Tests`），不改变任何行为 / 公开签名。
 - 本 commit 随 B1 修复一并提交；不改既有冻结行。
+
+---
+
+## B2 预览离线程解码 + 最新帧合并（2026-09-30）
+
+> **追加（只增不改）**。本条登记审计报告 B2 的修复：预览帧解码移出 UI 线程（Z11），高频时合并到最新帧。
+> 依据 `DOC/全代码分析.md`（B2）。
+
+### B2.1 语义
+- **解码在后台线程**：`Task.Run(() => new Bitmap(new MemoryStream(bytes)))`，与仓库既有 Z11 模式一致
+  （`DisplayImageLoader.LoadDisplayAsync` / `ImagePreview.LoadAsync` / `ImageImportBar.LoadThumbAsync`）。
+- **应用回 UI 线程**：`await Dispatcher.UIThread.InvokeAsync(() => ApplyPreviewBitmap(...))`；仅
+  `Image.Source` / 位图释放 / `IsVisible` 在 UI 线程执行。
+- **后到者胜（最新帧合并）**：`_pendingPreviewBytes` 只保留最新一帧；单飞 `DecodeLoopAsync` 每轮取走当帧解码，
+  期间到达的中间帧被覆盖跳过，不排队、不堆积。
+- `ShowPreview(byte[])` **签名不变**（公开面稳定）。
+
+### B2.2 实现
+- `MainWindow.Preview.cs`：`ShowPreview` 迁入本文件（原在 `MainWindow.axaml.cs`），并新增
+  `_pendingPreviewBytes` / `_decoding` 字段、`DecodeLoopAsync()`、`ApplyPreviewBitmap()`。
+- `_decoding` / `_pendingPreviewBytes` 仅在 UI 线程访问（每次 `await` 都回到 UI 线程），故无需加锁。
+- 保留原 `_pendingPreviewBitmap` 释放语义（应用新位图前 Dispose 旧位图）；`ReleaseBitmaps` 不改。
+- **不改** `App.axaml.cs`（`Dispatcher.UIThread.Post` 保留，无害）/ IPC / `PreviewReceived` / 帧格式 / Python。
+
+### B2.3 测试缝（仅观测）
+- `internal int LastPreviewDecodeThreadId`：后台解码完成时写 `Environment.CurrentManagedThreadId`（在
+  `Task.Run` 内，即线程池线程）。
+- `internal int PreviewApplyCount` / `internal int LastPreviewAppliedLength` / `internal bool HasPreviewImage`：
+  应用次数 / 末次帧字节长 / 是否已显示，供 headless 断言（App 已 `InternalsVisibleTo ZivAiEditor.Tests`）。
+
+### B2.4 验证
+- 新增 `MainWindowPreviewTests`（headless，SkiaSharp 合成 JPEG）：行为（应用成功）、线程（解码线程 ≠ UI 线程）、
+  合并（后到者胜、应用数 ≤ 帧数）。零 GPU / 零 Python。
+- 本 commit 随 B2 修复一并提交；不改既有冻结行。

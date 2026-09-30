@@ -4,7 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using ZivAiEditor.App.Controls;
 using ZivAiEditor.Contracts.Session;
 
@@ -234,5 +236,117 @@ public partial class MainWindow
         }
 
         return builder.ToString().Trim();
+    }
+
+    // ---- B2: off-thread preview decode + latest-frame coalescing ----
+
+    /// <summary>The newest preview frame awaiting decode, or <c>null</c>. A later frame overwrites it.</summary>
+    private byte[]? _pendingPreviewBytes;
+
+    /// <summary>True while the single decode loop is draining frames (UI-thread state).</summary>
+    private bool _decoding;
+
+    /// <summary>Managed id of the thread that last decoded a preview frame (test-only observation; B2).</summary>
+    internal int LastPreviewDecodeThreadId { get; private set; }
+
+    /// <summary>How many decoded preview frames have been applied to the pending Image (test-only; B2).</summary>
+    internal int PreviewApplyCount { get; private set; }
+
+    /// <summary>Compressed byte length of the last applied frame (test-only observation; B2).</summary>
+    internal int LastPreviewAppliedLength { get; private set; }
+
+    /// <summary>Whether the pending bubble currently shows a preview bitmap (test-only observation; B2).</summary>
+    internal bool HasPreviewImage => _pendingPreviewImage?.Source is not null;
+
+    /// <summary>
+    /// Renders a live preview JPEG (a backend <c>0x02</c> frame) into the pending bubble. Called on
+    /// the UI thread by the App wiring; ignored when no bubble is pending or the bytes are empty.
+    /// B2: the JPEG is decoded <b>off</b> the UI thread (Z11, mirroring <c>DisplayImageLoader</c> /
+    /// <c>ImagePreview</c> / <c>ImageImportBar</c>) and only the newest frame is applied, so a fast
+    /// producer cannot pile up decodes on the UI thread. Does not rebuild the chat stream, so
+    /// frequent frames only update one Image (no flicker).
+    /// </summary>
+    public void ShowPreview(byte[] jpegBytes)
+    {
+        if (_pendingPreviewImage is null || jpegBytes is null || jpegBytes.Length == 0)
+        {
+            return;
+        }
+
+        // B2 (latest-frame-wins): keep only the newest frame. If the decode loop is already
+        // draining, it will pick this frame up; intermediate frames are skipped, never queued.
+        _pendingPreviewBytes = jpegBytes;
+        if (_decoding)
+        {
+            return;
+        }
+
+        _decoding = true;
+        _ = DecodeLoopAsync();
+    }
+
+    /// <summary>
+    /// B2: one loop serves every queued frame — decode off the UI thread, then apply on it. Only
+    /// the frame in <see cref="_pendingPreviewBytes"/> when each iteration starts is decoded, so a
+    /// burst collapses to the newest frame. The loop state is UI-thread-only (every await resumes
+    /// on the UI thread), so no locking is needed.
+    /// </summary>
+    private async Task DecodeLoopAsync()
+    {
+        try
+        {
+            while (true)
+            {
+                var bytes = _pendingPreviewBytes;
+                if (bytes is null)
+                {
+                    break;
+                }
+
+                _pendingPreviewBytes = null;
+
+                Bitmap bitmap;
+                try
+                {
+                    bitmap = await Task.Run(() =>
+                    {
+                        using var stream = new MemoryStream(bytes);
+                        var decoded = new Bitmap(stream);
+                        LastPreviewDecodeThreadId = Environment.CurrentManagedThreadId;
+                        return decoded;
+                    }).ConfigureAwait(true);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[preview] decode failed: {ex.Message}");
+                    continue;
+                }
+
+                var length = bytes.Length;
+                await Dispatcher.UIThread.InvokeAsync(() => ApplyPreviewBitmap(bitmap, length));
+            }
+        }
+        finally
+        {
+            _decoding = false;
+        }
+    }
+
+    /// <summary>Applies a decoded preview bitmap to the pending bubble on the UI thread (B2).</summary>
+    private void ApplyPreviewBitmap(Bitmap bitmap, int bytesLength)
+    {
+        if (_pendingPreviewImage is null)
+        {
+            // The pending bubble was rebuilt away while decoding: drop the frame.
+            bitmap.Dispose();
+            return;
+        }
+
+        _pendingPreviewBitmap?.Dispose();
+        _pendingPreviewBitmap = bitmap;
+        _pendingPreviewImage.Source = bitmap;
+        _pendingPreviewImage.IsVisible = true;
+        LastPreviewAppliedLength = bytesLength;
+        PreviewApplyCount++;
     }
 }

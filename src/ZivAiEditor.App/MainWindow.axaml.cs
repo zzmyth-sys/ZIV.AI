@@ -483,34 +483,6 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(() => scroll.ScrollToEnd(), DispatcherPriority.Background);
     }
 
-    /// <summary>
-    /// Renders a live preview JPEG (a backend <c>0x02</c> frame) into the pending
-    /// bubble. Called on the UI thread by the App wiring; ignored when no bubble is
-    /// pending or the bytes cannot be decoded. Does not rebuild the chat stream, so
-    /// frequent frames only update one Image (no flicker).
-    /// </summary>
-    public void ShowPreview(byte[] jpegBytes)
-    {
-        if (_pendingPreviewImage is null || jpegBytes is null || jpegBytes.Length == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            using var stream = new MemoryStream(jpegBytes);
-            var bitmap = new Bitmap(stream);
-            _pendingPreviewBitmap?.Dispose();
-            _pendingPreviewBitmap = bitmap;
-            _pendingPreviewImage.Source = bitmap;
-            _pendingPreviewImage.IsVisible = true;
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[preview] {ex.Message}");
-        }
-    }
-
     /// <summary>Disposes every decoded bitmap and forgets the pending preview target.</summary>
     private void ReleaseBitmaps()
     {
