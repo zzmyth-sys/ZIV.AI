@@ -6556,3 +6556,15 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
   - `cancel` / `ping` 行为不变。
 - 新增 `test_disconnect.py` 4 例：submit → warning 且不中断；malformed JSON → warning；非 JSON → warning；shutdown → 非 warning。
 - 验证：Python CPU **279 / 0 / 11 skip**（275 + 4）；C# 非 GPU 794 / 0（未改 C#）。本 commit 随 B15 修复一并提交；不改既有冻结行。
+
+---
+
+## 帧长上限统一为 256 MiB（2026-09-30）
+
+> **追加（只增不改）**。C# `IpcFraming.MaxFrameBytes` 64 MiB → 256 MiB，与 Python（`ipc.py:12` / `config.py:63`）对齐。本 commit 见 `git log`。
+
+- 背景：C# 64 MiB / Python 256 MiB；越界即断连 → 两侧不一致。4K + 双图参考场景可能超 64 MiB。
+- 改动：`src/ZivAiEditor.Backend/IpcFraming.cs:10` 常量 **64 → 256 MiB**（仅此一处；唯一使用点 `:44` 读守卫）。
+- 理由：本地 IPC，非网络攻击面；Python 已先实现 256 MiB；升是不降级。**未改 Python 侧，未改协议语义**。
+- 验证：新增 `FrameLengthTests`（3 例）：常量 == 256 MiB；65 MiB 头**过**长度守卫（仅因截断抛 `EndOfStream`）；256 MiB+1 仍拒（`InvalidDataException`）。
+- C# 非 GPU **797 / 0**；Python 279 / 0 / 11 skip（未改 Python）。本 commit 随帧长上限统一一并提交；不改既有冻结行。

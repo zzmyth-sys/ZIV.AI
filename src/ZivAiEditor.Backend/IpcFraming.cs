@@ -7,7 +7,10 @@ internal static class IpcFraming
 {
     public const byte FrameJson = 0x01;
     public const byte FrameBinary = 0x02;
-    public const int MaxFrameBytes = 64 * 1024 * 1024;
+    // Task 3: match Python's cap (ipc.py:12 / config.py:63 = 256 MiB) so a large (4K + multi-ref)
+    // frame is not rejected by C# while Python already sends it. Raising the cap is not a
+    // behavioral downgrade; local IPC is not a network attack surface.
+    public const int MaxFrameBytes = 256 * 1024 * 1024;
 
     private static readonly byte[] ShutdownFrame = Encoding.UTF8.GetBytes("{\"type\":\"shutdown\"}");
 
