@@ -6269,3 +6269,36 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 ### G1P.4 落地提交
 - 本次落地 commit 即包含本段（2 文件：`DOC/G1_PROTOCOL.md` 新建 + `DOC/FROZEN.md` 本段）。
 - 下一步：**正式 G1 对照**（另立任务；本协议为操作口径）。
+
+---
+
+## 正式 G1 对照执行（日期：2026-09-30）
+
+> **追加（只增不改）**。按 `DOC/G1_PROTOCOL.md`（协议 commit `cffecd5`）执行正式对照；引用
+> §G1R.* / §G1P.*。GPU 任务（Z30 已过）。不改产品 / IPC / Python 后端 / contracts / `goldens.json`。
+
+### G1E.1 环境与 Z30
+- RTX 4080 16GB / driver 591.86 / torch 2.13.0+cu130 / ComfyUI 0.37.0；同机同会话。
+- Z30 `gpu-check` free=true（used 1204 MiB，`large_apps=[]`）。
+
+### G1E.2 执行（12 次 GPU 触碰，全部 exit 0）
+- 口径按协议：`T_total` = ZIV `LOADED + wall_sec` ↔ 官方 `wall_total_sec`；冷对冷（官方每跑前 kill 服务）；≥3 次中位数。
+- **G1-NV**：ZIV 58.0/57.8/58.1（median 58.0，抖动 0.5%）；官方 115.3/116.5/118.9（median 116.5，抖动 3.2%）→ **Δ_NV = −58.5s（−50.2%）**。
+- **G1-V**：ZIV 39.6/32.8/33.1/32.9/33.2（median 33.1，含首跑异常 r1；排除 r1 后 33.0，抖动 1.2%）；官方 58.9/57.0/57.3（median 57.3，抖动 3.3%）→ **Δ_V = −24.3s（−42.3%）**。
+- 抖动处理：加跑 r4/r5 后排除 ZIV-V 首跑异常（协议 §8）；排除后各侧 ≤10%。
+
+### G1E.3 判据结论
+- 按 §4 三档：两档 **Δ < 8.0s（含负值）→「ZIV 慢 ~10s」不成立**（ZIV 更快）。
+- 官方峰值 RSS 明显更高（NV 16.0 / V 22.9 GB vs ZIV 10.7 / 14.5 GB）；VRAM 官方 15.2–15.8 GB vs ZIV 11.4–14.3 GB。
+- 两次 SHA 各自多次一致 → 输出确定性。
+
+### G1E.4 未对齐项按协议执行情况
+- ① 分段：用 `T_total`（两侧可导出）——**按协议**。
+- ② 负向编码：不可对齐 → 口径修正为**保守下界**（官方偏慢）；结论方向不受影响——**按协议**。
+- ③ 冷/冷：官方每跑前 kill 服务重起；ZIV 天然冷——**按协议**。
+- ④ ≥3 次 + 抖动处理：ZIV-V 加跑 r4/r5、排除首跑异常（记录原因）——**按协议**。
+- **协议未枚举的新观察（登记，不阻塞）**：ZIV 默认 `SageAttention ON`、官方 stock OFF → 影响 wall；建议后续在协议中对「attention 后端」显式对齐或标注。
+
+### G1E.5 边界
+- 结果仅本机本会话（RTX 4080 / 驱动 591.86 / torch 2.13.0+cu130）有效；跨机 / 驱动不可比。
+- 非视觉验收；视觉签归用户。

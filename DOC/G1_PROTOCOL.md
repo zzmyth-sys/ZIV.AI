@@ -173,3 +173,5 @@
 
 - 2026-09-30：首版；依据 `DOC/FROZEN.md` §G1R.*（commit `1dbd135`），含裁判加固 1（LOADED 脆弱性）
   与加固 2（三档判据）。
+- 2026-09-30：img3 = `tools/zivcli/harness/fixtures/img3.png`（`683bdd1` 引入，SHA `EE31F26B…`；
+  非 `DOC/ICO/logo.png`）——澄清 §1 / §6 的 img3 来源。
