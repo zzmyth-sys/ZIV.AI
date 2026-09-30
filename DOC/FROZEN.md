@@ -6431,3 +6431,36 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 新增 `MainWindowPreviewTests`（headless，SkiaSharp 合成 JPEG）：行为（应用成功）、线程（解码线程 ≠ UI 线程）、
   合并（后到者胜、应用数 ≤ 帧数）。零 GPU / 零 Python。
 - 本 commit 随 B2 修复一并提交；不改既有冻结行。
+
+---
+
+## B17 /生成预检不再隐式拉起 Python（2026-09-30）
+
+> **追加（只增不改）**。本条登记审计报告 B17 的修复：`/生成` 预检不再经 `CheckHealthAsync`
+> 隐式启动 Python 后端。依据 `DOC/全代码分析.md`（B17）。
+
+### B17.1 语义（产品级裁决）
+- 预检顺序：① LLM `/health`（1.5s）→ 不可达则 `LlmUnreachable`（不变）；② LLM 可达后判断**后端是否已在运行**：
+  - **运行中** → 照旧 `CheckHealthAsync` 读 VRAM（不变）。
+  - **未运行** → **不调用** `CheckHealthAsync`，直接 `Ready("就绪（显存状态未知）")`。
+- 产品级裁决：**接受「未运行 → 显存未知 → Ready」**，与既有 D7 降级（VRAM 读失败 → `Ready("就绪（显存状态未知）")`，
+  `LlmPreflight.cs` 原 :119-130）一致；后端由正常提交路径按需启动（`IpcInferenceClient.SubmitEditAsync` → `EnsureStartedAsync`）。
+- **不采纳**方案 D2（C# 直接 `P/Invoke nvml.dll` 读显存）：新增平台依赖、超范围、需 GPU 验证。
+
+### B17.2 实现
+- 文件：`src/ZivAiEditor.App/LlmPreflight.cs`（**不是** Agent 层；任务授权「路径以实际为准」）。
+- 新增可选参 `Func<bool>? isBackendRunning = null`（加在既有可选参之后，向后兼容）；
+  默认解析为 `client is IpcInferenceClient ipc → () => ipc.Process.IsProcessRunning`，非 IPC 假实现 → `true`（保持既有测试语义）。
+- `CheckAsync` 在 `CheckHealthAsync` 前加门控：`if (!_isBackendRunning()) return Ready(显存未知)`。
+- **不改** `IInferenceClient` 契约 / IPC / `contracts` / 冻结签名；**不改** Python 后端 / `handlers.py`。
+
+### B17.3 依赖边界
+- 判定经 App 层已存在的引用：`App.csproj` 已 `ProjectReference ZivAiEditor.Backend`，故 App 层可直接访问
+  `IpcInferenceClient.Process`（`IpcInferenceClient.cs:36`）与 `PythonProcessManager.IsProcessRunning`（`PythonProcessManager.cs:301`）；
+  **无需新增 Agent→Backend 依赖**（无依赖方向变更）。
+
+### B17.4 验证
+- 新增 2 个 headless 测试（`PreflightTests`）：谓词 `() => false` + 计数 fake → `CheckHealthAsync` 未调用且 `Ready`；
+  真实 `IpcInferenceClient` + dummy `PythonProcessManager` + 假 HTTP 200 → `CheckAsync` 后 `manager.State == Stopped` 且未运行。
+- 既有 5 个 `PreflightTests`（fake 非 IPC → 默认「运行中」）全部仍通过。零 GPU / 零 Python。
+- 本 commit 随 B17 修复一并提交；不改既有冻结行。

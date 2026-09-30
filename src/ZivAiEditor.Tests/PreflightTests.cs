@@ -1,5 +1,6 @@
 using System.Net;
 using ZivAiEditor.App;
+using ZivAiEditor.Backend;
 using ZivAiEditor.Contracts.Inference;
 using Xunit;
 
@@ -39,8 +40,13 @@ public class PreflightTests
 
         public FakeInferenceClient(double vramUsed) => _vramUsed = vramUsed;
 
+        public int HealthCalls { get; private set; }
+
         public Task<HealthStatus> CheckHealthAsync(CancellationToken ct = default)
-            => Task.FromResult(new HealthStatus { VramUsedMb = _vramUsed });
+        {
+            HealthCalls++;
+            return Task.FromResult(new HealthStatus { VramUsedMb = _vramUsed });
+        }
 
         public Task<InferenceTaskHandle> SubmitInpaintAsync(
             InpaintRequest request,
@@ -158,5 +164,53 @@ public class PreflightTests
         var result = await preflight.CheckAsync();
 
         Assert.Equal(LlmPreflightStatus.Ready, result.Status);
+    }
+
+    [Fact]
+    public async Task Backend_Not_Running_Skips_Vram_Probe_And_Stays_Ready()
+    {
+        // B17: the LLM is reachable but the ComfyUI backend is not running. The preflight must NOT
+        // call CheckHealthAsync (which would start Python); VRAM degrades to "unknown" -> Ready.
+        var fake = new FakeInferenceClient(0);
+        var handler = new FakeHandler(() => new HttpResponseMessage(HttpStatusCode.OK));
+        var preflight = new LlmPreflight(
+            fake,
+            "http://127.0.0.1:8080/v1/chat/completions",
+            16376,
+            9800,
+            new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan },
+            isBackendRunning: () => false);
+
+        var result = await preflight.CheckAsync();
+
+        Assert.Equal(LlmPreflightStatus.Ready, result.Status);
+        Assert.Equal(0, fake.HealthCalls);
+    }
+
+    [Fact]
+    public async Task Real_Backend_Not_Started_By_Preflight()
+    {
+        // B17: end-to-end proof with a real IpcInferenceClient — a stopped backend is never started
+        // by the preflight (no Python / GPU is launched).
+        var manager = new PythonProcessManager(new PythonBackendOptions
+        {
+            PythonExe = "python.exe",
+            Script = "main.py",
+        });
+        using var client = new IpcInferenceClient(manager, ownsProcess: true);
+
+        var handler = new FakeHandler(() => new HttpResponseMessage(HttpStatusCode.OK));
+        var preflight = new LlmPreflight(
+            client,
+            "http://127.0.0.1:8080/v1/chat/completions",
+            16376,
+            9800,
+            new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan });
+
+        var result = await preflight.CheckAsync();
+
+        Assert.Equal(LlmPreflightStatus.Ready, result.Status);
+        Assert.Equal(PythonBackendState.Stopped, manager.State);
+        Assert.False(manager.IsProcessRunning);
     }
 }

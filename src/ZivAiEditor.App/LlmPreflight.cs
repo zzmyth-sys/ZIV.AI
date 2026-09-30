@@ -2,6 +2,7 @@ using System;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using ZivAiEditor.Backend;
 using ZivAiEditor.Contracts.Inference;
 
 namespace ZivAiEditor.App;
@@ -55,12 +56,19 @@ public sealed class LlmPreflight : ILlmPreflight
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
 
+    /// <summary>
+    /// B17: whether the ComfyUI backend is already running. The VRAM probe runs only when it is,
+    /// so <c>/生成</c> never starts the Python backend as a side effect of a "check".
+    /// </summary>
+    private readonly Func<bool> _isBackendRunning;
+
     public LlmPreflight(
         IInferenceClient client,
         string llmEndpoint,
         double vramTotalMb,
         double vramNeedMb,
-        HttpClient? httpClient = null)
+        HttpClient? httpClient = null,
+        Func<bool>? isBackendRunning = null)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _healthUrl = BuildHealthUrl(llmEndpoint);
@@ -68,7 +76,17 @@ public sealed class LlmPreflight : ILlmPreflight
         _vramNeedMb = vramNeedMb;
         _http = httpClient ?? new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
         _ownsHttp = httpClient is null;
+        _isBackendRunning = isBackendRunning ?? DefaultBackendRunningProbe(client);
     }
+
+    /// <summary>
+    /// B17: default "is the backend already running?" probe. It reads the concrete
+    /// <see cref="IpcInferenceClient"/>'s process state (the App layer already references Backend,
+    /// so no contract change is needed); a non-IPC client (a test fake) is treated as running so
+    /// the VRAM probe keeps its legacy behaviour.
+    /// </summary>
+    private static Func<bool> DefaultBackendRunningProbe(IInferenceClient client)
+        => client is IpcInferenceClient ipc ? () => ipc.Process.IsProcessRunning : static () => true;
 
     public async Task<LlmPreflightResult> CheckAsync(CancellationToken ct = default)
     {
@@ -90,6 +108,18 @@ public sealed class LlmPreflight : ILlmPreflight
         {
             System.Diagnostics.Debug.WriteLine($"[llm-preflight] probe failed: {ex.Message}");
             return Unreachable();
+        }
+
+        // B17: the backend is not running. Do NOT start it just to read VRAM — the normal submit
+        // path starts it on demand (IpcInferenceClient.SubmitEditAsync). This is the same downgrade
+        // as a VRAM read failure (D7): proceed Ready with the unknown-VRAM message.
+        if (!_isBackendRunning())
+        {
+            return new LlmPreflightResult
+            {
+                Status = LlmPreflightStatus.Ready,
+                Message = "就绪（显存状态未知）",
+            };
         }
 
         try
