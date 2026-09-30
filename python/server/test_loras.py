@@ -222,5 +222,37 @@ class LegacyAliasTests(unittest.TestCase):
             self.assertEqual("no-such-id", loras.resolve_path("no-such-id", {}))
 
 
+class OwnerRoutingTests(unittest.TestCase):
+    """2026-09-30 owner 归属：缺失 / 未知一律 none（归公共管理器）。"""
+
+    def test_explicit_owners(self):
+        registry = {
+            "m": {"id": "m", "owner": "model", "path": "p"},
+            "p": {"id": "p", "owner": "Plugin", "path": "p"},
+            "n": {"id": "n", "owner": "none", "path": "p"},
+        }
+        self.assertEqual("model", loras.resolve_owner("m", registry))
+        self.assertEqual("Plugin", loras.resolve_owner("p", registry))
+        self.assertEqual("none", loras.resolve_owner("n", registry))
+
+    def test_absent_owner_is_none(self):
+        self.assertEqual("none", loras.resolve_owner("x", {"x": {"id": "x", "path": "p"}}))
+        self.assertEqual("none", loras.resolve_owner("unknown", {}))
+        self.assertEqual("none", loras.resolve_owner("", {}))
+
+
+class UnifiedViolationTests(unittest.TestCase):
+    """2026-09-30 目录唯一强约束（告警级）：统一目录之外即违规。"""
+
+    def test_outside_root_is_violation(self):
+        with mock.patch.object(config, "LORA_ROOT", r"D:\root\loras"):
+            self.assertIsNotNone(loras.unified_violation(r"D:\other\x.safetensors"))
+            self.assertIsNone(loras.unified_violation(r"D:\root\loras\x.safetensors"))
+
+    def test_no_root_is_no_violation(self):
+        with mock.patch.object(config, "LORA_ROOT", ""):
+            self.assertIsNone(loras.unified_violation(r"D:\other\x.safetensors"))
+
+
 if __name__ == "__main__":
     unittest.main()

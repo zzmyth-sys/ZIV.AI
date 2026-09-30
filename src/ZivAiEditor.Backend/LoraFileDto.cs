@@ -19,11 +19,18 @@ internal sealed class LorasFileDto
     public List<LoraEntryDto>? Loras { get; init; }
 }
 
-/// <summary>One entry in <c>Template/loras.json</c> (id + weight path + default strengths + note).</summary>
+/// <summary>One entry in <c>Template/loras.json</c> (id + weight path + default strengths + owner + note).</summary>
 public sealed class LoraEntryDto
 {
     [JsonPropertyName("id")]
     public string? Id { get; init; }
+
+    /// <summary>
+    /// Ownership routing (2026-09-30): <c>model</c> (template-private) / <c>Plugin</c> (plugin-owned)
+    /// / <c>none</c> (public manager). Absent = <c>none</c>.
+    /// </summary>
+    [JsonPropertyName("owner")]
+    public string? Owner { get; init; }
 
     [JsonPropertyName("path")]
     public string? Path { get; init; }

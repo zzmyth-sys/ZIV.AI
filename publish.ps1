@@ -78,8 +78,10 @@ Get-ChildItem -LiteralPath $OutputDir -Force | Where-Object {
 # P2-2: the built-in Template json files are copied with CopyToOutputDirectory=PreserveNewest,
 # which only overwrites when the source is newer than the target. Delete the preserved copies
 # first so the next publish is guaranteed to refresh them (Template/commands.user.json, the user
-# override, is kept).
-foreach ($builtinName in @('commands.json', 'loras.json', 'models.json', 'plugins.json')) {
+# override, is kept). Template/loras.json is a developer log (append-only); it is synced normally
+# (PreserveNewest: the maintained source wins) rather than force-refreshed, so its history is not
+# clobbered by an unconditional delete.
+foreach ($builtinName in @('commands.json', 'models.json', 'plugins.json')) {
     $builtinPath = Join-Path $OutputDir "Template\$builtinName"
     if (Test-Path -LiteralPath $builtinPath) {
         Remove-Item -LiteralPath $builtinPath -Force

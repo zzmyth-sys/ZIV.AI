@@ -289,6 +289,11 @@ def _register_loras(payload):
         if not lora_path:
             _LOG.warning("LoRA id/path could not be resolved: %s", lora.get("path"))
             continue
+        # Strong-directory diagnostic (2026-09-30): warn (never fail) when a resolved weight is
+        # outside the unified dir (<comfy_root>/models/loras).
+        violation = loras.unified_violation(lora_path)
+        if violation:
+            _LOG.warning(violation)
         pipeline_hooks.register_pre_sampling_hook(
             pipeline_hooks.make_lora_hook(
                 lora_path,

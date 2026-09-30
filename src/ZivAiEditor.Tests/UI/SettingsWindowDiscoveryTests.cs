@@ -139,6 +139,43 @@ public class SettingsWindowDiscoveryTests
     }
 
     [Fact]
+    public void SettingsWindow_Lists_Public_Loras()
+    {
+        var directory = NewDirectory();
+        try
+        {
+            var comfy = Path.Combine(directory, "ComfyUI");
+            var loraRoot = Path.Combine(comfy, "models", "loras");
+            Directory.CreateDirectory(loraRoot);
+            File.WriteAllText(Path.Combine(loraRoot, "owned.safetensors"), "");
+            File.WriteAllText(Path.Combine(loraRoot, "public.safetensors"), "");
+            File.WriteAllText(Path.Combine(directory, "loras.json"),
+                "{ \"loras\": [ { \"id\": \"face\", \"owner\": \"model\", \"path\": \"C:/x/owned.safetensors\" } ] }");
+            var settings = new BackendSettings { ComfyRoot = comfy };
+
+            HeadlessTest.Run(() =>
+            {
+                var window = new SettingsWindow(new FakeShell(directory, settings), new PluginRegistry(Path.Combine(directory, "plugins.json")));
+                try
+                {
+                    var label = window.FindControl<TextBlock>("PART_PublicLoras");
+                    Assert.NotNull(label);
+                    Assert.Contains("public.safetensors", label!.Text);
+                    Assert.DoesNotContain("owned.safetensors", label.Text);
+                }
+                finally
+                {
+                    window.Close();
+                }
+            });
+        }
+        finally
+        {
+            DeleteDirectory(directory);
+        }
+    }
+
+    [Fact]
     public void SettingsWindow_Advanced_Exposes_Python_Comfy_Lora_Overrides()
     {
         var directory = NewDirectory();

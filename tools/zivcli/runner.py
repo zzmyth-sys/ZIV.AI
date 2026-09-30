@@ -45,6 +45,7 @@ SCN_ENV_KEYS = (
     "SCN_IMG2",
     "SCN_IMG3",
     "SCN_PROMPT",
+    "SCN_LORAS",
     "REPRO_HARNESS",
 )
 
@@ -61,6 +62,7 @@ class RunOptions:
     img2: str = None
     img3: str = None
     prompt: str = None
+    loras: tuple = ()
     max_wall: float = 120.0
     max_vram: float = 15500.0
     max_rss_gb: float = 18.0
@@ -85,6 +87,10 @@ def build_env(opts, base=None):
     # then falls back to its default — documented, not a silent drop).
     if opts.prompt is not None:
         env["SCN_PROMPT"] = str(opts.prompt)
+    if opts.loras:
+        # Comma list of LoRA ids / unified-dir relative names; the harness resolves each via
+        # loras.resolve_path and registers it as a pre-sampling hook.
+        env["SCN_LORAS"] = ",".join(str(item) for item in opts.loras)
     env["REPRO_HARNESS"] = str(opts.harness)
     return env
 

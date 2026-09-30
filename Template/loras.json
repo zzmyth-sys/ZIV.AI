@@ -1,9 +1,10 @@
 {
   "version": "1",
-  "_comment": "Public LoRA registry (Step 8-1; 2026-09-30 two-class split). Public LoRAs (plugin-managed) are declared here; template-private LoRAs are declared inline in Template/commands.json. The Python backend resolves an id to a weight path via python/server/loras.py. Public weights are copied into <comfy_root>/models/loras and referenced by relative name.",
+  "_comment": "LoRA data table (2026-09-30 owner model). One entry per known LoRA (id / path / owner / default strengths / description). `owner` routes it: 'model' (template-private, e.g. /换脸), 'Plugin' (plugin-owned, e.g. viggle), 'none' (public manager). `path` is the weight origin; a template references the unified-dir relative name (<comfy_root>/models/loras). Absent owner = 'none'. Entries with no owner and runtime-scanned weights are owned by the lora-manager plugin.",
   "loras": [
     {
       "id": "example_lora",
+      "owner": "none",
       "path": "D:\\path\\to\\your\\lora.safetensors",
       "default_strength_model": 1.0,
       "default_strength_clip": 1.0,
@@ -11,10 +12,19 @@
     },
     {
       "id": "qwen21-viggle-turbo-6step",
+      "owner": "Plugin",
       "path": "E:\\Downloads\\工作流\\姿态编辑流\\lora\\Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors",
       "default_strength_model": 1.0,
       "default_strength_clip": 1.0,
-      "description": "Qwen-Image-2.1 viggle-turbo v0.2.1 6-step 蒸馏 LoRA（公共；插件 qwen21-viggle-6step 专用；r256，diffusers 格式）"
+      "description": "Qwen-Image-2.1 viggle-turbo v0.2.1 6-step 蒸馏 LoRA（owner=Plugin；插件 qwen21-viggle-6step 专用；r256，diffusers 格式）"
+    },
+    {
+      "id": "face-swap",
+      "owner": "model",
+      "path": "C:\\AI\\ComfyUI_PIC\\ComfyUI\\models\\loras\\qwen_image2\\bfs_head_v1.1_qwen_2.1.safetensors",
+      "default_strength_model": 1.0,
+      "default_strength_clip": 1.0,
+      "description": "BFS Head V1.1 换头 LoRA（owner=model，归 /换脸；统一目录相对名 bfs_head_v1.1_qwen_2.1.safetensors）"
     }
   ]
 }

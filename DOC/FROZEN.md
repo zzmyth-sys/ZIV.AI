@@ -6715,3 +6715,41 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - Python `unittest discover -p "test_*.py"` → **284 / 0 / 11 skip**（基线 282 + 新增 2：`LegacyAliasTests`）。
 - 三件套路径未改；未跑 GPU；未碰 IPC / contracts / 冻结签名。
 - 复制落地（`<comfy_root>/models/loras` 含 viggle + face-swap）需真机 App 启动后确认（本批为 mock / 代码审查）。
+
+---
+
+## LoRA owner 归属 + 公共管理器插件 + 发布同步（2026-09-30）
+
+> **追加（只增不改）：** 用户裁决：owner 三选一（model/Plugin/none）；没写 owner 一律归公共管理器；公共管理器=插件，挂在现有 seams 锚点；`loras.json` 为数据表，`publish.ps1` 改为同步。本 commit 见 `git log`。
+
+### 裁决（写死）
+
+- owner 归属：写了 owner 按 owner 走（model / Plugin / none）；**没写 owner → 一律归公共管理器（等价 none）**。
+- `Template/loras.json` = **数据表**（id / path / owner / 默认强度 / 描述），非运行期用户文件，运行期不写回。
+- 公共管理器 = **插件**，用 `seams.py` 的「管线中间插节点」机制，挂**现有锚点**，不新加锚点。
+- 目录唯一：LoRA 物理位置 = `<comfy_root>/models/loras`（各类 origin 复制至此）。
+- 三件套不动。
+
+### 改动
+
+1. `Template/loras.json`：每条加 `owner`（example_lora=none / qwen21-viggle-turbo-6step=Plugin / face-swap=model）；新增 face-swap 条目（path=原 C# 硬编码 origin）。结构保持 `{version, loras:[]}`。
+2. `publish.ps1`：`loras.json` 从「删除刷新」列表移除，改为随 `PreserveNewest` **同步**；其余 `commands/models/plugins.json` 仍强制刷新。
+3. `src/ZivAiEditor.Backend/LoraFileDto.cs`：`LoraEntryDto` 加 `Owner`（数据字段）。
+4. `python/server/loras.py`：新增 `resolve_owner`（缺省 none）与 `unified_violation`（统一目录强约束告警级）。
+5. `src/ZivAiEditor.App/App.axaml.cs`：删除硬编码 `PrivateLoraSeeds`；改 `SeedModelLoras` 读 loras.json `owner=model` 条目，把 origin 复制进统一目录。
+6. `plugin_packs/lora-manager/`（新）：公共管理器插件，挂 `before_encode` 锚点；扫描统一目录 → 与 loras.json 比对 → 未被 owner=model/Plugin 记录者归公共（默认关）；提供 `list_public()`；**不写回 loras.json**、不串联。`Template/plugins.json` 登记（`seams:["before_encode"]`, `enabled_by_default:true`）。
+7. 三调用口：UI = `SettingsWindow` 新增「公共 LoRA」只读区（C# 扫描统一目录 − owner 记录）；命令 = `commands.json` 可引用统一目录相对名；CLI = `ziv run --lora <id>`（→ `SCN_LORAS`）。
+8. `python/server/handlers.py`：注册 LoRA 前经 `loras.unified_violation` 记 warning（不失败）。
+
+### 公共管理器挂载锚点（理由）
+
+- 选 **`before_encode`**（`seams.py:35`，白名单 `seams.py:50`）。理由：①它是编辑管线**第一个**锚点（`pipeline_stages.py:46`），扫描/注册在任何编码/采样前完成；②管理器只做「扫描+列出」，**不产生 patch**（返回 `None`），挂早期锚点最不干扰；③`before_sample` 已被 viggle 占用做模型 patch，管理器无需模型态。
+- 不新加锚点（`seams.py:32-40` 六个固定锚点已为优化插件 / LoRA 留口）。
+
+### 验证（非 GPU）
+
+- `dotnet build src/ZIV.AI.sln -c Release` → 0 警告 / 0 错误。
+- C# 非 GPU `--filter "FullyQualifiedName!~Ipc"` → **819 / 0**（基线 817 + 新增 2）。
+- Python `unittest discover -p "test_*.py"` → **295 / 0 / 11 skip**（基线 284 + 新增 11）。
+- headless 复核：lora-manager 已登记（`seams_for=['before_encode']`、loaded、enabled）；CLI `build_env` 设置 `SCN_LORAS=a,b`。
+- 三件套未动；未跑 GPU；未碰 IPC / contracts / 冻结签名。

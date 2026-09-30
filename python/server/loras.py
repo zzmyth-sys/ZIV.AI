@@ -60,6 +60,19 @@ def resolve(id_or_path, registry=None):
     return registry.get(id_or_path.strip())
 
 
+def resolve_owner(id_or_path, registry=None):
+    """Owner routing for a LoRA id (2026-09-30): ``model`` / ``Plugin`` / ``none``.
+
+    Absent / unknown / blank -> ``none`` (the public manager owns it).
+    """
+    entry = resolve(id_or_path, registry)
+    if isinstance(entry, dict):
+        owner = entry.get("owner")
+        if isinstance(owner, str) and owner.strip():
+            return owner.strip()
+    return "none"
+
+
 def resolve_strength(value, entry=None, default_key=None):
     """Resolve one LoRA strength (Step 8-2, semantic-inversion fix).
 
@@ -107,3 +120,23 @@ def resolve_path(id_or_path, registry=None, validate=False):
     if validate and not os.path.isfile(path):
         raise ValueError("LoRA 文件不存在：%s" % path)
     return path
+
+
+def unified_violation(path):
+    """Return a message when ``path`` is outside the unified dir, else ``None``.
+
+    Diagnostic-only (2026-09-30 strong-directory rule): callers log it; never raises, so a
+    legacy / fallback path degrades to a warning instead of failing the task.
+    """
+    root = (getattr(config, "LORA_ROOT", "") or "").strip()
+    if not root or not path:
+        return None
+    try:
+        root_abs = os.path.abspath(root)
+        path_abs = os.path.abspath(path)
+        common = os.path.commonpath([root_abs, path_abs])
+    except ValueError:
+        common = ""
+    if common != root_abs:
+        return "LoRA 不在统一目录（%s）：%s" % (root, path)
+    return None

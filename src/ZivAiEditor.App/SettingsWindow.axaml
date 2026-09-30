@@ -121,6 +121,14 @@
               </Expander>
 
               <StackPanel Spacing="8">
+                <TextBlock Text="公共 LoRA（未归属；由公共管理器管理，默认关）" Foreground="{StaticResource ZivTextSecondaryBrush}" />
+                <TextBlock x:Name="PART_PublicLoras"
+                           TextWrapping="Wrap"
+                           FontSize="11"
+                           Foreground="{StaticResource ZivTextSecondaryBrush}" />
+              </StackPanel>
+
+              <StackPanel Spacing="8">
                 <TextBlock Text="模板配置" Foreground="{StaticResource ZivTextSecondaryBrush}" />
                 <Button x:Name="PART_OpenTemplate" Content="打开 Template 文件夹"
                         MinWidth="160" Height="30" HorizontalAlignment="Left" />

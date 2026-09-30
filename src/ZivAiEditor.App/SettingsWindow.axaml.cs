@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -269,11 +271,65 @@ public partial class SettingsWindow : Window
         SetLabel("PART_LoraRootLabel",
             "loras: " + (ComfyDiscovery.DeriveLoraRoot(settings.ComfyRoot) ?? "(未发现 ComfyUI，无法推导)"));
 
+        var publicLoras = ScanPublicLoras(ComfyDiscovery.DeriveLoraRoot(settings.ComfyRoot));
+        SetLabel("PART_PublicLoras", publicLoras.Count == 0 ? "(无)" : string.Join("、", publicLoras));
+
         if (!string.IsNullOrWhiteSpace(settings.IgnoredScript)
             && this.FindControl<TextBlock>("PART_ScriptWarning") is { } warning)
         {
             warning.Text = "已忽略自定义 main.py（随版本发布，不可修改）：" + settings.IgnoredScript;
             warning.IsVisible = true;
+        }
+    }
+
+    /// <summary>
+    /// Read-only scan of the unified LoRA directory for **public** weights: files not owned by a
+    /// logged <c>owner=model</c> / <c>owner=Plugin</c> entry. Mirrors the Python manager plugin's
+    /// diff so the UI and the backend agree.
+    /// </summary>
+    private IReadOnlyList<string> ScanPublicLoras(string? loraRoot)
+    {
+        if (string.IsNullOrWhiteSpace(loraRoot) || !Directory.Exists(loraRoot))
+        {
+            return Array.Empty<string>();
+        }
+
+        var owned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var registry = new LoraRegistry(Path.Combine(_shell.TemplateDirectory, "loras.json"));
+            foreach (var entry in registry.All)
+            {
+                var owner = entry.Owner ?? "";
+                if (!owner.Equals("model", StringComparison.OrdinalIgnoreCase)
+                    && !owner.Equals("Plugin", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(entry.Path))
+                {
+                    owned.Add(Path.GetFileName(entry.Path!));
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // A missing / unreadable log leaves everything public (never fatal).
+        }
+
+        try
+        {
+            return Directory.EnumerateFiles(loraRoot!, "*.safetensors")
+                .Select(Path.GetFileName)
+                .Where(name => !string.IsNullOrEmpty(name) && !owned.Contains(name!))
+                .Cast<string>()
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        catch (Exception)
+        {
+            return Array.Empty<string>();
         }
     }
 

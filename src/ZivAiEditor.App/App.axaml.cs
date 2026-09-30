@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
+using ZivAiEditor.Backend;
 using ZivAiEditor.Diagnostics;
 using ZivAiEditor.UI;
 
@@ -13,18 +14,6 @@ namespace ZivAiEditor.App;
 public partial class App : Application
 {
     private AppContext? _context;
-
-    /// <summary>
-    /// Bootstrap seeds for **template-private** LoRAs: copies each known weight into the unified
-    /// directory (<c>&lt;comfy_root&gt;/models/loras</c>) on launch so the relative filename
-    /// declared in <c>commands.json</c> resolves. Best-effort: a missing source is a diagnostic
-    /// only (never blocks). Public LoRAs are seeded by their plugins at first use.
-    /// </summary>
-    private static readonly (string Source, string Name)[] PrivateLoraSeeds =
-    {
-        (@"C:\AI\ComfyUI_PIC\ComfyUI\models\loras\qwen_image2\bfs_head_v1.1_qwen_2.1.safetensors",
-         "bfs_head_v1.1_qwen_2.1.safetensors"),
-    };
 
     /// <summary>Set by <see cref="Program"/> after setup; <c>null</c> in the designer.</summary>
     internal ShellService? Shell { get; set; }
@@ -42,9 +31,10 @@ public partial class App : Application
 
             _context = AppContext.Create(Shell!);
 
-            // LoRA unified management: seed template-private weights into the unified directory
-            // (background, best-effort). Public weights are seeded by their plugins at first use.
-            Task.Run(() => SeedPrivateLoras(Shell!.LoadSettings()));
+            // LoRA unified management: seed template-private weights (owner=model in loras.json)
+            // into the unified directory, in the background / best-effort. Plugin-owned weights are
+            // seeded by their plugins at first use; public (owner=none) weights by the manager plugin.
+            Task.Run(() => SeedModelLoras(Shell!.LoadSettings(), _context.Loras));
 
             var window = new MainWindow(
                 _context.Session,
@@ -100,11 +90,11 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Copies each <see cref="PrivateLoraSeeds"/> weight into the unified LoRA directory when the
-    /// destination is missing. Never throws; a missing source / copy failure is logged to
-    /// <see cref="DiagLog"/> only.
+    /// Copies every logged <c>owner=model</c> LoRA origin (from <c>Template/loras.json</c>) into
+    /// the unified directory when the destination is missing. Never throws; a missing source /
+    /// copy failure is logged to <see cref="DiagLog"/> only.
     /// </summary>
-    private static void SeedPrivateLoras(BackendSettings settings)
+    private static void SeedModelLoras(BackendSettings settings, LoraRegistry registry)
     {
         var loraRoot = ComfyDiscovery.DeriveLoraRoot(settings.ComfyRoot);
         if (string.IsNullOrWhiteSpace(loraRoot))
@@ -112,11 +102,22 @@ public partial class App : Application
             return;
         }
 
-        foreach (var (source, name) in PrivateLoraSeeds)
+        foreach (var entry in registry.All)
         {
+            if (!string.Equals(entry.Owner, "model", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var source = entry.Path;
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                continue;
+            }
+
             try
             {
-                var dest = Path.Combine(loraRoot!, name);
+                var dest = Path.Combine(loraRoot!, Path.GetFileName(source));
                 if (File.Exists(dest))
                 {
                     continue;
@@ -124,17 +125,17 @@ public partial class App : Application
 
                 if (!File.Exists(source))
                 {
-                    DiagLog.Log($"lora seed missing (private): {source}");
+                    DiagLog.Log($"lora seed missing (model): {source}");
                     continue;
                 }
 
                 Directory.CreateDirectory(loraRoot!);
                 File.Copy(source, dest, overwrite: false);
-                DiagLog.Log($"lora seeded (private): {dest}");
+                DiagLog.Log($"lora seeded (model): {dest}");
             }
             catch (Exception ex)
             {
-                DiagLog.Log($"lora seed failed (private): {source}: {ex.Message}");
+                DiagLog.Log($"lora seed failed (model): {source}: {ex.Message}");
             }
         }
     }

@@ -14,6 +14,19 @@
       "enabled_by_default": false,
       "kind": "accel",
       "description": "6-step distilled LoRA acceleration for the maskless image-EDIT path (batch 3 sampling_plan capability; off by default)."
+    },
+    {
+      "id": "lora-manager",
+      "display_name": "LoRA 公共管理器",
+      "version": "0.1.0",
+      "capabilities": ["before_encode"],
+      "seams": ["before_encode"],
+      "dir": "plugin_packs/lora-manager",
+      "entry": "__init__.py",
+      "deps": [],
+      "enabled_by_default": true,
+      "kind": "lora",
+      "description": "公共 LoRA 管理器：扫描 <comfy_root>/models/loras，与 loras.json 比对，未被 owner=model/Plugin 记录的归公共（默认关）；只读日志，不写回。"
     }
   ]
 }

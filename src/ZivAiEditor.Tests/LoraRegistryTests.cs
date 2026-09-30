@@ -129,4 +129,13 @@ public class LoraRegistryTests : IDisposable
         Assert.NotNull(registry.TryGet(" face-swap "));
         Assert.Null(registry.TryGet(""));
     }
+
+    [Fact]
+    public void Parses_Owner_Field()
+    {
+        var registry = new LoraRegistry(WriteRegistry(
+            """{ "loras": [ { "id": "face", "owner": "model", "path": "p" } ] }"""));
+
+        Assert.Equal("model", registry.TryGet("face")!.Owner);
+    }
 }
