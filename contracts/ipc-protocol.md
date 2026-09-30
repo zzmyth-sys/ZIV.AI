@@ -327,7 +327,7 @@ C#(server)                                              Python(client)
 
 ## 7. 版本与兼容
 
-- **`ipc_version`：`0.8`**（管道名 `\\.\pipe\zivai.infer.v1` 为**通道版本**，与协议版本独立）。
+- **`ipc_version`：`0.9`**（管道名 `\\.\pipe\zivai.infer.v1` 为**通道版本**，与协议版本独立）。
   `ipc_version 0.1` 为**追溯设定**（原文档无版本字段）。
 - **0.1 → 0.2 变更点**：
   1. **管道方向**：`Python=server / C#=client` → `C#=Server / Python=Client`（C# 掌控 Python 生命周期，启动无竞态）。

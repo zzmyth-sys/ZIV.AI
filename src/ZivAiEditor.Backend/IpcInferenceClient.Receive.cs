@@ -9,6 +9,34 @@ namespace ZivAiEditor.Backend;
 
 public sealed partial class IpcInferenceClient
 {
+    /// <summary>N1: the IPC protocol version this build speaks (contracts/ipc-protocol.md §7).</summary>
+    internal const string ExpectedProtocolVersion = "0.9";
+
+    /// <summary>
+    /// N1: the backend's last-reported protocol_version mismatch, formatted
+    /// <c>backend='0.8' expected='0.9'</c>; <c>null</c> when it matched / was absent.
+    /// Test-only observation; a mismatch is warned, never rejected.
+    /// </summary>
+    internal string? LastProtocolVersionWarning { get; private set; }
+
+    /// <summary>
+    /// N1: compares the pong's <c>protocol_version</c> with <see cref="ExpectedProtocolVersion"/> and
+    /// records a mismatch. Deliberately does NOT reject / degrade — this is local IPC (not a network
+    /// service), so a version mismatch is a diagnostic (protocol drift), not a hard failure.
+    /// </summary>
+    private void RecordProtocolVersion(JsonElement root)
+    {
+        var actual = ReadString(root, "protocol_version");
+        if (actual is null || string.Equals(actual, ExpectedProtocolVersion, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        LastProtocolVersionWarning = $"backend='{actual}' expected='{ExpectedProtocolVersion}'";
+        Debug.WriteLine(
+            $"[ipc] protocol_version mismatch: {LastProtocolVersionWarning} (continuing; local IPC, no negotiation).");
+    }
+
     private void EnsureReceiveStarted(Stream stream)
     {
         lock (_stateLock)
@@ -180,6 +208,9 @@ public sealed partial class IpcInferenceClient
 
         if (messageType == "pong")
         {
+            // N1: warn (never reject) when the backend speaks a different IPC protocol_version.
+            RecordProtocolVersion(root);
+
             var pingId = ReadString(root, "request_id");
             if (pingId is not null && _pings.TryRemove(pingId, out var pingCompletion))
             {

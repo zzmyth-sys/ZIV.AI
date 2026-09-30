@@ -6518,3 +6518,26 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 
 ### 未改
 - 未改 ACCEPTANCE 原行 / `goldens.json` / CLI / harness / 产品代码 / IPC / contracts / 冻结签名。
+
+---
+
+## N1 + N2 契约版本一致性（2026-09-30）
+
+> **追加（只增不改）**。修正 `contracts/ipc-protocol.md` 内部版本矛盾（N2）+ C# 增加 pong `protocol_version` 校验（N1）。
+> **本次仅修文档矛盾 + 加校验，未改契约值 / 未改 IPC 行为。**
+
+### N2（文档矛盾修正）
+- `contracts/ipc-protocol.md` §7 原写 `ipc_version 0.8`，与头部 `:4` 的 `0.9` 自相矛盾 → 将 §7 改为 **`0.9`**（仅此一处；`:4` 未动）。
+- 这是修正文档内部矛盾，**不是**改契约语义；`ipc_version` 值本应就是 `0.9`（与 `config.PROTOCOL_VERSION="0.9"` / `handlers.py:106` pong 一致）。
+
+### N1（C# 校验，仅警告）
+- `IpcInferenceClient.Receive.cs`：收到 `pong` 时读 `protocol_version`，与常量 `ExpectedProtocolVersion = "0.9"` 比对；
+  不一致 → `Debug.WriteLine` 警告（含 both versions）+ 记观测缝 `internal string? LastProtocolVersionWarning`。
+- **不拒绝连接 / 不降级**：本地 IPC，非网络服务；拒绝会破坏兼容性。仅诊断协议漂移。
+- 未改 pong 帧格式 / IPC 契约 / Python 后端。
+
+### 验证
+- 新增 `ProtocolVersionTests`（headless，命名管道对，无 GPU/Python）：
+  ① pong `0.8` → 不抛异常且 warning 记 `backend='0.8' expected='0.9'`；② pong `0.9` → 无 warning。
+- C# 非 GPU **794 / 0**；Python 275 / 0 / 11 skip（未改 Python）。
+- 本 commit 随 N1/N2 修复一并提交；未改既有冻结行。
