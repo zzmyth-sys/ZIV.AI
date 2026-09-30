@@ -6239,3 +6239,33 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 ### G1R.5 复核
 - build 0 警告 0 错误；C# 非 GPU 全量 **782 / 0**；zivcli 单测 **70 / 0**（原 59 + 新增 `test_g1_workflow` 11）。
 - `_test_step2/off_submit.py` 未动；未改 ZIV 侧 CLI / harness / `goldens.json`。
+
+---
+
+## G1 对照执行协议落地（日期：2026-09-30）
+
+> **追加（只增不改）**。协议草案（只读调查 + 裁判核对）落地为 tracked 文件；引用上段
+> §G1R.*（commit `1dbd135`）为基线。**零 GPU**；不改产品源码 / IPC / Python 后端 / contracts / `goldens.json`。
+
+### G1P.1 落点
+- 新建 `DOC/G1_PROTOCOL.md`：章节 1–8（G1 定义 / 测量口径 / 残留不对齐处理 / 对照判据 /
+  用户步骤 / Agent 步骤 / 产物落点 / 失败信号与对策）。
+- G1 定义与官方工作流固化**引用** §G1R.1 / §G1R.2，不重复发明。
+
+### G1P.2 两处裁判加固（已写入协议）
+- **加固 1（LOADED 解析脆弱性）**：ZIV `runner.py:333-340` 未结构化 `LOADED`，当前从 result JSON 的
+  `stdout_tail` 文本解析；解析失败 → 回退手动从 stdout 提取；**连续 2 次失败** → 另立任务补 ZIV runner
+  结构化 `load_sec`（仅 runner 输出，不改产品）。登记为已知脆弱点，**不阻塞本次对照**。
+- **加固 2（三档判据）**：`Δ = median(ZIV_T_total) − median(官方_T_total)`；
+  `Δ ≥ 10.0s` 确认「慢 ~10s」/ `8.0 ≤ Δ < 10.0s` 部分确认 / `Δ < 8.0s`（含负值）不成立 /
+  抖动 >10% 或任一未对齐 = 不可比。
+
+### G1P.3 可比段与冷热口径依据
+- 可比段 = **全流程含加载 `T_total`**（ZIV `LOADED + wall_sec` ↔ 官方 `wall_total_sec`）；
+  ZIV 无 sample-only 时间戳，故官方 sample-only 不参与 Δ。
+- **冷对冷**（官方每跑前 kill 服务重起）；每档每侧 **≥3 次**取中位数 + min/max。
+- 负向编码不可对齐 → 口径修正为**保守下界**（官方偏慢，`Δ` 为「ZIV 至少慢 X」）。
+
+### G1P.4 落地提交
+- 本次落地 commit 即包含本段（2 文件：`DOC/G1_PROTOCOL.md` 新建 + `DOC/FROZEN.md` 本段）。
+- 下一步：**正式 G1 对照**（另立任务；本协议为操作口径）。
