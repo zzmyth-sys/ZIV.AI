@@ -6174,3 +6174,23 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - **视觉签仍待用户**：SHA 复现 ≠ 视觉通过；本段不下「视觉通过」裁定。
 - **跨机器 / 驱动 SHA 可能不同**（同机同 HEAD 应逐字节相同）；goldens 的 1969 为**同机回归锚点**。
 - 未改 `src/` / IPC / `python/` / contracts / harness；ACCEPTANCE / FROZEN 纯增。
+
+---
+
+## 1969 第三图更换（img3：logo → 黄昏窗光室内）（日期：2026-09-30）
+
+> **追加（只增不改）**。承接上段「1969 SHA 复现验证 + 入 goldens」：因原 `img3`（`DOC/ICO/logo.png`）
+> 为无光照轮廓图、`<image3>` 引用不可判，换为用户提供的光照图并重钉。**不改 C# / IPC / Python 后端 / 契约**。
+
+### Y1969V.5 换图与重钉
+- 盘点（只读）：全仓 tracked 图像仅 4 张（`DOC/ICO/logo.png`、`src/ZivAiEditor.App/Assets/logo.png` 两张轮廓 logo；
+  `fixtures/img1.jpg`、`fixtures/img2.png` 有光照但已被占用）→ **可用第三图 = 0**，由用户提供。
+- 新 fixture：`tools/zivcli/harness/fixtures/img3.png`（2848×1420；源为用户提供、豆包 AI 生成、用户声明无版权；
+  已裁掉底部 180px 水印；文件 SHA256=`EE31F26B454BA833D1D453ACCDCAABC20B53844E4EEF330FA0C81F9BD0CBEB9B`）。
+- `goldens.json` 1969 `img3`：`../../DOC/ICO/logo.png` → `harness/fixtures/img3.png`；`description` 同步。
+- 新 `sha256 = FA8CCF721104A5B1941A30FA714612762A01D46725BA68F7C83C7ECDD38EDCF1`（**取代** Y1969V.3 的 `98451AAB…`）。
+- Z30 过（used 1122 MiB，`large_apps=[]`）；`run` exit=0（load 7.5s / wall 49.7s / 峰值 VRAM 11469 MiB / 峰值 RSS 10.71 GB）；
+  `verify 1969 --yes` → **PASS**（两次运行一致 → 确定性）。
+- 边界：**视觉签仍待用户**；跨机 / 驱动 SHA 可能不同。
+- 残留：新 img3 为暖调室内，与 img2（暖调室内场景）色调偏近，`<image2>`/`<image3>` 归属判据仍略弱（用户已知悉）。
+- 未改 `src/` / IPC / `python/` / contracts；`harness/fixtures/` 仅**新增**一条 fixture（该目录为 vendor 快照，新增以本段 FROZEN 修订为准）。

@@ -4622,3 +4622,19 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 - 复核（本次未改 C# / CLI 逻辑）：C# 非 GPU 全量 **782 / 0**；zivcli 单测 **59 / 0**。
 - 视觉签**仍待用户**：SHA 复现 ≠ 视觉通过；本段只证 SHA 可复现，不下「视觉通过」裁定。
 - 跨机器 / 驱动：SHA 在异机 / 异驱动可能不同（同机同 HEAD 应逐字节相同）。
+
+---
+
+## 1969 第三图更换（img3：logo → 黄昏窗光室内）（2026-09-30，只增）
+
+- 背景：用户目视 1969 输出判定 `<image3>`（原 `DOC/ICO/logo.png`，黑白轮廓图、无光照）**不可判**「引用生效」→ 1969 视觉签不通过；需换有光照特征的第三图。
+- 盘点结论：全仓 tracked 图像仅 4 张（2 张为轮廓 logo；有光照的只有 img1/img2 且已被占用）→ **可用第三图 = 0**，改由用户提供。
+- 新 img3 来源：用户提供、豆包 AI 生成（用户声明无版权）；用户授权裁掉水印。
+- 改动：新增 fixture `tools/zivcli/harness/fixtures/img3.png`（2848×1420，裁掉底部 180px 水印；文件 SHA256=`EE31F26B…`）；`goldens.json` 的 1969 `img3` → `harness/fixtures/img3.png`（相对路径）。
+- 重钉（GPU，Z30 过：used 1122 MiB，`large_apps=[]`）：`python -m tools.zivcli run --op inpaint --side 1536 --nref 2 --img1 …\img1.jpg --img2 …\img2.png --img3 D:\devlop\ZIV.AI\tools\zivcli\harness\fixtures\img3.png --prompt "Replace the background of <image1> with the scene from <image2>; relight it like <image3>." --out …\runs\1969-light\multiref.png --yes`
+  → exit=0；新 SHA256=`FA8CCF721104A5B1941A30FA714612762A01D46725BA68F7C83C7ECDD38EDCF1`；load 7.5s / wall 49.7s；峰值 VRAM 11469 MiB；峰值 RSS 10.71 GB。
+- `python -m tools.zivcli verify 1969 --yes` → **PASS**（第二次运行 SHA 一致 → 确定性）。
+- 旧 SHA `98451aab…`（img3=logo）作废（历史记录保留，不改上段）。
+- 视觉签**仍待用户**：本次仅重钉 SHA，未下「视觉通过」裁定。
+- 残留：新 img3 为暖调室内、与 img2（暖调室内场景）色调偏近，`<image2>`/`<image3>` 归属判据仍略弱（用户已知悉并选择继续）。
+- 原 `:1969` 行与上段「1969 SHA 复现验证 + 入 goldens」不改，以本段为准。
