@@ -16,6 +16,13 @@ import config
 
 _LOG = logging.getLogger("zivai.server")
 
+# 兼容层（2026-09-30 · LoRA 两类分离）：从 loras.json 迁出的**模板私有** LoRA，旧的
+# commands.user.json 仍按旧 id 引用。这里把旧 id 映射为统一目录（<comfy_root>/models/loras）
+# 下的**相对名**，由 resolve_path 照常拼接 LORA_ROOT；未命中的值保持原有语义（注册表/字面路径）。
+LEGACY_ID_ALIASES = {
+    "face-swap": "bfs_head_v1.1_qwen_2.1.safetensors",
+}
+
 
 def load_registry(path=None):
     """Load the registry as ``{id: entry}``; missing / malformed file -> ``{}`` (never raises)."""
@@ -88,7 +95,8 @@ def resolve_path(id_or_path, registry=None, validate=False):
     if entry and isinstance(entry.get("path"), str) and entry["path"].strip():
         path = entry["path"].strip()
     else:
-        path = value
+        # 兼容层：旧（已迁出）id → 统一目录相对名；未知值保持原样。
+        path = LEGACY_ID_ALIASES.get(value, value)
     # 相对路径：配置了 lora_root 则以其为基准拼接；否则保持不变（validate 时视为配置错误）。
     if not os.path.isabs(path):
         root = getattr(config, "LORA_ROOT", "")

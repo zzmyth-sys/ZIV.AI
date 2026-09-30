@@ -1,7 +1,11 @@
+using System;
+using System.IO;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
+using ZivAiEditor.Diagnostics;
 using ZivAiEditor.UI;
 
 namespace ZivAiEditor.App;
@@ -9,6 +13,18 @@ namespace ZivAiEditor.App;
 public partial class App : Application
 {
     private AppContext? _context;
+
+    /// <summary>
+    /// Bootstrap seeds for **template-private** LoRAs: copies each known weight into the unified
+    /// directory (<c>&lt;comfy_root&gt;/models/loras</c>) on launch so the relative filename
+    /// declared in <c>commands.json</c> resolves. Best-effort: a missing source is a diagnostic
+    /// only (never blocks). Public LoRAs are seeded by their plugins at first use.
+    /// </summary>
+    private static readonly (string Source, string Name)[] PrivateLoraSeeds =
+    {
+        (@"C:\AI\ComfyUI_PIC\ComfyUI\models\loras\qwen_image2\bfs_head_v1.1_qwen_2.1.safetensors",
+         "bfs_head_v1.1_qwen_2.1.safetensors"),
+    };
 
     /// <summary>Set by <see cref="Program"/> after setup; <c>null</c> in the designer.</summary>
     internal ShellService? Shell { get; set; }
@@ -25,6 +41,11 @@ public partial class App : Application
             var options = LaunchOptions.Parse(desktop.Args);
 
             _context = AppContext.Create(Shell!);
+
+            // LoRA unified management: seed template-private weights into the unified directory
+            // (background, best-effort). Public weights are seeded by their plugins at first use.
+            Task.Run(() => SeedPrivateLoras(Shell!.LoadSettings()));
+
             var window = new MainWindow(
                 _context.Session,
                 _context.SessionWriter,
@@ -76,5 +97,45 @@ public partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>
+    /// Copies each <see cref="PrivateLoraSeeds"/> weight into the unified LoRA directory when the
+    /// destination is missing. Never throws; a missing source / copy failure is logged to
+    /// <see cref="DiagLog"/> only.
+    /// </summary>
+    private static void SeedPrivateLoras(BackendSettings settings)
+    {
+        var loraRoot = ComfyDiscovery.DeriveLoraRoot(settings.ComfyRoot);
+        if (string.IsNullOrWhiteSpace(loraRoot))
+        {
+            return;
+        }
+
+        foreach (var (source, name) in PrivateLoraSeeds)
+        {
+            try
+            {
+                var dest = Path.Combine(loraRoot!, name);
+                if (File.Exists(dest))
+                {
+                    continue;
+                }
+
+                if (!File.Exists(source))
+                {
+                    DiagLog.Log($"lora seed missing (private): {source}");
+                    continue;
+                }
+
+                Directory.CreateDirectory(loraRoot!);
+                File.Copy(source, dest, overwrite: false);
+                DiagLog.Log($"lora seeded (private): {dest}");
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Log($"lora seed failed (private): {source}: {ex.Message}");
+            }
+        }
     }
 }

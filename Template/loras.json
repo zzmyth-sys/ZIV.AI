@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "_comment": "LoRA registry (Step 8-1). Reference an entry by id from Template/commands.json as \"lora\": { \"path\": \"<id>\", \"strength_model\": 1.0, \"strength_clip\": 1.0 }. The Python backend resolves the id to a weight path via python/server/loras.py. Adding a LoRA template is data-only: edit this file + commands.json.",
+  "_comment": "Public LoRA registry (Step 8-1; 2026-09-30 two-class split). Public LoRAs (plugin-managed) are declared here; template-private LoRAs are declared inline in Template/commands.json. The Python backend resolves an id to a weight path via python/server/loras.py. Public weights are copied into <comfy_root>/models/loras and referenced by relative name.",
   "loras": [
     {
       "id": "example_lora",
@@ -10,18 +10,11 @@
       "description": "示例条目（占位路径，请替换为新 LoRA 权重；commands.json 未引用它）"
     },
     {
-      "id": "face-swap",
-      "path": "C:\\AI\\ComfyUI_PIC\\ComfyUI\\models\\loras\\qwen_image2\\bfs_head_v1.1_qwen_2.1.safetensors",
-      "default_strength_model": 1.0,
-      "default_strength_clip": 1.0,
-      "description": "BFS Head V1.1 换头 LoRA（Qwen-Image-2.1；图像1=基础，图像2=参考头部；来源 civitai.red/models/2027766）"
-    },
-    {
       "id": "qwen21-viggle-turbo-6step",
       "path": "E:\\Downloads\\工作流\\姿态编辑流\\lora\\Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors",
       "default_strength_model": 1.0,
       "default_strength_clip": 1.0,
-      "description": "Qwen-Image-2.1 viggle-turbo v0.2.1 6-step 蒸馏 LoRA（batch 3 插件 qwen21-viggle-6step 专用；r256，diffusers 格式）"
+      "description": "Qwen-Image-2.1 viggle-turbo v0.2.1 6-step 蒸馏 LoRA（公共；插件 qwen21-viggle-6step 专用；r256，diffusers 格式）"
     }
   ]
 }

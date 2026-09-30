@@ -143,6 +143,28 @@ public class SettingsLoaderTests : IDisposable
     }
 
     [Fact]
+    public void Load_Derives_Lora_Root_From_Discovered_Comfy_Root()
+    {
+        // No [models] lora_root -> default to the unified directory <comfy_root>/models/loras.
+        Directory.CreateDirectory(Path.Combine(_directory, "Comfyui", "ComfyUI"));
+
+        var settings = SettingsLoader.Load(_directory);
+
+        Assert.Equal(
+            Path.Combine(_directory, "Comfyui", "ComfyUI", "models", "loras"),
+            settings.LoraRoot);
+    }
+
+    [Fact]
+    public void Load_Prefers_Explicit_Lora_Root_Over_Derived()
+    {
+        Directory.CreateDirectory(Path.Combine(_directory, "Comfyui", "ComfyUI"));
+        File.WriteAllLines(SettingsPath, new[] { "[models]", @"lora_root = D:\l\loras" });
+
+        Assert.Equal(@"D:\l\loras", SettingsLoader.Load(_directory).LoraRoot);
+    }
+
+    [Fact]
     public void Load_Parses_Plugins_Section()
     {
         File.WriteAllLines(SettingsPath, new[]

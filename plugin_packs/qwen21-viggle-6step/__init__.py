@@ -23,6 +23,7 @@ import json
 import logging
 import math
 import os
+import shutil
 
 PLUGIN_META = {
     "id": "qwen21-viggle-6step",
@@ -155,6 +156,38 @@ def _install_model(model, lora):
     return patched, cleanup
 
 
+def _ensure_unified(source):
+    """Ensure the public LoRA sits in the unified dir; return the path to load.
+
+    Import-time free (called from the capability): copies the registry weight into
+    ``<comfy_root>/models/loras`` (``config.LORA_ROOT``) when missing, then loads from
+    there. Falls back to ``source`` when ``LORA_ROOT`` is unset or the copy fails, so a
+    read-only / absent target never fails the task.
+    """
+    if not source or not os.path.isfile(source):
+        return source
+    try:
+        import config
+
+        root = (getattr(config, "LORA_ROOT", "") or "").strip()
+    except Exception:  # noqa: BLE001 - config unavailable -> use the source path
+        return source
+    if not root:
+        return source
+
+    dest = os.path.join(root, os.path.basename(source))
+    if os.path.isfile(dest):
+        return dest
+    try:
+        os.makedirs(root, exist_ok=True)
+        shutil.copyfile(source, dest)
+        _LOG.info("qwen21-viggle-6step: seeded public LoRA into %s", dest)
+        return dest
+    except OSError as exc:
+        _LOG.warning("qwen21-viggle-6step: unified-dir copy failed (%s); using source", exc)
+        return source
+
+
 def sampling_plan(context):
     """Capability entry: accelerate a maskless image edit, else decline (``None``).
 
@@ -192,7 +225,8 @@ def sampling_plan(context):
     try:
         import loras
 
-        lora_path = loras.resolve_path(_LORA_ID)
+        source = loras.resolve_path(_LORA_ID)
+        lora_path = _ensure_unified(source)
     except Exception as exc:  # noqa: BLE001 - never fatal
         _LOG.warning("qwen21-viggle-6step: LoRA registry unavailable (%s); declining", exc)
         return None

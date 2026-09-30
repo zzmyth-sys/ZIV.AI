@@ -6680,3 +6680,38 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - C# 非 GPU `--filter "FullyQualifiedName!~Ipc"` → 815 / 0（删 4 条断言，不减用例数）。
 - Python CPU `unittest discover -p "test_*.py"` → 282 / 0 / 11 skip（未改 Python）。
 - `ComfyDiscovery` 不再有 `DeriveOutput` / `DeriveInput`；设置界面不再展示 output/input。
+
+---
+
+## LoRA 统一管理：物理统一 + 数据分离 + 引用切换（2026-09-30）
+
+> **追加（只增不改）：** 用户裁决「只有三件套保持原位；其它 LoRA 全进环境」。本 commit 见 `git log`；承接同批 LoRA 两类分离只读调查报告。
+
+### 裁决（写死）
+
+- 统一目录 = `<comfy_root>/models/loras`。
+- **只有三件套（DiT/TE/VAE）保持原位**；其它 LoRA 全部复制进统一目录。
+- 数据层分离（不新造接口）：公共（viggle）走插件 + `loras.json` id；模板私有（face-swap）迁出 `loras.json`，改 `commands.json` 内联。
+- 引用切换：两类均以统一目录**相对名**加载。
+
+### 改动
+
+1. `Template/loras.json`：移除 `face-swap`（迁出）；保留 `qwen21-viggle-turbo-6step`（公共）+ `example_lora`（占位）。
+2. `Template/commands.json` `/换脸`：`loras[].path` 由 id `face-swap` 改为统一目录相对名 `bfs_head_v1.1_qwen_2.1.safetensors`。
+3. `Shell/SettingsLoader.cs`：`lora_root` 未配置时默认 = `ComfyDiscovery.DeriveLoraRoot(<comfy_root>)`（= `<comfy_root>/models/loras`）；显式 `settings.ini [models] lora_root` / env 仍优先。
+4. `python/server/loras.py`：新增**兼容层** `LEGACY_ID_ALIASES`（`face-swap` → 统一目录相对名）；`resolve_path` 对**未知值**走别名映射（未命中保持原样）。核心解析优先级不变。
+5. `plugin_packs/qwen21-viggle-6step/__init__.py`：capability 内 `_ensure_unified(source)` —— 统一目录缺失则从 `loras.json` 记录的原绝对路径**复制**，随后按统一目录路径加载；无 `LORA_ROOT` / 复制失败回退原路径。**import 时无副作用**（复制只在 capability 调用内）。
+6. `App.axaml.cs`：启动步后台 `SeedPrivateLoras` —— 把模板私有 LoRA（face-swap）从原绝对路径复制进统一目录；源缺失 / 复制失败仅 `DiagLog`（不阻塞）。
+
+### 向后兼容
+
+- 既有 `commands.user.json` 按旧 id `"face-swap"` 引用 → Python `loras.resolve_path` 经 `LEGACY_ID_ALIASES` 解析到统一目录相对名（拼接 `LORA_ROOT`）。
+- C# `commands.user.json` 数据不改；`LoraControl` 显示不再有 `face-swap` 描述（注册表已迁出），仅影响显示，不影响解析。
+
+### 验证（非 GPU）
+
+- `dotnet build src/ZIV.AI.sln -c Release` → 0 警告 / 0 错误。
+- C# 非 GPU `--filter "FullyQualifiedName!~Ipc"` → **817 / 0**（基线 815 + 新增 2：SettingsLoader `lora_root` 推导）。
+- Python `unittest discover -p "test_*.py"` → **284 / 0 / 11 skip**（基线 282 + 新增 2：`LegacyAliasTests`）。
+- 三件套路径未改；未跑 GPU；未碰 IPC / contracts / 冻结签名。
+- 复制落地（`<comfy_root>/models/loras` 含 viggle + face-swap）需真机 App 启动后确认（本批为 mock / 代码审查）。

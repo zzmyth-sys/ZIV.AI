@@ -207,5 +207,20 @@ class LoraRootTests(unittest.TestCase):
             )
 
 
+class LegacyAliasTests(unittest.TestCase):
+    """2026-09-30 两类分离：迁出 loras.json 的模板私有 LoRA，旧 id 仍解析到统一目录相对名。"""
+
+    def test_legacy_face_swap_maps_to_unified_relative_name(self):
+        with mock.patch.object(config, "LORA_ROOT", r"D:\c\models\loras"):
+            self.assertEqual(
+                os.path.join(r"D:\c\models\loras", "bfs_head_v1.1_qwen_2.1.safetensors"),
+                loras.resolve_path("face-swap", {}),
+            )
+
+    def test_unknown_id_still_passes_through(self):
+        with mock.patch.object(config, "LORA_ROOT", ""):
+            self.assertEqual("no-such-id", loras.resolve_path("no-such-id", {}))
+
+
 if __name__ == "__main__":
     unittest.main()

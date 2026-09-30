@@ -50,8 +50,10 @@ internal sealed class BackendSettings
     public string? IgnoredScript { get; init; }
 
     /// <summary>
-    /// LoRA root directory (<c>[models] lora_root</c>); null when unset / cleared. Relative LoRA
-    /// paths in <c>loras.json</c> / commands resolve against it (backend-side).
+    /// LoRA root directory (<c>[models] lora_root</c>); relative LoRA paths in
+    /// <c>loras.json</c> / commands resolve against it (backend-side). Defaults to the unified
+    /// directory <c>&lt;comfy_root&gt;/models/loras</c> when unset; an explicit value still wins.
+    /// Null only when neither is configured nor discoverable.
     /// </summary>
     public string? LoraRoot { get; init; }
 
@@ -169,7 +171,7 @@ internal static class SettingsLoader
             DitPath = GetOptional(models, "dit_path"),
             TePath = GetOptional(models, "te_path"),
             VaePath = GetOptional(models, "vae_path"),
-            LoraRoot = GetOptional(models, "lora_root"),
+            LoraRoot = GetOptional(models, "lora_root") ?? ComfyDiscovery.DeriveLoraRoot(effectiveComfy),
             ComfyRoot = effectiveComfy,
             ConfiguredComfyRoot = configuredComfy,
             DiscoveredComfyRoot = discoveredComfy,

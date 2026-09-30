@@ -149,8 +149,8 @@
       "variants": {
         "multi": "head_swap: start with Picture 1 as the base image, keeping its lighting, environment, and background. Remove the head from Picture 1 completely and replace it with the head from Picture 2. Ensure the head and body have correct anatomical proportions and natural blending. {description}"
       },
-      "loras": [{ "path": "face-swap", "strength_model": 1.0, "strength_clip": 1.0 }],
-      "description": "换脸：把参考图（<image2>）的脸换到主图（<image1>）人物上（需自备换脸 LoRA）"
+      "loras": [{ "path": "bfs_head_v1.1_qwen_2.1.safetensors", "strength_model": 1.0, "strength_clip": 1.0 }],
+      "description": "换脸：把参考图（<image2>）的脸换到主图（<image1>）人物上（模板私有 LoRA，统一目录相对名；随模板复制到 <comfy_root>/models/loras）"
     }
   ]
 }
