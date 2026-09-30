@@ -8,6 +8,7 @@ namespace ZivAiEditor.Tests;
 /// Step 9C.6-B2 crop temp-file tests: program-directory cache path, per-node overwrite,
 /// and robust cleanup. File IO only, no GPU.
 /// </summary>
+[Collection(ImagingGlobalCleanupCollection.Name)]
 public class ImageCropperTests
 {
     private static string NewTempDir()

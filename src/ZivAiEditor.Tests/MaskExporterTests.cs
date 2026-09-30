@@ -8,6 +8,7 @@ namespace ZivAiEditor.Tests;
 /// Step 9C.7 mask export tests: program-directory cache path, per-node overwrite, binary
 /// 0 / 255 output (R2) and robust cleanup. File IO only, no GPU.
 /// </summary>
+[Collection(ImagingGlobalCleanupCollection.Name)]
 public class MaskExporterTests
 {
     private static string NewSessionId() => Guid.NewGuid().ToString("N");

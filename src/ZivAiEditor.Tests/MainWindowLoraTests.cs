@@ -28,6 +28,7 @@ namespace ZivAiEditor.Tests.UI;
 /// save dialog is intentionally not exercised here (covered separately end-to-end via the
 /// template store, which has no UI).
 /// </summary>
+[Collection(ImagingGlobalCleanupCollection.Name)]
 public class MainWindowLoraTests
 {
     [Fact]
