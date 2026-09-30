@@ -6083,3 +6083,61 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 
 ### Y1969R.5 边界
 - 未改 `src/` / IPC / `python/` / contracts / harness / `goldens.json`；ACCEPTANCE / FROZEN 纯增。
+
+---
+
+## 测试隔离：成像临时目录跨类并行竞态（MaskExporter / ImageCropper，日期：2026-09-30）
+
+> **追加（只增不改）**。纯测试侧隔离：给共享 `_cache/{crops,masks,proxies}` 的测试类加非并行
+> xUnit collection。**不改产品源码 / 契约 / IPC / Python / 冻结签名 / 产品语义**；**无 GPU**（Z29 / Z30）。
+> flake 首现 commit `c8c9fd3`；修复 commit **`e7467f9`**。
+
+### M1 根因
+- `ImagingService.CleanupAll()`（`ImagingService.cs:57-64`）清空 `_cache/{crops,masks,proxies}` 三个
+  **进程级真实目录**（根 = `AppContext.BaseDirectory`）；`AppContext.Create()` → `BuildImaging()`
+  （`AppContext.cs:209` / `:498-504`）**每次构造都调用**它。
+- xUnit 默认类间并行（无 `xunit.runner.json` / 无程序集级 `CollectionBehavior`）→
+  `MainWindowLoraTests`（经 `AppContext.Create`）与 `MaskExporterTests` **并行**时，前者全局 wipe
+  删掉后者 `ExportAsync` 刚写入、尚未 `TryLoadAsync` 的会话目录 → `TryLoad` 偶发返回 null
+  （首跑 781/1，单项重跑通过，2 次全量 782/0 → 低频）。
+- 初审曾疑同类的 `CleanupAll_Removes_Every_Session_Directory` 为竞对；实测二者**同属
+  `MaskExporterTests`**，类内串行 → **非竞对**。
+
+### M2 契约（冻结）
+- **新增** `src/ZivAiEditor.Tests/ImagingGlobalCleanupCollection.cs`：
+  `[CollectionDefinition("ImagingGlobalCleanup", DisableParallelization = true)]`。
+- **成员类**（`[Collection(ImagingGlobalCleanupCollection.Name)]`）：
+  `MaskExporterTests` / `ImageCropperTests` / `MainWindowLoraTests`。
+- **入集合约定**：任何调用 `MaskExporter.CleanupAll` / `ImageCropper.CleanupAll` /
+  `ProxyImageCache.CleanupAll`，或调用 `AppContext.Create()`（隐式触发 `ImagingService.CleanupAll`）
+  的测试类**必须**加入本集合；约定写在 collection 的 XML 注释里。
+- `DisableParallelization=true` 使该集合与**其它所有** collection（含 `DisplayProxyCollection`）
+  互斥 → 同时覆盖 `AppContext.Create` 对 `_cache/proxies` 的 wipe。
+
+### M3 未纳入判定的类
+- `MainWindowSmokeTests`（仅 `new ImagingService()`、无 CleanupAll）、`ImagingServiceTests`
+  （仅 `CleanupNode` 随机会话）→ 不触达全局清理，不入集合。
+- `ProxyImageCacheTests` / `ImagePreviewHeadlessTests` / `DisplayProxyPersistenceTests` /
+  `DisplayImageLoaderTests`（已属 `DisplayProxyCollection`，非并行）→ 不入本集合；
+  两非并行 collection 互斥语义保证隔离。
+
+### M4 未采纳方案
+- **未采纳**「合并进 `DisplayProxyCollection`」：二者保护面不同（proxy 缓存 vs crop/mask 根），
+  合并会模糊边界。
+- **未采纳 B**（测试期重定向 `_cache/masks` 根）与 **C**（`CleanupAll` 加「只清本会话」参数）：
+  均需改产品源码 / 公开签名（触发停点）。
+- **未采纳 D1**（改测试不调全局 CleanupAll）：`AppContext.Create` 仍无条件触发全局 wipe，
+  不消除竞对。**未采纳 D2**（程序集级 `CollectionBehavior(DisableTestParallelization=true)`）：
+  牺牲全部并行度，过重。
+
+### M5 风险
+- **未来新测试类**若调用全局清理 / `AppContext.Create` 而**未**加入本集合 → 竞态复现；
+  本步以 collection 注释为**人工约定**（无编译期强制）。
+- `DisplayProxyCollection` 存在同型残余：非本集合成员若触发 proxy 全局 wipe 仍可能冲突；
+  本集合因 `DisableParallelization` 已与它互斥，故当前安全。
+
+### M6 验证
+- `dotnet build src\ZIV.AI.sln -c Release` → **0 警告 0 错误**。
+- `dotnet test --filter "FullyQualifiedName!~Ipc"` → **连续 3 次 782 通过 / 0 失败**（测试数不变）。
+- `git diff --stat` 仅测试项目文件；未 push。
+- 未跑 GPU / 未启动真实 App（Z29 / Z30）。
