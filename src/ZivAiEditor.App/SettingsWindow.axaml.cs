@@ -40,7 +40,10 @@ public partial class SettingsWindow : Window
         : this()
     {
         _shell = shell ?? throw new ArgumentNullException(nameof(shell));
-        _settingsPath = Path.Combine(System.AppContext.BaseDirectory, SettingsLoader.FileName);
+        // Same single-entry resolution as SettingsLoader.Load / the backend env injection:
+        // ZIV_AI_SETTINGS_PATH first, else the program directory, so the UI writes the file
+        // Python reads (no more bin\Release drift under an env override).
+        _settingsPath = SettingsLoader.ResolvePath();
         _pluginsPath = Path.Combine(shell.TemplateDirectory, "plugins.json");
         _plugins = plugins ?? new PluginRegistry(_pluginsPath);
 

@@ -11,7 +11,11 @@ namespace ZivAiEditor.Tests;
 /// <summary>
 /// B7: <see cref="SettingsLoader"/> <c>[models]</c> parsing, the runtime backend defaults and the
 /// <c>settings.ini.template</c> seed (no GPU / Python). Each test uses a temp program directory.
+/// Also covers <see cref="SettingsLoader.ResolvePath"/> and the env override shared with
+/// <c>AppContext.BuildBackendEnvironment</c>. Joins the non-parallel settings-env collection
+/// because it sets / reads the process-wide <c>ZIV_AI_SETTINGS_PATH</c>.
 /// </summary>
+[Collection(SettingsEnvCollection.Name)]
 public class SettingsLoaderTests : IDisposable
 {
     private readonly string _directory;
@@ -206,6 +210,68 @@ public class SettingsLoaderTests : IDisposable
     }
 
     [Fact]
+    public void ResolvePath_Prefers_Env_Settings_Path_Override()
+    {
+        // Single entry point: the env override wins over the program directory.
+        var overridePath = Path.Combine(_directory, "portable.ini");
+
+        var saved = Environment.GetEnvironmentVariable("ZIV_AI_SETTINGS_PATH");
+        try
+        {
+            Environment.SetEnvironmentVariable("ZIV_AI_SETTINGS_PATH", overridePath);
+
+            Assert.Equal(Path.GetFullPath(overridePath), SettingsLoader.ResolvePath());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ZIV_AI_SETTINGS_PATH", saved);
+        }
+    }
+
+    [Fact]
+    public void ResolvePath_Falls_Back_To_Program_Directory()
+    {
+        var saved = Environment.GetEnvironmentVariable("ZIV_AI_SETTINGS_PATH");
+        try
+        {
+            Environment.SetEnvironmentVariable("ZIV_AI_SETTINGS_PATH", null);
+
+            Assert.Equal(
+                Path.Combine(System.AppContext.BaseDirectory, "settings.ini"),
+                SettingsLoader.ResolvePath());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ZIV_AI_SETTINGS_PATH", saved);
+        }
+    }
+
+    [Fact]
+    public void BuildBackendEnvironment_Injects_Resolved_Settings_Path_From_Env()
+    {
+        // Same-source guard: the path injected into Python is exactly SettingsLoader.ResolvePath(),
+        // so an env override reaches both the C# reader and the Python backend.
+        var overridePath = Path.Combine(_directory, "portable.ini");
+        File.WriteAllLines(overridePath, new[] { "[backend]", "pipe_name = x" });
+
+        var saved = Environment.GetEnvironmentVariable("ZIV_AI_SETTINGS_PATH");
+        try
+        {
+            Environment.SetEnvironmentVariable("ZIV_AI_SETTINGS_PATH", overridePath);
+
+            var environment = ZivAiEditor.App.AppContext.BuildBackendEnvironment(
+                new BackendSettings(), _directory);
+
+            Assert.Equal(SettingsLoader.ResolvePath(), environment["ZIV_AI_SETTINGS_PATH"]);
+            Assert.Equal(Path.GetFullPath(overridePath), environment["ZIV_AI_SETTINGS_PATH"]);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ZIV_AI_SETTINGS_PATH", saved);
+        }
+    }
+
+    [Fact]
     public void Load_Parses_Plugins_Section()
     {
         File.WriteAllLines(SettingsPath, new[]
@@ -232,7 +298,12 @@ public class SettingsLoaderTests : IDisposable
     }
 }
 
-/// <summary>B3 / T1: the AppContext backend environment assembly is pure and unit-testable.</summary>
+/// <summary>
+/// B3 / T1: the AppContext backend environment assembly is pure and unit-testable. Joins the
+/// non-parallel settings-env collection because it resolves <c>ZIV_AI_SETTINGS_PATH</c> through
+/// <c>SettingsLoader.ResolvePath</c>.
+/// </summary>
+[Collection(SettingsEnvCollection.Name)]
 public class BackendEnvironmentTests : IDisposable
 {
     private readonly string _directory;

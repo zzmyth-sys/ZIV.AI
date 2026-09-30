@@ -129,20 +129,28 @@ internal static class SettingsLoader
 {
     public const string FileName = "settings.ini";
 
+    /// <summary>
+    /// Resolves the effective <c>settings.ini</c> path: the <c>ZIV_AI_SETTINGS_PATH</c> override
+    /// (an absolute path; see <see cref="TryResolveOverride"/>) when set, else the program-directory
+    /// <c>settings.ini</c>. The single entry point shared by <see cref="Load"/>, the backend env
+    /// injection (<c>AppContext.BuildBackendEnvironment</c>) and the settings window writer, so all
+    /// three resolve one file.
+    /// </summary>
+    public static string ResolvePath()
+        => TryResolveOverride(out var overrideFile)
+            ? overrideFile
+            : Path.Combine(System.AppContext.BaseDirectory, FileName);
+
     public static BackendSettings Load(string? programDirectory = null)
     {
-        var directory = programDirectory ?? System.AppContext.BaseDirectory;
-        var path = Path.Combine(directory, FileName);
-
-        // Explicit override (user intent): ZIV_AI_SETTINGS_PATH points at a specific settings.ini
-        // (e.g. a dev machine unified onto the portable install's file). Honoured only on the
-        // default path (programDirectory == null) so callers/tests passing a directory are
-        // unaffected; the file's own directory becomes the program directory for defaults.
-        if (programDirectory is null && TryResolveOverride(out var overrideFile))
-        {
-            directory = Path.GetDirectoryName(overrideFile)!;
-            path = overrideFile;
-        }
+        // Single-entry path resolution: on the default path ResolvePath() honours the
+        // ZIV_AI_SETTINGS_PATH override (else the program directory); an explicit programDirectory
+        // is honoured verbatim (callers / tests) and ignores the override. The file's own directory
+        // becomes the program directory for defaults.
+        var path = programDirectory is null
+            ? ResolvePath()
+            : Path.Combine(programDirectory, FileName);
+        var directory = programDirectory ?? Path.GetDirectoryName(path)!;
 
         EnsurePresent(path, directory);
 

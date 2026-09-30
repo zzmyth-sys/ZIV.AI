@@ -327,7 +327,10 @@ internal sealed class AppContext : IDisposable
         // Plugin hot-switch (plan 1): hand Python the settings.ini path so it can read
         // [plugins] live; otherwise only the startup-frozen per-plugin env reaches Python
         // and a UI toggle needs an App restart. Injected only when the file exists.
-        var settingsIni = Path.Combine(System.AppContext.BaseDirectory, "settings.ini");
+        // Same single-entry resolution as SettingsLoader.Load / the settings window writer
+        // (ZIV_AI_SETTINGS_PATH first, else the program directory), so C#, Python and the UI
+        // all read / write one settings.ini.
+        var settingsIni = SettingsLoader.ResolvePath();
         if (File.Exists(settingsIni))
         {
             environment["ZIV_AI_SETTINGS_PATH"] = settingsIni;

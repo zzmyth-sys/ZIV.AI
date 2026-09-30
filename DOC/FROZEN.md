@@ -6964,3 +6964,37 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - Python `unittest discover -p "test_*.py"` → **306 / 0**（未改 Python）。
 - 仓库根 `settings.ini` 已删；`git status` 仅示 3 个预期改动。
 - 三件套未动；未跑 GPU；未碰 IPC / contracts / seams / 官方 ComfyUI。
+
+---
+
+## settings.ini 路径收口补全（AppContext + SettingsWindow，2026-10-01）
+
+> **追加（只增不改）** 承接上一节「settings.ini 覆盖统一」并**补全其登记缺口**。上节只完成 `SettingsLoader.Load` 的 env 优先读，`AppContext.cs:330` 注入与 `SettingsWindow.axaml.cs:43` 写盘仍拼 `<BaseDirectory>/settings.ini`，导致 env 后 C# 读便携版 / Python 读 bin / UI 写 bin 三处不同源。本 commit 见 `git log`。
+
+### 收口（单一入口）
+
+- 新增 `SettingsLoader.ResolvePath()`：`ZIV_AI_SETTINGS_PATH`（合法绝对路径）优先，否则 `Path.Combine(AppContext.BaseDirectory, "settings.ini")`。作为 settings.ini 路径的**唯一解析入口**。
+- `SettingsLoader.Load()` 内部改走 `ResolvePath()`（默认路径 `programDirectory == null` 时）；显式传 `programDirectory` 仍逐字使用并忽略 env（调用方 / 测试语义不变）。
+- `AppContext.BuildBackendEnvironment` 注入 `ZIV_AI_SETTINGS_PATH` 的值改为 `SettingsLoader.ResolvePath()`（仍保留 `File.Exists` 门槛）。
+- `SettingsWindow` 的 `_settingsPath` 改为 `SettingsLoader.ResolvePath()`（唯一赋值点在 ctor）。
+
+### 改动文件
+
+1. `src/ZivAiEditor.App/Shell/SettingsLoader.cs`：加 `ResolvePath()`，`Load()` 复用。
+2. `src/ZivAiEditor.App/AppContext.cs`：注入路径改走 `ResolvePath()`。
+3. `src/ZivAiEditor.App/SettingsWindow.axaml.cs`：`_settingsPath` 改走 `ResolvePath()`。
+4. `src/ZivAiEditor.Tests/SettingsLoaderTests.cs`：新增 `ResolvePath_*` 与 `BuildBackendEnvironment_Injects_Resolved_Settings_Path_From_Env`。
+5. `src/ZivAiEditor.Tests/SettingsEnvCollection.cs`：新增非并行集合，串行 env 相关测试类，避免进程级 `ZIV_AI_SETTINGS_PATH` 竞态。
+
+### 结果（env 设后三处同源）
+
+- C# 读：`SettingsLoader.Load()` → `ResolvePath()` → env 文件。
+- Python 读：`ZIV_AI_SETTINGS_PATH` 注入 = `ResolvePath()` → env 文件。
+- UI 写：`SettingsWindow._settingsPath` = `ResolvePath()` → env 文件。
+
+### 验证（非 GPU）
+
+- `dotnet build src/ZIV.AI.sln -c Release` → 0 警告 / 0 错误。
+- C# 非 GPU `--filter "FullyQualifiedName!~Ipc"` → **828 / 0**（825 + 新增 3）。
+- Python `unittest discover -p "test_*.py"` → **306 / 0**（未动 Python）。
+- 三件套未动；未跑 GPU；未动 IPC / contracts / seams / 官方 ComfyUI；未动用户 settings.ini 值。
