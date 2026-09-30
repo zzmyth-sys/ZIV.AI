@@ -371,18 +371,40 @@ def _make_cancel_poller(frame_io):
                 break
             frame_type, payload = frame
             if frame_type != ipc.FRAME_JSON:
+                # B15: an unexpected (non-JSON) frame is dropped, but logged so the drop is
+                # diagnosable instead of silent (same style as dispatch.py Z-026).
+                _LOG.warning(
+                    "unexpected frame while a task is in flight: frame_type=0x%02x; dropped (B15)",
+                    frame_type,
+                )
                 continue
             try:
                 message = ipc.decode_json(payload)
-            except ValueError:
+            except ValueError as exc:
+                _LOG.warning(
+                    "unexpected frame while a task is in flight: malformed JSON (%s); dropped (B15)",
+                    exc,
+                )
                 continue
             if not isinstance(message, dict):
+                _LOG.warning(
+                    "unexpected frame while a task is in flight: non-object JSON; dropped (B15)"
+                )
                 continue
             message_type = message.get("type")
             if message_type == "cancel":
                 _interrupt_processing()
             elif message_type == "ping":
                 frame_io.write_json(handle_ping(message))
+            elif message_type == "shutdown":
+                # Legal drop (B15): a shutdown during a task is ignored by design; the main
+                # loop handles it once the task ends. Debug only.
+                _LOG.debug("shutdown frame ignored while a task is in flight")
+            else:
+                _LOG.warning(
+                    "unexpected frame while a task is in flight: type=%r; dropped (B15)",
+                    message_type,
+                )
 
     return poll
 

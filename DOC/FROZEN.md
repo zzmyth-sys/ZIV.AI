@@ -6541,3 +6541,18 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
   ① pong `0.8` → 不抛异常且 warning 记 `backend='0.8' expected='0.9'`；② pong `0.9` → 无 warning。
 - C# 非 GPU **794 / 0**；Python 275 / 0 / 11 skip（未改 Python）。
 - 本 commit 随 N1/N2 修复一并提交；未改既有冻结行。
+
+---
+
+## B15 采样期非预期帧不再静默丢弃（2026-09-30）
+
+> **追加（只增不改）**。依据审计对齐报告 B15；与 `dispatch.py` Z-026 同型（静默 continue → warning）。本 commit 见 `git log`。
+
+- 位置：`python/server/handlers.py` `_make_cancel_poller.poll()`（采样期内从管道排空的帧）。
+- 改动（**仅日志，行为不变**）：
+  - 非 JSON 帧 / 非法 JSON / 非对象 JSON → `_LOG.warning`（含 frame_type / 原因），仍丢弃。
+  - 未预期类型（如 `submit` / 未知）→ `_LOG.warning`（含 `type=%r`），仍丢弃。
+  - `shutdown`（合法丢弃）→ `_LOG.debug`（不 alert）。
+  - `cancel` / `ping` 行为不变。
+- 新增 `test_disconnect.py` 4 例：submit → warning 且不中断；malformed JSON → warning；非 JSON → warning；shutdown → 非 warning。
+- 验证：Python CPU **279 / 0 / 11 skip**（275 + 4）；C# 非 GPU 794 / 0（未改 C#）。本 commit 随 B15 修复一并提交；不改既有冻结行。

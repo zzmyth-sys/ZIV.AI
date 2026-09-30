@@ -115,6 +115,36 @@ class CancelPollerTests(unittest.TestCase):
         handlers._make_cancel_poller(stub)()
         self.assertEqual([1], self.calls)
 
+    def test_unexpected_submit_frame_warns_and_does_not_interrupt(self):
+        # B15: a submit frame arriving mid-task is dropped, but with a WARNING (not silent).
+        frame = (ipc.FRAME_JSON, ipc.encode_json({"type": "submit", "task_id": "t"}))
+        stub = _StubFrameIO([ipc.PIPE_HAS_FRAME, ipc.PIPE_NO_DATA], frame=frame)
+        with self.assertLogs("zivai.server", level="WARNING") as cm:
+            handlers._make_cancel_poller(stub)()
+        self.assertTrue(any("submit" in line for line in cm.output), cm.output)
+        self.assertEqual([], self.calls)  # behaviour unchanged
+
+    def test_malformed_json_frame_warns(self):
+        frame = (ipc.FRAME_JSON, b"not json")
+        stub = _StubFrameIO([ipc.PIPE_HAS_FRAME, ipc.PIPE_NO_DATA], frame=frame)
+        with self.assertLogs("zivai.server", level="WARNING") as cm:
+            handlers._make_cancel_poller(stub)()
+        self.assertTrue(any("malformed" in line for line in cm.output), cm.output)
+
+    def test_non_json_frame_warns(self):
+        frame = (ipc.FRAME_BINARY, b"\x00\x01\x02")
+        stub = _StubFrameIO([ipc.PIPE_HAS_FRAME, ipc.PIPE_NO_DATA], frame=frame)
+        with self.assertLogs("zivai.server", level="WARNING") as cm:
+            handlers._make_cancel_poller(stub)()
+        self.assertTrue(any("dropped" in line for line in cm.output), cm.output)
+
+    def test_shutdown_frame_is_not_a_warning(self):
+        frame = (ipc.FRAME_JSON, ipc.encode_json({"type": "shutdown"}))
+        stub = _StubFrameIO([ipc.PIPE_HAS_FRAME, ipc.PIPE_NO_DATA], frame=frame)
+        with self.assertNoLogs("zivai.server", level="WARNING"):
+            handlers._make_cancel_poller(stub)()
+        self.assertEqual([], self.calls)
+
 
 class CleanupTests(unittest.TestCase):
     def _patch_engine(self, engine):
