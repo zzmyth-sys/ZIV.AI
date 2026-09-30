@@ -126,6 +126,7 @@
                            TextWrapping="Wrap"
                            FontSize="11"
                            Foreground="{StaticResource ZivTextSecondaryBrush}" />
+                <Button x:Name="PART_RefreshPublicLoras" Content="刷新" MinWidth="64" Height="28" HorizontalAlignment="Left" />
               </StackPanel>
 
               <StackPanel Spacing="8">
@@ -143,7 +144,7 @@
               <TextBlock Text="插件列表（由 Template/plugins.json 登记）"
                          Foreground="{StaticResource ZivTextSecondaryBrush}" />
               <ItemsControl x:Name="PART_PluginList" />
-              <TextBlock Text="启用状态写入 settings.ini [plugins]，重启 App 后对后端生效。"
+              <TextBlock Text="启用状态写入 settings.ini [plugins]，下次任务生效。"
                          TextWrapping="Wrap"
                          Foreground="{StaticResource ZivTextSecondaryBrush}" />
             </StackPanel>

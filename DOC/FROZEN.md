@@ -6786,3 +6786,49 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - Python `unittest discover -p "test_*.py"`（cwd `python/server`）→ **302 / 0**（基线 295 + 新增 7）。
 - headless：viggle 复制前置（源在统一目录外 → 复制进 `LORA_ROOT` 后加载）；无 `LORA_ROOT` / 源缺失 / 复制失败 → `LoraUnifiedError`；handlers 非统一目录 → `ValueError`。
 - 三件套未动；未跑 GPU；未碰 IPC / contracts / 冻结签名 / 公开签名；未改官方 ComfyUI 源码。
+
+---
+
+## 公共 LoRA 更新按钮 + 跨语言对齐测试 + 陈旧文案修正（2026-09-30）
+
+> **追加（只增不改）：** 承接「UI 开关 Viggle 只读报告」与上轮只读复核（C#/Python 判定规则不一致停点）。裁判裁定：以 Python `_PUBLIC_EXTS` 为基准；排序不统一；对齐测试断言集合；fixture 覆盖 `.ckpt`。本 commit 见 `git log`。
+
+### 裁定（写死）
+
+- **D1 扩展名集合**：C# `ScanPublicLoras` 与 Python `lora-manager._PUBLIC_EXTS` 完全一致 = `.safetensors` / `.ckpt` / `.pt` / `.sft`。
+- **D2 排序**：**不统一**。C# 保留 `OrdinalIgnoreCase`（UI 友好）；Python 保留默认 `sorted`。对齐测试只断言**集合**。
+- **fixture 覆盖**：含 `.safetensors` + `.ckpt`，否则测不出 D1。
+
+### .sft 核实（结论：非笔误，保留）
+
+- 依据：ComfyUI 官方 `Comfyui/ComfyUI/folder_paths.py:10`
+  `supported_pt_extensions = {'.ckpt','.pt','.pt2','.bin','.pth','.safetensors','.pkl','.sft'}`；
+  `loras` 等目录使用该集合（`:28`）。`.sft` 是 ComfyUI 认可的权重扩展名，故**保留**。
+
+### 改动
+
+1. `SettingsWindow.axaml.cs`：`ScanPublicLoras` 抽出为 `internal static ScanPublicLoras(loraRoot, lorasJsonPath)`（供对齐测试注入）；扩展名集合改为 `PublicLoraExtensions = {".safetensors",".ckpt",".pt",".sft"}`（与 Python 一致）；保留 `OrdinalIgnoreCase` 排序、归属规则（owner∈{model,Plugin}→owned）、basename 比较、仅文件、异常降级。新增 `RefreshPublicLorasDisplay` + `WirePublicLoras`。
+2. `SettingsWindow.axaml`：`PART_PublicLoras` 旁加「刷新」按钮（`PART_RefreshPublicLoras`）；陈旧文案修正（见下）。
+3. `tests/fixtures/lora-scan/`（新）：共享 fixture（`models/loras/{a.safetensors,b.safetensors,c.safetensors,d.ckpt}` + `loras.json`（a=model/b=Plugin）+ `expected.json` `{"public_loras":["c.safetensors","d.ckpt"]}` + `README.md`）。
+4. `src/ZivAiEditor.Tests/LoraScanAlignmentTests.cs`（新）：C# 对齐测试（`FindRepositoryRoot()` 定位 fixture；调 `internal ScanPublicLoras`；`HashSet.SetEquals` 集合断言）。
+5. `python/server/test_lora_scan_alignment.py`（新）：Python 对齐测试（`config.REPO_ROOT` 拼路径；mock `config.LORA_ROOT` + `loras.load_registry`；`set` 断言，读同一 `expected.json`）。
+6. `src/ZivAiEditor.Tests/UI/SettingsWindowDiscoveryTests.cs`：新增更新按钮 headless 测试。
+
+### 更新按钮（方案 A：UI 独立扫描）
+
+- 点击「刷新」→ `RefreshPublicLorasDisplay(_shell.LoadSettings())` → 重跑 `ScanPublicLoras` → `SetLabel("PART_PublicLoras", …)`。
+- **不依赖 seams 热加载**（UI 无法强制 seam 重跑，见「UI 开关 Viggle」报告）；**不新增 IPC**。
+- **方案 B（UI→IPC→Python 管理器回传结果）未采纳**：需新增 IPC method 与契约/冻结面变更，触发停点；且 UI 已有等价 C# 扫描。
+
+### 陈旧文案（对齐 cdda560）
+
+- 前（`SettingsWindow.axaml`）：「启用状态写入 settings.ini [plugins]，重启 App 后对后端生效。」
+- 后：「启用状态写入 settings.ini [plugins]，下次任务生效。」
+
+### 验证（非 GPU）
+
+- `dotnet build src/ZIV.AI.sln -c Release` → 0 警告 / 0 错误。
+- C# 非 GPU `--filter "FullyQualifiedName!~Ipc"` → **821 / 0**（基线 819 + 新增 2）。
+- Python `unittest discover -p "test_*.py"` → **303 / 0**（基线 302 + 新增 1）。
+- 共享 fixture 存在（含 `.ckpt`）；C#/Python 各一对齐测试读同一 `expected.json`，集合断言通过。
+- 三件套未动；未跑 GPU；未碰 IPC / contracts / 冻结签名 / 公开签名 / seams。

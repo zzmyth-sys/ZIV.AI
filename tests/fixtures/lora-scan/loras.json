@@ -1,0 +1,8 @@
+{
+  "version": "1",
+  "_comment": "Shared cross-language alignment fixture (tests/fixtures/lora-scan). Read-only sample data; never loaded by the pipeline. Used by src/ZivAiEditor.Tests/LoraScanAlignmentTests.cs and python/server/test_lora_scan_alignment.py.",
+  "loras": [
+    { "id": "a", "owner": "model", "path": "a.safetensors" },
+    { "id": "b", "owner": "Plugin", "path": "b.safetensors" }
+  ]
+}

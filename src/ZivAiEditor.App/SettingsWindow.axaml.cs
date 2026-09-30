@@ -59,6 +59,7 @@ public partial class SettingsWindow : Window
         WireComfy();
         WireLoraRoot();
         WireFooter();
+        WirePublicLoras();
 
         var settings = _shell.LoadSettings();
         Prefill(settings);
@@ -271,8 +272,7 @@ public partial class SettingsWindow : Window
         SetLabel("PART_LoraRootLabel",
             "loras: " + (ComfyDiscovery.DeriveLoraRoot(settings.ComfyRoot) ?? "(未发现 ComfyUI，无法推导)"));
 
-        var publicLoras = ScanPublicLoras(ComfyDiscovery.DeriveLoraRoot(settings.ComfyRoot));
-        SetLabel("PART_PublicLoras", publicLoras.Count == 0 ? "(无)" : string.Join("、", publicLoras));
+        RefreshPublicLorasDisplay(settings);
 
         if (!string.IsNullOrWhiteSpace(settings.IgnoredScript)
             && this.FindControl<TextBlock>("PART_ScriptWarning") is { } warning)
@@ -282,12 +282,17 @@ public partial class SettingsWindow : Window
         }
     }
 
+    /// <summary>The weight extensions the public scan accepts; identical to Python <c>_PUBLIC_EXTS</c>.</summary>
+    internal static readonly string[] PublicLoraExtensions = { ".safetensors", ".ckpt", ".pt", ".sft" };
+
     /// <summary>
     /// Read-only scan of the unified LoRA directory for **public** weights: files not owned by a
     /// logged <c>owner=model</c> / <c>owner=Plugin</c> entry. Mirrors the Python manager plugin's
-    /// diff so the UI and the backend agree.
+    /// diff (same extension set as <c>lora-manager._PUBLIC_EXTS</c>). The sort is UI-friendly
+    /// (<see cref="StringComparer.OrdinalIgnoreCase"/>) and is intentionally not asserted by the
+    /// cross-language alignment tests (they compare sets, not order).
     /// </summary>
-    private IReadOnlyList<string> ScanPublicLoras(string? loraRoot)
+    internal static IReadOnlyList<string> ScanPublicLoras(string? loraRoot, string? lorasJsonPath)
     {
         if (string.IsNullOrWhiteSpace(loraRoot) || !Directory.Exists(loraRoot))
         {
@@ -297,7 +302,7 @@ public partial class SettingsWindow : Window
         var owned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            var registry = new LoraRegistry(Path.Combine(_shell.TemplateDirectory, "loras.json"));
+            var registry = new LoraRegistry(lorasJsonPath);
             foreach (var entry in registry.All)
             {
                 var owner = entry.Owner ?? "";
@@ -320,7 +325,8 @@ public partial class SettingsWindow : Window
 
         try
         {
-            return Directory.EnumerateFiles(loraRoot!, "*.safetensors")
+            return Directory.EnumerateFiles(loraRoot!)
+                .Where(IsPublicLoraExtension)
                 .Select(Path.GetFileName)
                 .Where(name => !string.IsNullOrEmpty(name) && !owned.Contains(name!))
                 .Cast<string>()
@@ -330,6 +336,39 @@ public partial class SettingsWindow : Window
         catch (Exception)
         {
             return Array.Empty<string>();
+        }
+    }
+
+    private static bool IsPublicLoraExtension(string path)
+    {
+        var extension = Path.GetExtension(path);
+        foreach (var candidate in PublicLoraExtensions)
+        {
+            if (string.Equals(extension, candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private IReadOnlyList<string> ScanPublicLoras(string? loraRoot)
+        => ScanPublicLoras(loraRoot, Path.Combine(_shell.TemplateDirectory, "loras.json"));
+
+    /// <summary>Re-scans the unified directory and refreshes the read-only public-LoRA label.</summary>
+    private void RefreshPublicLorasDisplay(BackendSettings settings)
+    {
+        var publicLoras = ScanPublicLoras(ComfyDiscovery.DeriveLoraRoot(settings.ComfyRoot));
+        SetLabel("PART_PublicLoras", publicLoras.Count == 0 ? "(无)" : string.Join("、", publicLoras));
+    }
+
+    /// <summary>Wires the public-LoRA "refresh" button (UI-side scan; no IPC / no seam trigger).</summary>
+    private void WirePublicLoras()
+    {
+        if (this.FindControl<Button>("PART_RefreshPublicLoras") is { } button)
+        {
+            button.Click += (_, _) => RefreshPublicLorasDisplay(_shell.LoadSettings());
         }
     }
 

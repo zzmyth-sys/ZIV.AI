@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 using Xunit;
 using ZivAiEditor.App;
 using ZivAiEditor.Backend;
@@ -192,6 +193,47 @@ public class SettingsWindowDiscoveryTests
                     Assert.NotNull(window.FindControl<TextBox>("PART_LoraRoot"));
                     Assert.NotNull(window.FindControl<Button>("PART_BrowseLoraRoot"));
                     Assert.NotNull(window.FindControl<Button>("PART_ClearLoraRoot"));
+                }
+                finally
+                {
+                    window.Close();
+                }
+            });
+        }
+        finally
+        {
+            DeleteDirectory(directory);
+        }
+    }
+
+    [Fact]
+    public void SettingsWindow_Refresh_Public_Loras_Button_Rescans()
+    {
+        var directory = NewDirectory();
+        try
+        {
+            var comfy = Path.Combine(directory, "ComfyUI");
+            var loraRoot = Path.Combine(comfy, "models", "loras");
+            Directory.CreateDirectory(loraRoot);
+            File.WriteAllText(Path.Combine(directory, "loras.json"), "{ \"loras\": [] }");
+            var settings = new BackendSettings { ComfyRoot = comfy };
+
+            HeadlessTest.Run(() =>
+            {
+                var window = new SettingsWindow(new FakeShell(directory, settings), new PluginRegistry(Path.Combine(directory, "plugins.json")));
+                try
+                {
+                    var label = window.FindControl<TextBlock>("PART_PublicLoras");
+                    Assert.NotNull(label);
+                    Assert.Equal("(无)", label!.Text);
+
+                    // A new public weight appears on disk; the refresh button must re-scan (UI-side).
+                    File.WriteAllText(Path.Combine(loraRoot, "new.safetensors"), "");
+                    var button = window.FindControl<Button>("PART_RefreshPublicLoras");
+                    Assert.NotNull(button);
+                    button!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+                    Assert.Contains("new.safetensors", label.Text);
                 }
                 finally
                 {
