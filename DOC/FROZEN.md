@@ -6832,3 +6832,47 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - Python `unittest discover -p "test_*.py"` → **303 / 0**（基线 302 + 新增 1）。
 - 共享 fixture 存在（含 `.ckpt`）；C#/Python 各一对齐测试读同一 `expected.json`，集合断言通过。
 - 三件套未动；未跑 GPU；未碰 IPC / contracts / 冻结签名 / 公开签名 / seams。
+
+---
+
+## 公共 LoRA 移出环境页 → 独立「LoRA」页签（2026-09-30）
+
+> **追加（只增不改）：** 用户截图反馈：环境页 LoRA 区密集。裁定：公共 LoRA 移出环境页，独立「LoRA」页签，分两区。本 commit 见 `git log`。
+
+### 页签结构
+
+- **环境 / 插件 / LoRA**（新增第三页签）。默认打开仍为「插件」页（插件 `TabItem` `IsSelected="True"`）。
+
+### LoRA 页签两区
+
+- **上区「公共 LoRA」**：复用 `PART_PublicLoras` + `PART_RefreshPublicLoras`「刷新」（UI 独立扫描，逻辑未改，仅搬位置）。
+- **下区「已归属 LoRA（只读参考）」**：新控件 `PART_OwnedLoras`，列出 `loras.json` 中 `owner∈{model,Plugin}` 的条目，渲染 `id（owner）：basename`，按 id 排序。
+
+### 文案清理（用户截图反馈）
+
+- 标题：「公共 LoRA（未归属；由公共管理器管理，默认关）」→「公共 LoRA」。
+- 子说明：新增「未归属的 LoRA 由公共管理器自动管理；启用状态默认关」。
+- 空态：「(无)」→「（暂无；放入统一目录后点刷新）」。
+
+### 改动
+
+1. `SettingsWindow.axaml`：环境页删除公共 LoRA 区；`TabControl` 新增第三 `TabItem Header="LoRA"`（上区公共 + 下区已归属）。
+2. `SettingsWindow.axaml.cs`：`RefreshPublicLorasDisplay` 空态改文案；新增 `RefreshOwnedLorasDisplay`（读 `LoraRegistry`，过滤 owner∈{model,Plugin}，渲染 id/owner/basename）；`InitDiscovery` 调用之。`WirePublicLoras` 控件名不变（仅位置移）。
+3. `SettingsWindowDiscoveryTests.cs`：新增 `SettingsWindow_Has_Lora_Tab_With_Public_And_Owned_Sections`（断言 3 页签 + 顺序 + 已归属内容）；`SettingsWindow_Refresh_Public_Loras_Button_Rescans` 空态断言更新。
+4. `SettingsWindowSmokeTests.cs`：`tabs.ItemCount` 2 → 3（两处）——**范围外测试同步（披露）**。
+
+### LoraRegistry
+
+- **无需扩展**：`LoraEntryDto` 已暴露 `Owner` / `Path`（`LoraFileDto.cs:32,35`）。已归属区直接读 `LoraRegistry.All`。
+
+### 范围说明（披露）
+
+- 授权测试清单仅列 `SettingsWindowDiscoveryTests.cs`；但 `SettingsWindowSmokeTests.cs:38,159` 断言 `tabs.ItemCount == 2`，新增第三页签必使其失败。为满足验收「821 + 新增 / 0」同步该两处断言（2→3）。该文件为纯测试文件，不属禁止面（IPC/contracts/冻结签名/公开签名/ComfyUI/三件套）。
+
+### 验证（非 GPU）
+
+- `dotnet build src/ZIV.AI.sln -c Release` → 0 警告 / 0 错误。
+- C# 非 GPU `--filter "FullyQualifiedName!~Ipc"` → **822 / 0**（基线 821 + 新增 1）。
+- Python `unittest discover -p "test_*.py"` → **303 / 0**（未改 Python）。
+- 环境页不再显示 LoRA 区；LoRA 页签两区就位。
+- 三件套未动；未跑 GPU；未碰 IPC / contracts / seams / 官方 ComfyUI。

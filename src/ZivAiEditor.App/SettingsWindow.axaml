@@ -121,15 +121,6 @@
               </Expander>
 
               <StackPanel Spacing="8">
-                <TextBlock Text="公共 LoRA（未归属；由公共管理器管理，默认关）" Foreground="{StaticResource ZivTextSecondaryBrush}" />
-                <TextBlock x:Name="PART_PublicLoras"
-                           TextWrapping="Wrap"
-                           FontSize="11"
-                           Foreground="{StaticResource ZivTextSecondaryBrush}" />
-                <Button x:Name="PART_RefreshPublicLoras" Content="刷新" MinWidth="64" Height="28" HorizontalAlignment="Left" />
-              </StackPanel>
-
-              <StackPanel Spacing="8">
                 <TextBlock Text="模板配置" Foreground="{StaticResource ZivTextSecondaryBrush}" />
                 <Button x:Name="PART_OpenTemplate" Content="打开 Template 文件夹"
                         MinWidth="160" Height="30" HorizontalAlignment="Left" />
@@ -147,6 +138,33 @@
               <TextBlock Text="启用状态写入 settings.ini [plugins]，下次任务生效。"
                          TextWrapping="Wrap"
                          Foreground="{StaticResource ZivTextSecondaryBrush}" />
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <TabItem Header="LoRA">
+          <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="6,8,6,0">
+            <StackPanel Spacing="16">
+              <StackPanel Spacing="8">
+                <TextBlock Text="公共 LoRA" Foreground="{StaticResource ZivTextSecondaryBrush}" />
+                <TextBlock Text="未归属的 LoRA 由公共管理器自动管理；启用状态默认关"
+                           TextWrapping="Wrap"
+                           FontSize="11"
+                           Foreground="{StaticResource ZivTextSecondaryBrush}" />
+                <TextBlock x:Name="PART_PublicLoras"
+                           TextWrapping="Wrap"
+                           FontSize="11"
+                           Foreground="{StaticResource ZivTextSecondaryBrush}" />
+                <Button x:Name="PART_RefreshPublicLoras" Content="刷新" MinWidth="64" Height="28" HorizontalAlignment="Left" />
+              </StackPanel>
+
+              <StackPanel Spacing="8">
+                <TextBlock Text="已归属 LoRA（只读参考）" Foreground="{StaticResource ZivTextSecondaryBrush}" />
+                <TextBlock x:Name="PART_OwnedLoras"
+                           TextWrapping="Wrap"
+                           FontSize="11"
+                           Foreground="{StaticResource ZivTextSecondaryBrush}" />
+              </StackPanel>
             </StackPanel>
           </ScrollViewer>
         </TabItem>

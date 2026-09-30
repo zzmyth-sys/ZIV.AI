@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -225,7 +226,7 @@ public class SettingsWindowDiscoveryTests
                 {
                     var label = window.FindControl<TextBlock>("PART_PublicLoras");
                     Assert.NotNull(label);
-                    Assert.Equal("(无)", label!.Text);
+                    Assert.Equal("（暂无；放入统一目录后点刷新）", label!.Text);
 
                     // A new public weight appears on disk; the refresh button must re-scan (UI-side).
                     File.WriteAllText(Path.Combine(loraRoot, "new.safetensors"), "");
@@ -234,6 +235,61 @@ public class SettingsWindowDiscoveryTests
                     button!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
                     Assert.Contains("new.safetensors", label.Text);
+                }
+                finally
+                {
+                    window.Close();
+                }
+            });
+        }
+        finally
+        {
+            DeleteDirectory(directory);
+        }
+    }
+
+    [Fact]
+    public void SettingsWindow_Has_Lora_Tab_With_Public_And_Owned_Sections()
+    {
+        var directory = NewDirectory();
+        try
+        {
+            var comfy = Path.Combine(directory, "ComfyUI");
+            var loraRoot = Path.Combine(comfy, "models", "loras");
+            Directory.CreateDirectory(loraRoot);
+            File.WriteAllText(Path.Combine(directory, "loras.json"),
+                "{ \"loras\": ["
+                + " { \"id\": \"face\", \"owner\": \"model\", \"path\": \"C:/x/owned.safetensors\" },"
+                + " { \"id\": \"vig\", \"owner\": \"Plugin\", \"path\": \"C:/x/vig.safetensors\" } ] }");
+            var settings = new BackendSettings { ComfyRoot = comfy };
+
+            HeadlessTest.Run(() =>
+            {
+                var window = new SettingsWindow(new FakeShell(directory, settings), new PluginRegistry(Path.Combine(directory, "plugins.json")));
+                try
+                {
+                    var tabs = window.FindControl<TabControl>("PART_SettingsTabs");
+                    Assert.NotNull(tabs);
+                    Assert.Equal(3, tabs!.ItemCount);
+
+                    var headers = new List<string>();
+                    foreach (var item in tabs.Items)
+                    {
+                        if (item is TabItem { Header: string header })
+                        {
+                            headers.Add(header);
+                        }
+                    }
+
+                    Assert.Equal(new[] { "环境", "插件", "LoRA" }, headers);
+
+                    var ownedLabel = window.FindControl<TextBlock>("PART_OwnedLoras");
+                    Assert.NotNull(ownedLabel);
+                    Assert.Contains("face", ownedLabel!.Text);
+                    Assert.Contains("vig", ownedLabel.Text);
+                    Assert.Contains("owned.safetensors", ownedLabel.Text);
+                    Assert.NotNull(window.FindControl<TextBlock>("PART_PublicLoras"));
+                    Assert.NotNull(window.FindControl<Button>("PART_RefreshPublicLoras"));
                 }
                 finally
                 {

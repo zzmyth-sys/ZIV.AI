@@ -35,7 +35,7 @@ public class SettingsWindowSmokeTests
                 {
                     var tabs = window.FindControl<TabControl>("PART_SettingsTabs");
                     Assert.NotNull(tabs);
-                    Assert.Equal(2, tabs!.ItemCount);
+                    Assert.Equal(3, tabs!.ItemCount);
                     Assert.NotNull(window.FindControl<TextBox>("PART_DitPath"));
                     Assert.NotNull(window.FindControl<ItemsControl>("PART_PluginList"));
                 }
@@ -156,7 +156,7 @@ public class SettingsWindowSmokeTests
                     var tabs = window.FindControl<TabControl>("PART_SettingsTabs");
                     Assert.NotNull(tabs);
                     // The LoRA row lives inside the existing 环境 tab, not a new tab.
-                    Assert.Equal(2, tabs!.ItemCount);
+                    Assert.Equal(3, tabs!.ItemCount);
                     Assert.NotNull(window.FindControl<TextBox>("PART_LoraRoot"));
                     Assert.NotNull(window.FindControl<Button>("PART_BrowseLoraRoot"));
                     Assert.NotNull(window.FindControl<Button>("PART_ClearLoraRoot"));

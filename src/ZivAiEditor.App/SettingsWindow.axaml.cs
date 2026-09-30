@@ -273,6 +273,7 @@ public partial class SettingsWindow : Window
             "loras: " + (ComfyDiscovery.DeriveLoraRoot(settings.ComfyRoot) ?? "(未发现 ComfyUI，无法推导)"));
 
         RefreshPublicLorasDisplay(settings);
+        RefreshOwnedLorasDisplay(settings);
 
         if (!string.IsNullOrWhiteSpace(settings.IgnoredScript)
             && this.FindControl<TextBlock>("PART_ScriptWarning") is { } warning)
@@ -360,7 +361,41 @@ public partial class SettingsWindow : Window
     private void RefreshPublicLorasDisplay(BackendSettings settings)
     {
         var publicLoras = ScanPublicLoras(ComfyDiscovery.DeriveLoraRoot(settings.ComfyRoot));
-        SetLabel("PART_PublicLoras", publicLoras.Count == 0 ? "(无)" : string.Join("、", publicLoras));
+        SetLabel("PART_PublicLoras", publicLoras.Count == 0
+            ? "（暂无；放入统一目录后点刷新）"
+            : string.Join("、", publicLoras));
+    }
+
+    /// <summary>
+    /// Renders the read-only "owned LoRA" reference: <c>loras.json</c> entries whose
+    /// <c>owner</c> is <c>model</c> or <c>Plugin</c>, as <c>id（owner）：basename</c>.
+    /// </summary>
+    private void RefreshOwnedLorasDisplay(BackendSettings settings)
+    {
+        var entries = new List<string>();
+        try
+        {
+            var registry = new LoraRegistry(Path.Combine(_shell.TemplateDirectory, "loras.json"));
+            foreach (var entry in registry.All)
+            {
+                var owner = entry.Owner ?? "";
+                if (!owner.Equals("model", StringComparison.OrdinalIgnoreCase)
+                    && !owner.Equals("Plugin", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var name = string.IsNullOrWhiteSpace(entry.Path) ? "" : Path.GetFileName(entry.Path!);
+                entries.Add($"{entry.Id ?? "?"}（{owner}）：{name}");
+            }
+        }
+        catch (Exception)
+        {
+            // A missing / unreadable log leaves the list empty (never fatal).
+        }
+
+        entries.Sort(StringComparer.Ordinal);
+        SetLabel("PART_OwnedLoras", entries.Count == 0 ? "（无）" : string.Join("\n", entries));
     }
 
     /// <summary>Wires the public-LoRA "refresh" button (UI-side scan; no IPC / no seam trigger).</summary>
