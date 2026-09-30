@@ -112,8 +112,6 @@ public class ComfyDiscoveryTests
         const string root = @"D:\c\ComfyUI";
 
         Assert.Equal(Path.Combine(root, "models"), ComfyDiscovery.DeriveModelRoot(root));
-        Assert.Equal(Path.Combine(root, "output"), ComfyDiscovery.DeriveOutput(root));
-        Assert.Equal(Path.Combine(root, "input"), ComfyDiscovery.DeriveInput(root));
         Assert.Equal(Path.Combine(root, "models", "loras"), ComfyDiscovery.DeriveLoraRoot(root));
         Assert.Equal(
             Path.GetFullPath(Path.Combine(root, "..", "python_embeded", "python.exe")),
@@ -124,8 +122,6 @@ public class ComfyDiscoveryTests
     public void Derivations_Return_Null_Without_Root()
     {
         Assert.Null(ComfyDiscovery.DeriveModelRoot(null));
-        Assert.Null(ComfyDiscovery.DeriveOutput(null));
-        Assert.Null(ComfyDiscovery.DeriveInput(null));
         Assert.Null(ComfyDiscovery.DeriveLoraRoot(null));
         Assert.Null(ComfyDiscovery.DerivePythonExe(null));
     }

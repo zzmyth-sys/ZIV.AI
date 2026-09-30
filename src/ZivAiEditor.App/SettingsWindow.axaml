@@ -59,7 +59,7 @@
               <StackPanel Spacing="8">
                 <TextBlock Text="运行环境（自动发现）" Foreground="{StaticResource ZivTextSecondaryBrush}" />
                 <Grid ColumnDefinitions="100,*"
-                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
+                      RowDefinitions="Auto,Auto,Auto,Auto"
                       RowSpacing="8"
                       ColumnSpacing="8">
                   <TextBlock Grid.Row="0" Grid.Column="0" Text="ComfyUI 目录"
@@ -74,16 +74,8 @@
                              VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
                   <TextBox x:Name="PART_Script" Grid.Row="2" Grid.Column="1" IsReadOnly="True" />
 
-                  <TextBlock Grid.Row="3" Grid.Column="0" Text="输出目录"
-                             VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
-                  <TextBox x:Name="PART_OutputDir" Grid.Row="3" Grid.Column="1" IsReadOnly="True" />
-
-                  <TextBlock Grid.Row="4" Grid.Column="0" Text="输入目录"
-                             VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
-                  <TextBox x:Name="PART_InputDir" Grid.Row="4" Grid.Column="1" IsReadOnly="True" />
-
                   <TextBlock x:Name="PART_ScriptWarning"
-                             Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
+                             Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2"
                              TextWrapping="Wrap"
                              IsVisible="False"
                              Foreground="#E06C4A"

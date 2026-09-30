@@ -254,8 +254,6 @@ public partial class SettingsWindow : Window
         SetText("PART_ComfyRoot", settings.ComfyRoot);
         SetText("PART_PythonExe", settings.PythonExe);
         SetText("PART_Script", settings.Script);
-        SetText("PART_OutputDir", ComfyDiscovery.DeriveOutput(settings.ComfyRoot));
-        SetText("PART_InputDir", ComfyDiscovery.DeriveInput(settings.ComfyRoot));
 
         if (this.FindControl<TextBox>("PART_ComfyRoot") is { } comfyBox)
         {

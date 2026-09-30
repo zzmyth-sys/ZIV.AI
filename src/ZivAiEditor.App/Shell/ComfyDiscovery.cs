@@ -101,12 +101,6 @@ internal static class ComfyDiscovery
     /// <summary>Model root derived from the ComfyUI tree (<c>&lt;root&gt;/models</c>); null when no root.</summary>
     internal static string? DeriveModelRoot(string? comfyRoot) => Join(comfyRoot, "models");
 
-    /// <summary>Default output directory (<c>&lt;root&gt;/output</c>); null when no root.</summary>
-    internal static string? DeriveOutput(string? comfyRoot) => Join(comfyRoot, "output");
-
-    /// <summary>Default input directory (<c>&lt;root&gt;/input</c>); null when no root.</summary>
-    internal static string? DeriveInput(string? comfyRoot) => Join(comfyRoot, "input");
-
     /// <summary>LoRA directory (<c>&lt;root&gt;/models/loras</c>); null when no root.</summary>
     internal static string? DeriveLoraRoot(string? comfyRoot) => Join(comfyRoot, "models", "loras");
 

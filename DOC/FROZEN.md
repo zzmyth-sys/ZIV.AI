@@ -6645,3 +6645,38 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - C# 非 GPU `--filter "FullyQualifiedName!~Ipc"` → **815 / 0**（基线 800 + 新增 15：`ComfyDiscoveryTests` 10 + `SettingsWindowDiscoveryTests` 5）。
 - Python `unittest discover -p "test_*.py"`（cwd `python/server`）→ **282 / 0**（基线 279 + 新增 3：`test_config_paths.py`）。
 - 未跑 GPU；未改官方 `Comfyui/ComfyUI/main.py`；未碰 IPC / contracts / 冻结签名 / 公开签名。
+
+---
+
+## 修正：撤销 output/input 派生（2026-09-30，追加；原 b9485d0 段不动）
+
+> **方向修正（铁律 4：只增不改）：** 上一 commit `b9485d0` 把 ZIV 的 output/input 误写成「派生自 comfy_root」，方向反了。本 commit 撤销该派生并声明原则。本 commit 见 `git log`。
+
+### 原则（写死）
+
+- ZIV.AI 是**独立 AI 图像编辑桌面应用**，不是 ComfyUI 前端。
+- ZIV 的「输入」= 用户导入的图片；「输出」= 编辑结果保存位置；二者是 ZIV 自己的事，**不由 ComfyUI 派生**。
+- ComfyUI 的 `input/`、`output/` 是 ComfyUI 内部目录，ZIV **不碰、不展示**。
+
+### 撤销内容
+
+- `ComfyDiscovery`：删除 `DeriveOutput` / `DeriveInput`（其余发现链 / `DeriveModelRoot` / `DeriveLoraRoot` / `DerivePythonExe` 全保留）。
+- `SettingsWindow.axaml(.cs)`：删除「输出目录 / 输入目录」只读字段及其填充逻辑。
+- 测试：删除相关断言（`ComfyDiscoveryTests`；`SettingsWindowDiscoveryTests` 本就无 output/input 断言）。
+
+### 保留不变
+
+- 发现链（env/settings > 程序便携 > python_exe 同级 > 仓库相对）、三件套可编辑、默认插件页、高级折叠区（python.exe / comfy_root / lora_root 覆盖）、main.py 只读 + `script` 忽略 —— **全部保留**。
+- 本任务**不改** ZIV 自身 output/input 实现（见下），只登记。
+
+### 仅登记（不在本任务改）
+
+- ZIV 自身输出目录：`python/server/config.py:117-121` `OUTPUT_DIR`（程序目录 `output/`，`SPEC §3.9`，可用 env `ZIV_AI_OUTPUT_DIR` 覆盖）。
+- ZIV 自身输入 = 用户导入图片（会话 / 项目流程管理），与 ComfyUI `input/` 无关。
+
+### 验证
+
+- `dotnet build src/ZIV.AI.sln -c Release` → 0 警告 / 0 错误。
+- C# 非 GPU `--filter "FullyQualifiedName!~Ipc"` → 815 / 0（删 4 条断言，不减用例数）。
+- Python CPU `unittest discover -p "test_*.py"` → 282 / 0 / 11 skip（未改 Python）。
+- `ComfyDiscovery` 不再有 `DeriveOutput` / `DeriveInput`；设置界面不再展示 output/input。
