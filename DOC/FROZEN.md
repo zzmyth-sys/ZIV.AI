@@ -6302,3 +6302,27 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 ### G1E.5 边界
 - 结果仅本机本会话（RTX 4080 / 驱动 591.86 / torch 2.13.0+cu130）有效；跨机 / 驱动不可比。
 - 非视觉验收；视觉签归用户。
+
+---
+
+## G1 收尾（日期：2026-09-30）
+
+> **追加（只增不改）**。G1 对照收尾：正式对照结论 + 单图补充对照 + 缺口登记。引用 §G1R.* / §G1P.* / §G1E.*。
+
+### G1C.1 正式对照结论
+- 按 `DOC/G1_PROTOCOL.md` 执行：**「ZIV vs 官方 @1536 慢 ~10s」不成立**（ZIV 更快；Δ_NV=−58.5s、Δ_V=−24.3s）。详见 §G1E.*。
+
+### G1C.2 单图补充对照（未入协议；一次性）
+- 场景：单图 / 25 步 / 无 Viggle / `side=1536`（ZIV `--nref 0 --steps 25`）。
+- 结果：ZIV `T_total=33.5s`（load 8.0 + sample 25.5）/ 峰值 VRAM 10499 MiB / RSS 5.64 GB；
+  官方 `T_total=41.5s`（load 9.4 + sample 32.1）/ 峰值 VRAM 14655 MiB / RSS 6.91 GB；两侧输出 1216×1536。
+- **Δ = −8.0s**（ZIV 更快）；**单次样本**（非 ≥3 次中位数）。
+- 方法：官方侧用**一次性临时脚本**（未入库）构造单图 25 步工作流；不改官方代码 / 工作流。
+
+### G1C.3 缺口登记（可选后续）
+- `tools/zivcli/official/g1_workflow.py` 固定 `nref=2 / steps=40`（+ Viggle 0/1），**不支持单图 / 25 步**；
+  单图对照只能临时构造。如需常规化 → 另立任务给 `g1_workflow.py` 参数化（`--nref/--steps`）。
+- 协议「attention 后端」未显式对齐（ZIV `SageAttention ON` / 官方 stock OFF）——见 §G1E.4；建议后续协议显式标注。
+
+### G1C.4 状态
+- G1 对照**收尾**（性能结果为准）；**视觉签归用户**。产物落点见 `DOC/ACCEPTANCE.MD`「G1 收尾」段。

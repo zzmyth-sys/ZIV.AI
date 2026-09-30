@@ -175,3 +175,5 @@
   与加固 2（三档判据）。
 - 2026-09-30：img3 = `tools/zivcli/harness/fixtures/img3.png`（`683bdd1` 引入，SHA `EE31F26B…`；
   非 `DOC/ICO/logo.png`）——澄清 §1 / §6 的 img3 来源。
+- 2026-09-30：追加**单图 / 25 步 / 无 Viggle**补充对照（一次性，未入协议目录；官方侧为临时脚本）：
+  ZIV `T_total=33.5s` vs 官方 `41.5s`（Δ=−8.0s）。结果与缺口登记见 `DOC/FROZEN.md` §G1C.*。
