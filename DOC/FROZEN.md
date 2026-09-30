@@ -6141,3 +6141,36 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - `dotnet test --filter "FullyQualifiedName!~Ipc"` → **连续 3 次 782 通过 / 0 失败**（测试数不变）。
 - `git diff --stat` 仅测试项目文件；未 push。
 - 未跑 GPU / 未启动真实 App（Z29 / Z30）。
+
+---
+
+## 1969 SHA 复现验证 + 入 goldens（日期：2026-09-30）
+
+> **追加（只增不改）**。验证 1969 GPU 取证 SHA 可复现；一致则入 `goldens.json` 并 `verify` 自验。
+> 纯 CLI 数据 + 文档；**不改 C# / IPC / Python 后端 / 契约 / 冻结签名**；GPU 任务（Z30 已过）。
+
+### Y1969V.1 前置
+- 首跑取证 commit `c8c9fd3`（FROZEN 本文件「1969 GPU 真跑取证」段 Y1969R.1–R.5）；本次修复/入账 commit 见 `git log`。
+- Z30：`gpu-check` → `free=true`（used 1128 MiB / 16376 MiB，`large_apps=[]`；11:08）；`run` 内置 gpu-check 亦过。
+- CLI 包装器经 PATH Python 3.13.7 运行（嵌入式 Python 的 `_pth` 隔离看不到仓库 `tools`）；harness 仍由 runner 以
+  嵌入式 `Comfyui\python_embeded\python.exe` 拉起，与取证一致。
+
+### Y1969V.2 复现（分支 X：SHA 一致）
+- 命令（绝对路径；输出 `runs/1969-repro/multiref.png`，**不复用** c8c9fd3 的 `runs/1969/multiref.png`）：
+  `python -m tools.zivcli run --op inpaint --side 1536 --nref 2 --img1 D:\devlop\ZIV.AI\tools\zivcli\harness\fixtures\img1.jpg --img2 D:\devlop\ZIV.AI\tools\zivcli\harness\fixtures\img2.png --img3 D:\devlop\ZIV.AI\DOC\ICO\logo.png --prompt "Replace the background of <image1> with the scene from <image2>; relight it like <image3>." --out D:\devlop\ZIV.AI\tools\zivcli\runs\1969-repro\multiref.png --yes`
+- 结果：exit=0；SHA256 = `98451aabc43f1d111d9c8d630b15a4297c2537cd4d8a3b8f3516cfb1d1fb2e3f`
+  （**与 c8c9fd3 取证逐字一致**）；load 11.5s / pipeline wall 58.7s / 峰值 VRAM 12081 MiB / 峰值 RSS 12.96 GB。
+- `SCN_PROMPT` 实际注入值 = 传入 prompt（逐字）：`Replace the background of <image1> with the scene from <image2>; relight it like <image3>.`
+
+### Y1969V.3 goldens 条目（冻结）
+- 新增 `tools/zivcli/goldens.json` key `1969`，schema 与 b3/b4 一致；含 `prompt` 字段。
+- 路径策略：沿用 b3/b4 的**相对**策略（相对 `tools/zivcli`）：`img1=harness/fixtures/img1.jpg`、
+  `img2=harness/fixtures/img2.png`、`img3=../../DOC/ICO/logo.png`（归一后 = `DOC/ICO/logo.png`）。
+- `sha256 = 98451AABC43F1D111D9C8D630B15A4297C2537CD4D8A3B8F3516CFB1D1FB2E3F`。
+- `python -m tools.zivcli verify 1969 --yes` → **PASS**（exit 0；actual == expected）。
+- 复核（未改 C# / CLI 逻辑）：C# 非 GPU 全量 **782 / 0**；zivcli 单测 **59 / 0**。
+
+### Y1969V.4 边界
+- **视觉签仍待用户**：SHA 复现 ≠ 视觉通过；本段不下「视觉通过」裁定。
+- **跨机器 / 驱动 SHA 可能不同**（同机同 HEAD 应逐字节相同）；goldens 的 1969 为**同机回归锚点**。
+- 未改 `src/` / IPC / `python/` / contracts / harness；ACCEPTANCE / FROZEN 纯增。

@@ -22,5 +22,18 @@
     "img2": "harness/fixtures/img2.png",
     "img3": "harness/fixtures/img2.png",
     "sha256": "5AD34D51D48779243CF6CEA99526584DA682C355C6FC09946C058C97976A26C8"
+  },
+  "1969": {
+    "description": "1969 / 9C.5D.14 多图引用（<image2> / <image3> 生效；img3 = repo DOC/ICO/logo.png）",
+    "op": "inpaint",
+    "side": 1536,
+    "nref": 2,
+    "steps": 40,
+    "viggle": 0,
+    "img1": "harness/fixtures/img1.jpg",
+    "img2": "harness/fixtures/img2.png",
+    "img3": "../../DOC/ICO/logo.png",
+    "prompt": "Replace the background of <image1> with the scene from <image2>; relight it like <image3>.",
+    "sha256": "98451AABC43F1D111D9C8D630B15A4297C2537CD4D8A3B8F3516CFB1D1FB2E3F"
   }
 }

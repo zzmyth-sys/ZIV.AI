@@ -4603,3 +4603,22 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 - 状态：**证据已录，待用户目视签**（不下「通过」裁定）。
 - 与 B3/B4 无冲突（B3=`53DF2DB7…` / B4=`5AD34D51…`，本项 SHA 不同，属不同输入）。
 - 原 `:1969` 行不改，以本段为准。
+
+---
+
+## 1969 SHA 复现验证 + 入 goldens（2026-09-30，只增）
+
+- 依据：裁判裁决「验证 1969 SHA 可复现；一致则入 goldens.json 并 verify 自验」。原 `:1969` 行不改，以本段为准。
+- Z30：`gpu-check` → `free=true`（used 1128 MiB / 16376 MiB，`large_apps=[]`；11:08）；`run` 内置 gpu-check 亦过。
+- 复现命令（绝对路径；输出改为**新目录** `runs/1969-repro/`，避免误读 c8c9fd3 的 `runs/1969/multiref.png`）：
+  `python -m tools.zivcli run --op inpaint --side 1536 --nref 2 --img1 D:\devlop\ZIV.AI\tools\zivcli\harness\fixtures\img1.jpg --img2 D:\devlop\ZIV.AI\tools\zivcli\harness\fixtures\img2.png --img3 D:\devlop\ZIV.AI\DOC\ICO\logo.png --prompt "Replace the background of <image1> with the scene from <image2>; relight it like <image3>." --out D:\devlop\ZIV.AI\tools\zivcli\runs\1969-repro\multiref.png --yes`
+- `SCN_PROMPT` 实际注入值（逐字，= 传入 prompt）：
+  `Replace the background of <image1> with the scene from <image2>; relight it like <image3>.`
+- 输出 PNG：`D:\devlop\ZIV.AI\tools\zivcli\runs\1969-repro\multiref.png`（1216×1536）。
+- SHA256（CLI 输出 + 独立 `Get-FileHash` 一致）：`98451AABC43F1D111D9C8D630B15A4297C2537CD4D8A3B8F3516CFB1D1FB2E3F`
+  → **与 c8c9fd3 取证 `98451aab…` 逐字一致（分支 X）**。
+- 耗时：load 11.5s；pipeline wall 58.7s；峰值 VRAM 12081 MiB；峰值 RSS 12.96 GB；exit=0；未被看门狗杀。
+- **1969 已入 `tools/zivcli/goldens.json`**（可进 `verify` / `batch`）；`python -m tools.zivcli verify 1969 --yes` → **PASS**（exit 0；actual == expected）。
+- 复核（本次未改 C# / CLI 逻辑）：C# 非 GPU 全量 **782 / 0**；zivcli 单测 **59 / 0**。
+- 视觉签**仍待用户**：SHA 复现 ≠ 视觉通过；本段只证 SHA 可复现，不下「视觉通过」裁定。
+- 跨机器 / 驱动：SHA 在异机 / 异驱动可能不同（同机同 HEAD 应逐字节相同）。
