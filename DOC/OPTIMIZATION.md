@@ -786,3 +786,17 @@ GGUF+aimdo 混用是否会退化。
 （4080 > 4070 + 对方有卸载）。→ **本机 2K 速度属正常区间**。
 
 **可选缓解**（若必须常跑正方形/宽幅 2K）：`--vram-headroom` 预留头寸减少抖动；或降一档 side（如 1792）。
+
+---
+
+## 附录：重建 G1 同负载对照（官方侧基线，2026-09-30，只增）
+
+- **G1 定义（裁判担责，写死）**：`op=inpaint` / `side=1536`（输出 1216×1536）/ `nref=2` /
+  `steps=40` / `sampler=euler` / `scheduler=simple` / `shift=3.1` / `cfg=1.0` / `seed=42` /
+  `denoise=1.0` / `viggle=0|1`（Viggle 档 6-sigmas 接管）。
+- **官方脚本（tracked）**：`tools/zivcli/official/g1_workflow.py`（工作流构造）+ `run_official.py`
+  （起服务 / 提交 / 分段计时 / 峰值采集 / 结果 JSON）；用法见 `tools/zivcli/official/README.md`。
+- **测量字段**与 `tools/zivcli/runner.py` 对齐；分段口径见 `DOC/FROZEN.md`「重建 G1 官方对照基线」段 §G1R.3。
+- **冒烟事实（2026-09-30，非正式对照）**：官方非 Viggle @1536/2ref/40 步 →
+  `load_sec=25.9s`、采样 `wall_sec=88.9s`、峰值 VRAM 15148 MiB、峰值 RSS 16.05 GB（单次，未取均值）。
+  仅供脚本可运行性 / 字段完整性核验，**不作性能结论**。

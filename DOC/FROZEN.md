@@ -6194,3 +6194,48 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 边界：**视觉签仍待用户**；跨机 / 驱动 SHA 可能不同。
 - 残留：新 img3 为暖调室内，与 img2（暖调室内场景）色调偏近，`<image2>`/`<image3>` 归属判据仍略弱（用户已知悉）。
 - 未改 `src/` / IPC / `python/` / contracts；`harness/fixtures/` 仅**新增**一条 fixture（该目录为 vendor 快照，新增以本段 FROZEN 修订为准）。
+
+---
+
+## 重建 G1 官方对照基线（日期：2026-09-30）
+
+> **追加（只增不改）**。把官方 ComfyUI 侧 G1 同负载对照工作流固化为 **tracked** 脚本；
+> 参数与 ZIV 对齐，测量口径统一。**不改 `src/` / IPC / Python 后端 / contracts / `goldens.json`**；
+> 未改 `_test_step2/off_submit.py`（探针原地保留）。GPU 任务（Z30 已过）。
+
+### G1R.1 重建 G1 定义（裁判担责，写死）
+- `op=inpaint`；`side=1536`（输出 **1216×1536**）；`nref=2`（img1 主图 + img2/img3 参考）；
+  `steps=40`；`sampler=euler`；`scheduler=simple`；`shift=3.1`（`ModelSamplingAuraFlow`）；
+  `cfg=1.0`；`seed=42`；`denoise=1.0`；`Viggle=0/1`（Viggle 档 steps 由 6-sigmas
+  `1.0,0.9375,0.875,0.75,0.5,0.25` 接管）。
+- prompt（两侧逐字一致）：`Replace the background of <image1> with the scene from <image2>; relight it like <image3>.`
+
+### G1R.2 官方工作流固化（tracked）
+- 新增 `tools/zivcli/official/`：`g1_workflow.py`（构造官方 API 工作流，纯 JSON，可 headless）、
+  `run_official.py`（起服务 / 提交 / 分段计时 / 采峰值 / 落 JSON）、`__init__.py`、`README.md`。
+- 官方节点映射：非 Viggle = `UNETLoader → ModelSamplingAuraFlow(3.1) → KSampler(euler/simple/40/cfg1/denoise1) → VAEDecode`；
+  Viggle = `UNETLoader → ViggleTurboLora(1.0)` + `ViggleTurboSigmas(6-sigmas)` + `KSamplerSelect(euler)` +
+  `BasicGuider` + `RandomNoise(42)` + `SamplerCustomAdvanced`（无 AuraFlow）。参考分辨率 `TextEncodeQwenImage21.resolution=1536`。
+- 模型 / LoRA 名从 `Template/models.json` / `Template/loras.json` 推导（数据驱动）。
+- 与 `_test_step2/off_submit.py`（未入库探针）关系：探针原地保留；本脚本为它的 tracked / 参数对齐 / 口径统一版。
+
+### G1R.3 测量口径统一（冻结）
+- 字段与 ZIV `runner.py` 对齐：`sha256 / wall_sec / peak_vram_mib / peak_rss_gb / exit_code / killed / output_path / input_env`；
+  官方额外 `load_sec / wall_total_sec / status_str / prompt_id`。
+- 分段（WebSocket 事件时间戳）：`load_sec` = `execution_start` → 采样节点 `executing`（含模型加载 + encode + 参考视觉塔）；
+  `wall_sec` = 采样节点 `executing` → `executed`；`wall_total_sec` = `execution_start` → `execution_success`。
+- 峰值：VRAM 用 `nvidia-smi memory.used`（0.5s 轮询）；RSS 用官方**服务进程**工作集（`psutil`，0.5s）。
+- 已知结构性差异（须在对照结论中标注）：官方 `load_sec` 含 encode，ZIV `LOADED` 只含模型加载；
+  官方 `KSampler` 在 `cfg=1.0` 仍编码负向 prompt，ZIV `SKIP_NEGATIVE_AT_CFG1` 跳过 → 官方 wall 略偏大。
+- 产物落点 `tools/zivcli/official/runs/g1/`（`tools/zivcli/.gitignore` 的 `runs/` 已覆盖）；服务日志在同目录。
+
+### G1R.4 冒烟（2026-09-30，本步唯一 GPU 动作）
+- Z30：`gpu-check` free=true（used 1425 MiB，`large_apps=[]`；12:27）。
+- `python -m tools.zivcli.official.run_official --viggle 0 --yes` → exit 0；`status_str=success`；
+  `load_sec=25.9 / wall_sec=88.9 / wall_total_sec=114.8`；`peak_vram_mib=15148`；`peak_rss_gb=16.05`；
+  `output_path=…\Comfyui\ComfyUI\output\g1_noviggle_00001_.png`；`sha256=27447597…`。
+- 未写 goldens / 未定义 PASS 判据（本步只固化 + 冒烟）；正式 G1 对照为第二步。
+
+### G1R.5 复核
+- build 0 警告 0 错误；C# 非 GPU 全量 **782 / 0**；zivcli 单测 **70 / 0**（原 59 + 新增 `test_g1_workflow` 11）。
+- `_test_step2/off_submit.py` 未动；未改 ZIV 侧 CLI / harness / `goldens.json`。
