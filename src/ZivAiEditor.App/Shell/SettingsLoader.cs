@@ -12,7 +12,11 @@ internal sealed class BackendSettings
     /// <summary>Resolved at load time from the program directory (A9: no dev-machine default).</summary>
     public string PythonExe { get; init; } = string.Empty;
 
-    /// <summary>Resolved at load time from the program directory (A9: no dev-machine default).</summary>
+    /// <summary>
+    /// The ZIV backend entry point. Always the shipped <c>&lt;program&gt;/python/server/main.py</c>
+    /// (A9): main.py ships with the version, so a user-written <c>[backend] script</c> is ignored
+    /// (recorded in <see cref="IgnoredScript"/>) rather than honoured.
+    /// </summary>
     public string Script { get; init; } = string.Empty;
 
     /// <summary>DiT weights path (<c>[models] dit_path</c>); null when unset / cleared.</summary>
@@ -24,8 +28,26 @@ internal sealed class BackendSettings
     /// <summary>VAE weights path (<c>[models] vae_path</c>); null when unset / cleared.</summary>
     public string? VaePath { get; init; }
 
-    /// <summary>ComfyUI source-tree path (<c>[backend] comfy_root</c>); null when unset / cleared.</summary>
+    /// <summary>
+    /// Effective ComfyUI source tree: the configured <c>[backend] comfy_root</c> when set, else the
+    /// result of the <see cref="ComfyDiscovery"/> chain; null when neither resolves.
+    /// </summary>
     public string? ComfyRoot { get; init; }
+
+    /// <summary>Raw <c>[backend] comfy_root</c> as written; null when unset / cleared.</summary>
+    public string? ConfiguredComfyRoot { get; init; }
+
+    /// <summary>ComfyUI root found by <see cref="ComfyDiscovery"/> when no <c>comfy_root</c> is configured.</summary>
+    public string? DiscoveredComfyRoot { get; init; }
+
+    /// <summary>Raw <c>[backend] python_exe</c> as written (advanced override); null when unset.</summary>
+    public string? ConfiguredPythonExe { get; init; }
+
+    /// <summary>
+    /// A user-written <c>[backend] script</c> that differs from the shipped main.py. Ignored for
+    /// execution; surfaced so the settings window can warn that main.py is not user-editable.
+    /// </summary>
+    public string? IgnoredScript { get; init; }
 
     /// <summary>
     /// LoRA root directory (<c>[models] lora_root</c>); null when unset / cleared. Relative LoRA
@@ -127,16 +149,32 @@ internal static class SettingsLoader
         };
         var plannerDefaults = defaults.LlmPlanner;
         var rewriterDefaults = defaults.LlmRewriter;
+        var configuredComfy = GetOptional(backend, "comfy_root");
+        var configuredPython = GetOptional(backend, "python_exe");
+        var configuredScript = GetOptional(backend, "script");
+        // Discovery runs only when no comfy_root is configured: a configured value is used
+        // verbatim (even when it does not exist), so a typo surfaces as a readable backend error
+        // rather than silently switching to a different tree.
+        var discoveredComfy = configuredComfy is null
+            ? ComfyDiscovery.DiscoverComfyRoot(null, directory, configuredPython ?? defaults.PythonExe)
+            : null;
+        var effectiveComfy = configuredComfy ?? discoveredComfy;
         return new BackendSettings
         {
             PipeName = Get(backend, "pipe_name", defaults.PipeName),
-            PythonExe = Get(backend, "python_exe", defaults.PythonExe),
-            Script = Get(backend, "script", defaults.Script),
+            PythonExe = configuredPython
+                ?? ComfyDiscovery.DerivePythonExe(effectiveComfy)
+                ?? defaults.PythonExe,
+            Script = defaults.Script,
             DitPath = GetOptional(models, "dit_path"),
             TePath = GetOptional(models, "te_path"),
             VaePath = GetOptional(models, "vae_path"),
             LoraRoot = GetOptional(models, "lora_root"),
-            ComfyRoot = GetOptional(backend, "comfy_root"),
+            ComfyRoot = effectiveComfy,
+            ConfiguredComfyRoot = configuredComfy,
+            DiscoveredComfyRoot = discoveredComfy,
+            ConfiguredPythonExe = configuredPython,
+            IgnoredScript = IsCustomScript(configuredScript, defaults.Script) ? configuredScript : null,
             Prewarm = GetBool(backend, "prewarm", defaults.Prewarm),
             PluginStates = ParsePluginStates(plugins),
             LlmPlanner = new LlmPlannerSettings
@@ -274,6 +312,30 @@ internal static class SettingsLoader
 
     private static string? GetOptional(Dictionary<string, string> values, string key)
         => values.TryGetValue(key, out var value) && value.Length > 0 ? value : null;
+
+    /// <summary>
+    /// True when a configured <c>script</c> is present and differs from the shipped main.py.
+    /// Path-normalized; an unparsable value counts as custom (it is not the shipped file).
+    /// </summary>
+    private static bool IsCustomScript(string? configured, string shipped)
+    {
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return false;
+        }
+
+        try
+        {
+            return !string.Equals(
+                Path.GetFullPath(configured!),
+                Path.GetFullPath(shipped),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            return true;
+        }
+    }
 
     private static int GetInt(Dictionary<string, string> values, string key, int fallback)
         => values.TryGetValue(key, out var value)

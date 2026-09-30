@@ -3,7 +3,7 @@
         x:Class="ZivAiEditor.App.SettingsWindow"
         Title="ZIV.AI Editor"
         Width="600"
-        Height="560"
+        Height="620"
         CanResize="False"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
@@ -29,67 +29,115 @@
       <TabControl x:Name="PART_SettingsTabs" Grid.Row="1" Margin="12,0,12,8">
         <TabItem Header="环境">
           <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="6,8,6,0">
-        <StackPanel Spacing="20">
-          <StackPanel Spacing="8">
-            <TextBlock Text="模型三件套" Foreground="{StaticResource ZivTextSecondaryBrush}" />
-            <Grid ColumnDefinitions="90,*,Auto,Auto"
-                  RowDefinitions="Auto,Auto,Auto,Auto"
-                  RowSpacing="8"
-                  ColumnSpacing="8">
-              <TextBlock Grid.Row="0" Grid.Column="0" Text="DiT权重"
-                         VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
-              <TextBox x:Name="PART_DitPath" Grid.Row="0" Grid.Column="1" IsReadOnly="True" />
-              <Button x:Name="PART_BrowseDit" Grid.Row="0" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
-              <Button x:Name="PART_OpenDit" Grid.Row="0" Grid.Column="3" Content="打开文件夹" MinWidth="88" Height="30" />
+            <StackPanel Spacing="16">
+              <StackPanel Spacing="8">
+                <TextBlock Text="模型三件套" Foreground="{StaticResource ZivTextSecondaryBrush}" />
+                <Grid ColumnDefinitions="90,*,Auto,Auto"
+                      RowDefinitions="Auto,Auto,Auto"
+                      RowSpacing="8"
+                      ColumnSpacing="8">
+                  <TextBlock Grid.Row="0" Grid.Column="0" Text="DiT权重"
+                             VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
+                  <TextBox x:Name="PART_DitPath" Grid.Row="0" Grid.Column="1" IsReadOnly="True" />
+                  <Button x:Name="PART_BrowseDit" Grid.Row="0" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
+                  <Button x:Name="PART_OpenDit" Grid.Row="0" Grid.Column="3" Content="打开文件夹" MinWidth="88" Height="30" />
 
-              <TextBlock Grid.Row="1" Grid.Column="0" Text="TE权重"
-                         VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
-              <TextBox x:Name="PART_TePath" Grid.Row="1" Grid.Column="1" IsReadOnly="True" />
-              <Button x:Name="PART_BrowseTe" Grid.Row="1" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
-              <Button x:Name="PART_OpenTe" Grid.Row="1" Grid.Column="3" Content="打开文件夹" MinWidth="88" Height="30" />
+                  <TextBlock Grid.Row="1" Grid.Column="0" Text="TE权重"
+                             VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
+                  <TextBox x:Name="PART_TePath" Grid.Row="1" Grid.Column="1" IsReadOnly="True" />
+                  <Button x:Name="PART_BrowseTe" Grid.Row="1" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
+                  <Button x:Name="PART_OpenTe" Grid.Row="1" Grid.Column="3" Content="打开文件夹" MinWidth="88" Height="30" />
 
-              <TextBlock Grid.Row="2" Grid.Column="0" Text="VAE权重"
-                         VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
-              <TextBox x:Name="PART_VaePath" Grid.Row="2" Grid.Column="1" IsReadOnly="True" />
-              <Button x:Name="PART_BrowseVae" Grid.Row="2" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
-              <Button x:Name="PART_OpenVae" Grid.Row="2" Grid.Column="3" Content="打开文件夹" MinWidth="88" Height="30" />
+                  <TextBlock Grid.Row="2" Grid.Column="0" Text="VAE权重"
+                             VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
+                  <TextBox x:Name="PART_VaePath" Grid.Row="2" Grid.Column="1" IsReadOnly="True" />
+                  <Button x:Name="PART_BrowseVae" Grid.Row="2" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
+                  <Button x:Name="PART_OpenVae" Grid.Row="2" Grid.Column="3" Content="打开文件夹" MinWidth="88" Height="30" />
+                </Grid>
+              </StackPanel>
 
-              <TextBlock Grid.Row="3" Grid.Column="0" Text="LoRA根目录"
-                         VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
-              <TextBox x:Name="PART_LoraRoot" Grid.Row="3" Grid.Column="1" IsReadOnly="True" />
-              <Button x:Name="PART_BrowseLoraRoot" Grid.Row="3" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
-              <Button x:Name="PART_ClearLoraRoot" Grid.Row="3" Grid.Column="3" Content="清除" MinWidth="88" Height="30" />
-            </Grid>
-          </StackPanel>
+              <StackPanel Spacing="8">
+                <TextBlock Text="运行环境（自动发现）" Foreground="{StaticResource ZivTextSecondaryBrush}" />
+                <Grid ColumnDefinitions="100,*"
+                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
+                      RowSpacing="8"
+                      ColumnSpacing="8">
+                  <TextBlock Grid.Row="0" Grid.Column="0" Text="ComfyUI 目录"
+                             VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
+                  <TextBox x:Name="PART_ComfyRoot" Grid.Row="0" Grid.Column="1" IsReadOnly="True" />
 
-          <StackPanel Spacing="8">
-            <TextBlock Text="Python 环境" Foreground="{StaticResource ZivTextSecondaryBrush}" />
-            <Grid ColumnDefinitions="100,*,Auto" RowDefinitions="Auto,Auto,Auto" RowSpacing="8" ColumnSpacing="8">
-              <TextBlock Grid.Row="0" Grid.Column="0" Text="python.exe"
-                         VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
-              <TextBox x:Name="PART_PythonExe" Grid.Row="0" Grid.Column="1" IsReadOnly="True" />
-              <Button x:Name="PART_BrowsePython" Grid.Row="0" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
-              <TextBlock Grid.Row="1" Grid.Column="0" Text="main.py 脚本"
-                         VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
-              <TextBox x:Name="PART_Script" Grid.Row="1" Grid.Column="1" IsReadOnly="True" />
-              <Button x:Name="PART_BrowseScript" Grid.Row="1" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
-              <TextBlock Grid.Row="2" Grid.Column="0" Text="ComfyUI 目录"
-                         VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
-              <TextBox x:Name="PART_ComfyRoot" Grid.Row="2" Grid.Column="1" IsReadOnly="True" />
-              <Button x:Name="PART_BrowseComfy" Grid.Row="2" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
-            </Grid>
-          </StackPanel>
+                  <TextBlock Grid.Row="1" Grid.Column="0" Text="python.exe"
+                             VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
+                  <TextBox x:Name="PART_PythonExe" Grid.Row="1" Grid.Column="1" IsReadOnly="True" />
 
-          <StackPanel Spacing="8">
-            <TextBlock Text="模板配置" Foreground="{StaticResource ZivTextSecondaryBrush}" />
-            <Button x:Name="PART_OpenTemplate" Content="打开 Template 文件夹"
-                    MinWidth="160" Height="30" HorizontalAlignment="Left" />
-          </StackPanel>
-        </StackPanel>
+                  <TextBlock Grid.Row="2" Grid.Column="0" Text="main.py 脚本"
+                             VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
+                  <TextBox x:Name="PART_Script" Grid.Row="2" Grid.Column="1" IsReadOnly="True" />
+
+                  <TextBlock Grid.Row="3" Grid.Column="0" Text="输出目录"
+                             VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
+                  <TextBox x:Name="PART_OutputDir" Grid.Row="3" Grid.Column="1" IsReadOnly="True" />
+
+                  <TextBlock Grid.Row="4" Grid.Column="0" Text="输入目录"
+                             VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
+                  <TextBox x:Name="PART_InputDir" Grid.Row="4" Grid.Column="1" IsReadOnly="True" />
+
+                  <TextBlock x:Name="PART_ScriptWarning"
+                             Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
+                             TextWrapping="Wrap"
+                             IsVisible="False"
+                             Foreground="#E06C4A"
+                             FontSize="11" />
+                </Grid>
+              </StackPanel>
+
+              <Expander x:Name="PART_Advanced"
+                        Header="高级（手动覆盖；留空则用自动发现）"
+                        IsExpanded="False">
+                <StackPanel Spacing="8" Margin="0,8,0,0">
+                  <Grid ColumnDefinitions="100,*,Auto,Auto"
+                        RowDefinitions="Auto,Auto,Auto"
+                        RowSpacing="8"
+                        ColumnSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="python.exe"
+                               VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
+                    <TextBox x:Name="PART_PythonExeOverride" Grid.Row="0" Grid.Column="1" />
+                    <Button x:Name="PART_BrowsePython" Grid.Row="0" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
+                    <Button x:Name="PART_ClearPython" Grid.Row="0" Grid.Column="3" Content="清除" MinWidth="88" Height="30" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="ComfyUI 目录"
+                               VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
+                    <TextBox x:Name="PART_ComfyRootOverride" Grid.Row="1" Grid.Column="1" />
+                    <Button x:Name="PART_BrowseComfy" Grid.Row="1" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
+                    <Button x:Name="PART_ClearComfy" Grid.Row="1" Grid.Column="3" Content="清除" MinWidth="88" Height="30" />
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="LoRA 根目录"
+                               VerticalAlignment="Center" Foreground="{StaticResource ZivTextBrush}" />
+                    <TextBox x:Name="PART_LoraRoot" Grid.Row="2" Grid.Column="1" />
+                    <Button x:Name="PART_BrowseLoraRoot" Grid.Row="2" Grid.Column="2" Content="浏览…" MinWidth="64" Height="30" />
+                    <Button x:Name="PART_ClearLoraRoot" Grid.Row="2" Grid.Column="3" Content="清除" MinWidth="88" Height="30" />
+                  </Grid>
+                  <TextBlock x:Name="PART_ModelRootLabel"
+                             TextWrapping="Wrap"
+                             Foreground="{StaticResource ZivTextSecondaryBrush}"
+                             FontSize="11" />
+                  <TextBlock x:Name="PART_LoraRootLabel"
+                             TextWrapping="Wrap"
+                             Foreground="{StaticResource ZivTextSecondaryBrush}"
+                             FontSize="11" />
+                </StackPanel>
+              </Expander>
+
+              <StackPanel Spacing="8">
+                <TextBlock Text="模板配置" Foreground="{StaticResource ZivTextSecondaryBrush}" />
+                <Button x:Name="PART_OpenTemplate" Content="打开 Template 文件夹"
+                        MinWidth="160" Height="30" HorizontalAlignment="Left" />
+              </StackPanel>
+            </StackPanel>
           </ScrollViewer>
         </TabItem>
 
-        <TabItem Header="插件">
+        <TabItem Header="插件" IsSelected="True">
           <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="6,8,6,0">
             <StackPanel Spacing="8">
               <TextBlock Text="插件列表（由 Template/plugins.json 登记）"

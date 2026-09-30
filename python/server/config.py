@@ -36,9 +36,12 @@ def _resolve_comfy_root():
 
 COMFY_ROOT = _resolve_comfy_root()
 
-MODEL_ROOT = os.environ.get(
-    "ZIV_AI_MODEL_ROOT",
-    r"C:\AI\ComfyUI_PIC\ComfyUI\models",  # 开发期默认；生产建议用 env 或 models.json
+MODEL_ROOT = os.environ.get("ZIV_AI_MODEL_ROOT", "").strip() or (
+    # A10 修订（2026-09-30）：未显式设置时由 ComfyUI 树推导 <comfy_root>/models；
+    # 推导目录不存在则保留旧开发期兜底（默认模型源不因发现失败而丢失）。
+    os.path.join(COMFY_ROOT, "models")
+    if os.path.isdir(os.path.join(COMFY_ROOT, "models"))
+    else r"C:\AI\ComfyUI_PIC\ComfyUI\models"  # 开发期兜底；生产建议用 env 或 models.json
 )
 
 DIT_MODEL_PATH = os.path.join(

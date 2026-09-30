@@ -6597,3 +6597,51 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 新增 3 例（`MaskStateTests`）：① undo 逐像素精确 + 区域外不触碰；② Clear 后 undo 还原整幅；③ 2048² 大快照使超 64 MiB → 预算淘汰（保留数 < `MaxUndo`）+ 常量==64 MiB。
 - `MaskStateTests` **27/27**；C# 非 GPU **800/0**；Python 279/0/11 skip（未改 Python）。
 - 本 commit 随 B7 修复一并提交；不改既有冻结行。
+
+---
+
+## 环境路径自动发现 + 设置界面收敛（2026-09-30）
+
+> **追加（只增不改）：** 依据同批只读调查报告与裁判裁决（方案 B + C）。本 commit 见 `git log`。
+> **产品级裁决：** ①首启向导（全链失败才弹）；②设置界面收敛（默认插件页 / 只三件套可编辑 / 高级折叠区）；③A10 修订（MODEL_ROOT 可推导）。
+
+### 一、发现链（`src/ZivAiEditor.App/Shell/ComfyDiscovery.cs`，纯函数）
+
+- 有效 comfy_root = **已配置值**（settings.ini `[backend]` comfy_root）优先；未配置时按发现链取第一个存在目录：
+  1. **env / settings**：`ZIV_AI_COMFY_ROOT` / `[backend] comfy_root`（已配置值原样使用，不因不存在而替换）。
+  2. **程序目录便携布局**：`<程序目录>/Comfyui/ComfyUI`。
+  3. **解释器同级**：`<python_exe>/../ComfyUI`（便携版 `python_embeded`）。
+  4. **仓库相对**：自程序目录上溯找 `<祖先>/Comfyui/ComfyUI`，且要求 `<祖先>/DOC/FROZEN.md` 存在（开发检出守卫，防无关祖先误判）。
+- 派生：`models=<root>/models`、`output=<root>/output`、`input=<root>/input`、`loras=<root>/models/loras`、`python.exe=<root>/../python_embeded/python.exe`。
+- 注册表探测：**不做**（YAGNI）。
+- `SettingsLoader`：comfy_root 未配置 → 用发现结果；`python.exe` 未配置 → 由 comfy_root 推导，否则程序目录默认；`main.py` 恒为 `<程序目录>/python/server/main.py`。
+
+### 二、设置界面收敛（`SettingsWindow.axaml(.cs)`）
+
+- 默认打开**「插件」页**（插件 `TabItem` `IsSelected="True"`，不靠索引）。
+- 「环境」页主区：三件套（DiT/TE/VAE）**可编辑**（保留三行）；comfy_root 只读展示、发现失败时可编辑；python.exe / main.py / output / input **只读展示**。
+- 新增**「高级」折叠区**（默认折叠）：`python.exe` / `comfy_root` / `lora_root` 允许**手动覆盖**，写 `settings.ini`，优先级高于自动发现（`override > 主区值 > 发现结果`）。
+- **main.py 永不出现于可编辑处**：移除「浏览」按钮；`[backend] script` 自定义值被**忽略**并在界面警示（写本追加段）。
+
+### 三、首启向导
+
+- 仅当**全链失败**（有效 comfy_root 为空）时，设置窗口 `Opened` 弹文件夹选择器；选中 → 写 `[backend] comfy_root`；取消 → 保持现有失败行为（后端可读异常，不崩）。
+- `_wizardShown` 保证只弹一次；`ComfyDiscovery.ShouldPromptForComfyRoot` 为纯触发判据（headless 可测）。
+
+### 四、A10 修订（追加；**原 A10 行不动**）
+
+- **背景**：A10 初衷是「不改官方 ComfyUI 逻辑」；`MODEL_ROOT` 是 ZIV 自有配置，非官方逻辑，故可推导。
+- **变更**（`python/server/config.py`）：`MODEL_ROOT = env ZIV_AI_MODEL_ROOT > (<comfy_root>/models，存在时) > 开发期兜底 C:\AI\ComfyUI_PIC\ComfyUI\models`。
+- **不变**：A10 原裁决「MODEL_ROOT 不进 settings.ini」保持；派生 `DIT/TEXT_ENCODER/VAE_PATH` 仍 `os.path.join(MODEL_ROOT, …)`；三件套加载优先级 `env > models.json > config 默认` 不变。
+- **向后兼容**：`<comfy_root>/models` 不存在时回退旧兜底，默认模型源不因发现失败而丢失。
+
+### 五、与审计 P1 的关系
+
+- P1「开发机硬编码族」：`COMFY_ROOT` 已仓库相对（P1-6）；本任务把 `MODEL_ROOT` 由硬编码改为可推导（经本 A10 修订），故 P1 的 `MODEL_ROOT` 停点**可闭环**；`Template/models.json` / `loras.json` 的绝对路径属「数据可改」，不属代码硬编码。
+
+### 六、验证（非 GPU）
+
+- `dotnet build src/ZIV.AI.sln -c Release` → 0 警告 / 0 错误。
+- C# 非 GPU `--filter "FullyQualifiedName!~Ipc"` → **815 / 0**（基线 800 + 新增 15：`ComfyDiscoveryTests` 10 + `SettingsWindowDiscoveryTests` 5）。
+- Python `unittest discover -p "test_*.py"`（cwd `python/server`）→ **282 / 0**（基线 279 + 新增 3：`test_config_paths.py`）。
+- 未跑 GPU；未改官方 `Comfyui/ComfyUI/main.py`；未碰 IPC / contracts / 冻结签名 / 公开签名。

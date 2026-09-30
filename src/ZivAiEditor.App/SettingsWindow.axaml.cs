@@ -8,9 +8,12 @@ using ZivAiEditor.Backend;
 namespace ZivAiEditor.App;
 
 /// <summary>
-/// Modal settings window: model weights, the Python executable and the template folder.
-/// Fields are pre-filled from the program-directory <c>settings.ini</c>; saving writes only
-/// the affected keys (comments / other lines preserved) and asks for an app restart.
+/// Modal settings window. The environment tab is split into: the three-piece model set (DiT /
+/// TE / VAE, the only user-editable weights), read-only auto-discovery fields (ComfyUI root,
+/// python.exe, the shipped main.py, output / input), and a collapsed "advanced" section whose
+/// python.exe / comfy_root / lora_root overrides persist to <c>settings.ini</c> and win over
+/// discovery. The plugin tab opens by default. main.py is never editable (it ships with the
+/// version); a custom <c>[backend] script</c> is ignored and only warned about.
 /// </summary>
 public partial class SettingsWindow : Window
 {
@@ -18,6 +21,8 @@ public partial class SettingsWindow : Window
     private readonly string _settingsPath = null!;
     private readonly string _pluginsPath = null!;
     private PluginRegistry _plugins = null!;
+    private bool _comfyRootEditable;
+    private bool _wizardShown;
 
     public SettingsWindow()
     {
@@ -45,7 +50,6 @@ public partial class SettingsWindow : Window
         WireBrowse("PART_BrowseDit", "PART_DitPath", "选择模型权重");
         WireBrowse("PART_BrowseTe", "PART_TePath", "选择模型权重");
         WireBrowse("PART_BrowseVae", "PART_VaePath", "选择模型权重");
-        WireBrowse("PART_BrowseScript", "PART_Script", "选择 main.py");
         WireOpen("PART_OpenDit", "PART_DitPath");
         WireOpen("PART_OpenTe", "PART_TePath");
         WireOpen("PART_OpenVae", "PART_VaePath");
@@ -53,9 +57,14 @@ public partial class SettingsWindow : Window
         WireComfy();
         WireLoraRoot();
         WireFooter();
-        Prefill();
+
+        var settings = _shell.LoadSettings();
+        Prefill(settings);
+        InitDiscovery(settings);
         UpdateOpenEnabled();
         InitPlugins();
+
+        Opened += OnWindowOpened;
     }
 
     private void WireBrowse(string buttonName, string textName, string title)
@@ -113,48 +122,68 @@ public partial class SettingsWindow : Window
         }
     }
 
+    /// <summary>Advanced override: python.exe (auto-derived in the main area; overriding is opt-in).</summary>
     private void WirePython()
     {
-        if (this.FindControl<Button>("PART_BrowsePython") is not { } button)
+        if (this.FindControl<Button>("PART_BrowsePython") is { } browse)
         {
-            return;
+            browse.Click += async (_, _) =>
+            {
+                if (this.FindControl<TextBox>("PART_PythonExeOverride") is not { } target)
+                {
+                    return;
+                }
+
+                var directory = await _shell.PickFolderAsync(this, "选择 Python 目录", SuggestedDirectory(target.Text));
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    target.Text = Path.Combine(directory, "python.exe");
+                }
+            };
         }
 
-        button.Click += async (_, _) =>
+        if (this.FindControl<Button>("PART_ClearPython") is { } clear)
         {
-            if (this.FindControl<TextBox>("PART_PythonExe") is not { } target)
+            clear.Click += (_, _) =>
             {
-                return;
-            }
-
-            var directory = await _shell.PickFolderAsync(this, "选择 Python 目录", SuggestedDirectory(target.Text));
-            if (!string.IsNullOrEmpty(directory))
-            {
-                target.Text = Path.Combine(directory, "python.exe");
-            }
-        };
+                if (this.FindControl<TextBox>("PART_PythonExeOverride") is { } target)
+                {
+                    target.Text = string.Empty;
+                }
+            };
+        }
     }
 
+    /// <summary>Advanced override: comfy_root. Empty falls back to auto-discovery.</summary>
     private void WireComfy()
     {
-        if (this.FindControl<Button>("PART_BrowseComfy") is not { } button)
+        if (this.FindControl<Button>("PART_BrowseComfy") is { } browse)
         {
-            return;
+            browse.Click += async (_, _) =>
+            {
+                if (this.FindControl<TextBox>("PART_ComfyRootOverride") is not { } target)
+                {
+                    return;
+                }
+
+                var directory = await _shell.PickFolderAsync(this, "选择 ComfyUI 目录", SuggestedDirectory(target.Text));
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    target.Text = directory;
+                }
+            };
         }
 
-        button.Click += async (_, _) =>
+        if (this.FindControl<Button>("PART_ClearComfy") is { } clear)
         {
-            if (this.FindControl<TextBox>("PART_ComfyRoot") is not { } target)
+            clear.Click += (_, _) =>
             {
-                return;
-            }
-
-            var directory = await _shell.PickFolderAsync(this, "选择 ComfyUI 目录", SuggestedDirectory(target.Text));
-            if (!string.IsNullOrEmpty(directory))
-            {
-                target.Text = directory;
-            }
-        };
+                if (this.FindControl<TextBox>("PART_ComfyRootOverride") is { } target)
+                {
+                    target.Text = string.Empty;
+                }
+            };
+        }
     }
 
     private void WireLoraRoot()
@@ -206,16 +235,91 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void Prefill()
+    /// <summary>The only editable weights: the three-piece set.</summary>
+    private void Prefill(BackendSettings settings)
     {
-        var settings = _shell.LoadSettings();
         SetText("PART_DitPath", settings.DitPath);
         SetText("PART_TePath", settings.TePath);
         SetText("PART_VaePath", settings.VaePath);
-        SetText("PART_LoraRoot", settings.LoraRoot);
+    }
+
+    /// <summary>
+    /// Fills the read-only auto-discovery fields, the advanced overrides (persisted values only)
+    /// and the derived labels. comfy_root becomes editable only when discovery failed.
+    /// </summary>
+    private void InitDiscovery(BackendSettings settings)
+    {
+        _comfyRootEditable = ComfyDiscovery.ShouldPromptForComfyRoot(settings.ComfyRoot);
+
+        SetText("PART_ComfyRoot", settings.ComfyRoot);
         SetText("PART_PythonExe", settings.PythonExe);
         SetText("PART_Script", settings.Script);
-        SetText("PART_ComfyRoot", settings.ComfyRoot);
+        SetText("PART_OutputDir", ComfyDiscovery.DeriveOutput(settings.ComfyRoot));
+        SetText("PART_InputDir", ComfyDiscovery.DeriveInput(settings.ComfyRoot));
+
+        if (this.FindControl<TextBox>("PART_ComfyRoot") is { } comfyBox)
+        {
+            comfyBox.IsReadOnly = !_comfyRootEditable;
+        }
+
+        SetText("PART_PythonExeOverride", settings.ConfiguredPythonExe);
+        SetText("PART_ComfyRootOverride", settings.ConfiguredComfyRoot);
+        SetText("PART_LoraRoot", settings.LoraRoot);
+
+        SetLabel("PART_ModelRootLabel",
+            "models: " + (ComfyDiscovery.DeriveModelRoot(settings.ComfyRoot) ?? "(未发现 ComfyUI，无法推导)"));
+        SetLabel("PART_LoraRootLabel",
+            "loras: " + (ComfyDiscovery.DeriveLoraRoot(settings.ComfyRoot) ?? "(未发现 ComfyUI，无法推导)"));
+
+        if (!string.IsNullOrWhiteSpace(settings.IgnoredScript)
+            && this.FindControl<TextBlock>("PART_ScriptWarning") is { } warning)
+        {
+            warning.Text = "已忽略自定义 main.py（随版本发布，不可修改）：" + settings.IgnoredScript;
+            warning.IsVisible = true;
+        }
+    }
+
+    private void OnWindowOpened(object? sender, EventArgs e) => _ = RunFirstRunWizardAsync();
+
+    /// <summary>
+    /// First-run wizard (adjudication 1): only when the whole discovery chain failed. A cancelled
+    /// picker keeps the existing failure behavior (a readable backend error later, never a crash).
+    /// </summary>
+    private async Task RunFirstRunWizardAsync()
+    {
+        if (_wizardShown || !_comfyRootEditable)
+        {
+            return;
+        }
+
+        _wizardShown = true;
+        var directory = await _shell.PickFolderAsync(this, "未找到 ComfyUI 目录，请选择", null);
+        if (string.IsNullOrEmpty(directory))
+        {
+            return;
+        }
+
+        SetText("PART_ComfyRoot", directory);
+        SetText("PART_ComfyRootOverride", directory);
+        if (this.FindControl<TextBox>("PART_ComfyRoot") is { } comfyBox)
+        {
+            comfyBox.IsReadOnly = true;
+        }
+
+        _comfyRootEditable = false;
+        PersistComfyRoot(directory);
+    }
+
+    private void PersistComfyRoot(string directory)
+    {
+        try
+        {
+            SettingsWriter.WriteComfyRoot(_settingsPath, Normalize(directory));
+        }
+        catch (Exception)
+        {
+            // A failed wizard write must not break the window; the override still applies on Save.
+        }
     }
 
     private async Task SaveAsync()
@@ -225,15 +329,19 @@ public partial class SettingsWindow : Window
             var dit = Normalize(Text("PART_DitPath"));
             var te = Normalize(Text("PART_TePath"));
             var vae = Normalize(Text("PART_VaePath"));
+            var python = Normalize(Text("PART_PythonExeOverride"));
             var loraRoot = Normalize(Text("PART_LoraRoot"));
-            var python = Normalize(Text("PART_PythonExe"));
-            var script = Normalize(Text("PART_Script"));
-            var comfy = Normalize(Text("PART_ComfyRoot"));
+
+            // Advanced override wins; otherwise the main-area value is persisted only when it was
+            // editable (discovery failed). An auto-discovered root is never written back.
+            var comfyOverride = Normalize(Text("PART_ComfyRootOverride"));
+            var comfy = comfyOverride.Length > 0
+                ? comfyOverride
+                : _comfyRootEditable ? Normalize(Text("PART_ComfyRoot")) : string.Empty;
 
             SettingsWriter.WriteModelPaths(_settingsPath, dit, te, vae);
             SettingsWriter.WriteLoraRoot(_settingsPath, loraRoot);
             SettingsWriter.WritePythonExe(_settingsPath, python);
-            SettingsWriter.WriteScript(_settingsPath, script);
             SettingsWriter.WriteComfyRoot(_settingsPath, comfy);
 
             await MessageDialog.ShowAsync(this, "保存成功，需重启 App 生效");
@@ -255,6 +363,14 @@ public partial class SettingsWindow : Window
         if (this.FindControl<TextBox>(name) is { } target)
         {
             target.Text = value ?? string.Empty;
+        }
+    }
+
+    private void SetLabel(string name, string value)
+    {
+        if (this.FindControl<TextBlock>(name) is { } target)
+        {
+            target.Text = value;
         }
     }
 
