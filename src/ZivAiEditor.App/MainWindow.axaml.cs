@@ -327,9 +327,24 @@ public partial class MainWindow : Window
         ReleaseBitmaps();
         _chatGeneration++;
         stream.Children.Clear();
+        var hasPending = false;
         foreach (var message in _vm.Messages)
         {
+            if (message.IsPending)
+            {
+                hasPending = true;
+            }
+
             stream.Children.Add(BuildMessage(message));
+        }
+
+        // B14: with no in-flight bubble there is no label to receive status text. Forget the stale
+        // label (the Clear above detached it) and the cached text, so a later SetStatus does not
+        // write into a removed control.
+        if (!hasPending)
+        {
+            _pendingTextLabel = null;
+            _statusText = null;
         }
 
         ScrollToEnd();
@@ -362,10 +377,15 @@ public partial class MainWindow : Window
                 VerticalAlignment = VerticalAlignment.Center,
             };
 
-        // Progress / status is routed into the in-flight "生成中" bubble.
+        // Progress / status is routed into the in-flight "生成中" bubble. B14: re-apply the cached
+        // status text so a rebuild does not reset the bubble to its placeholder ("生成中…").
         if (message.IsPending)
         {
             _pendingTextLabel = textBlock;
+            if (textBlock is not null && _statusText is not null)
+            {
+                textBlock.Text = _statusText;
+            }
         }
 
         if (!hasAction)

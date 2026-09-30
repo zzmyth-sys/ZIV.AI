@@ -6464,3 +6464,29 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
   真实 `IpcInferenceClient` + dummy `PythonProcessManager` + 假 HTTP 200 → `CheckAsync` 后 `manager.State == Stopped` 且未运行。
 - 既有 5 个 `PreflightTests`（fake 非 IPC → 默认「运行中」）全部仍通过。零 GPU / 零 Python。
 - 本 commit 随 B17 修复一并提交；不改既有冻结行。
+
+---
+
+## B14 进度文本在聊天重建后不丢（2026-09-30）
+
+> **追加（只增不改）**。本条登记审计报告 B14 的修复：进度/状态文本在旁路重建后不丢，完成后不再写入
+> detached 控件。依据 `DOC/全代码分析.md`（B14）。
+
+### B14.1 语义（产品级裁决）
+- **维持既有设计**：没有独立状态栏，进度/状态文本只路由进「生成中」pending 气泡（`MainWindow.Status.cs`）。
+  不采纳方案 B（独立常驻状态栏，需改 XAML）。
+- 修复策略（方案 C）：**MainWindow 本地缓存最近一次 status 文本**，重建时把缓存重新应用到新建的 pending 标签；
+  无 pending 气泡时清空缓存与标签引用（避免写入已移除控件）。不采纳 A（改 `SessionViewModel`/INPC）与
+  D（改 `ChatMessage` 为可变）。
+
+### B14.2 实现
+- `MainWindow.Status.cs`：新增 `private string? _statusText;`（缓存）；`SetStatus` 改为「先存值，有标签则写」；
+  新增测试缝 `internal string? PendingStatusText` 与 `internal void SetStatusForTest(string)`（仅观测/驱动）。
+- `MainWindow.axaml.cs`：`BuildMessage` 的 pending 分支在设 `_pendingTextLabel` 后，若 `_statusText` 非 null 则
+  覆盖占位文本；`RenderChat` 末尾若无 pending 消息 → `_pendingTextLabel = null; _statusText = null;`。
+- **不改** XAML / `SessionViewModel` / `ChatMessage`；**不改** IPC / contracts / 冻结签名 / 公开签名。
+
+### B14.3 验证
+- 新增 `MainWindowStatusTests`（headless）：① 瞬时修复——pending + `SetStatus("进度X")` + 旁路重建（`AddHint`）后
+  `PendingStatusText == "进度X"`；② 永久修复——完成后 `PendingStatusText == null`，再 `SetStatus("已保存")` 仍为 null。
+- 零 GPU / 零 Python。本 commit 随 B14 修复一并提交；不改既有冻结行。
