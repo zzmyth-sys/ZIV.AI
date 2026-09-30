@@ -242,7 +242,7 @@ class OwnerRoutingTests(unittest.TestCase):
 
 
 class UnifiedViolationTests(unittest.TestCase):
-    """2026-09-30 目录唯一强约束（告警级）：统一目录之外即违规。"""
+    """2026-09-30 目录唯一强约束：统一目录之外即违规（谓词；调用方硬失败）。"""
 
     def test_outside_root_is_violation(self):
         with mock.patch.object(config, "LORA_ROOT", r"D:\root\loras"):
@@ -252,6 +252,55 @@ class UnifiedViolationTests(unittest.TestCase):
     def test_no_root_is_no_violation(self):
         with mock.patch.object(config, "LORA_ROOT", ""):
             self.assertIsNone(loras.unified_violation(r"D:\other\x.safetensors"))
+
+
+class StrongDirectoryHardFailTests(unittest.TestCase):
+    """2026-09-30 目录唯一强约束（硬失败）：handlers 注册统一目录之外的 LoRA 必须抛异常。
+
+    上一轮仅 warning（降级）；本批堆 hard-fail：`_register_loras` 对非统一目录权重抛
+    ``ValueError``，由 `_run_submit` 上报为 `lora_unavailable`（不再静默 warning）。
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = os.path.join(self._tmp.name, "loras")
+        os.makedirs(self.root)
+
+    def _touch(self, path):
+        with open(path, "wb") as handle:
+            handle.write(b"")
+        return path
+
+    def test_register_outside_root_raises(self):
+        import handlers
+
+        outside = self._touch(os.path.join(self._tmp.name, "outside.safetensors"))
+        with mock.patch.object(config, "LORA_ROOT", self.root):
+            with self.assertRaises(ValueError) as ctx:
+                handlers._register_loras({"loras": [{"path": outside}]})
+        self.assertIn("统一目录", str(ctx.exception))
+
+    def test_register_inside_root_registers_hook(self):
+        import handlers
+
+        inside = self._touch(os.path.join(self.root, "ok.safetensors"))
+        with mock.patch.object(config, "LORA_ROOT", self.root), mock.patch.object(
+            handlers.pipeline_hooks, "register_pre_sampling_hook"
+        ) as register:
+            handlers._register_loras({"loras": [{"path": inside}]})
+        register.assert_called_once()
+
+    def test_register_without_root_is_not_a_violation(self):
+        # 未配置 LORA_ROOT = 无统一目录可违反（与 unified_violation 语义一致）-> 不抛。
+        import handlers
+
+        weight = self._touch(os.path.join(self._tmp.name, "any.safetensors"))
+        with mock.patch.object(config, "LORA_ROOT", ""), mock.patch.object(
+            handlers.pipeline_hooks, "register_pre_sampling_hook"
+        ) as register:
+            handlers._register_loras({"loras": [{"path": weight}]})
+        register.assert_called_once()
 
 
 if __name__ == "__main__":

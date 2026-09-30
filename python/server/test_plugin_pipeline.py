@@ -145,8 +145,11 @@ class PluginPipelineRoutingTests(unittest.TestCase):
         self.assertIsNotNone(plugin, status)
         # the 1.3 GB weight + real sigmas are irrelevant to routing; stub them. The sigmas stub
         # must be 1-D (``_fit_sigmas`` rejects a bare string), mirroring the real 7-element
-        # schedule (diffusers N nodes + trailing 0) while ``steps`` stays 6.
+        # schedule (diffusers N nodes + trailing 0) while ``steps`` stays 6. ``_ensure_unified``
+        # is the copy-precondition (2026-09-30 hard-fail) — stubbed because routing does not
+        # depend on the unified dir / the weight being installed on this host.
         plugin._load_lora = lambda path: {}
+        plugin._ensure_unified = lambda source: source
         shape = (7,) if sigmas is None else sigmas
         plugin._build_sigmas = lambda latent: mock.Mock(shape=shape)
         return plugin

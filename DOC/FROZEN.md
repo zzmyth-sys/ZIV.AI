@@ -6753,3 +6753,36 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - Python `unittest discover -p "test_*.py"` → **295 / 0 / 11 skip**（基线 284 + 新增 11）。
 - headless 复核：lora-manager 已登记（`seams_for=['before_encode']`、loaded、enabled）；CLI `build_env` 设置 `SCN_LORAS=a,b`。
 - 三件套未动；未跑 GPU；未碰 IPC / contracts / 冻结签名。
+
+---
+
+## 目录强约束 warning → 硬失败 + viggle 插件复制前置（2026-09-30）
+
+> **追加（只增不改）：** 用户裁决：上一轮目录强约束降级为 warning；本轮**直接改 viggle 插件**，使其在加载前把权重复制进统一目录，从而让强约束可以**硬失败**而不误伤 viggle。本 commit 见 `git log`；承接上一轮「LoRA owner 归属 + 公共管理器插件 + 发布同步」。
+
+### 裁决（写死）
+
+- 目录强约束 = **硬失败**：加载时若 `lora_path` 不在 `<comfy_root>/models/loras` 下 → **拒绝加载**（不再 warning 降级）。
+- viggle 插件（owner:Plugin）**自管复制**：加载前确保 origin 已复制到统一目录；复制失败 / 源缺失 / 无 `LORA_ROOT` → **抛明确异常**（不静默回退源）。
+- 不改其它 LoRA 的 owner 语义（face-swap=model / example=none 不变）。
+- 三件套不动；不改 IPC / contracts / 冻结签名 / 公开签名 / 官方 ComfyUI 源码；不新加 seams 锚点。
+
+### 改动
+
+1. `python/server/handlers.py`（`_register_loras`）：`loras.unified_violation` 返回非空 → `raise ValueError(violation)`（由 `_run_submit` 的 `except ValueError` 上报为 `lora_unavailable`），不再 `_LOG.warning` 降级。
+2. `python/server/loras.py`：`unified_violation` **行为不变**（返回非空即违规；无 `LORA_ROOT` 即无违规）；仅更新 docstring 说明「调用方改硬失败」。
+3. `plugin_packs/qwen21-viggle-6step/__init__.py`：`_ensure_unified` 从「回退源路径」改为**硬失败复制前置**，新增 `LoraUnifiedError`；`sampling_plan` 在 `_load_lora` 前调用它并按统一目录路径加载；失败抛异常（由插件 dispatcher 隔离，编辑任务退回 legacy 路径，但插件永不加载目录外权重）。
+4. 测试同步：`test_loras.py` 新增 `StrongDirectoryHardFailTests`（handlers 非统一目录注册 → `ValueError`；统一目录内正常注册；无 `LORA_ROOT` 不违规）；`test_dispatch.py` 的 viggle 复制测试改为硬失败断言并新增复制前置用例；`test_plugin_pipeline.py` `_enable` 补 `_ensure_unified` stub（路由测试与真机权重无关）。
+
+### 设计意图
+
+- 「改 viggle 插件使其满足强约束」：viggle 权重的 `loras.json` origin 是绝对路径（`E:\...`），天然违反统一目录。若只把强约束做成硬失败，抓到的第一个就是 viggle 自己。故先把 viggle 改成**自管复制 + 统一目录加载**，强约束才可能对全局硬失败。
+- 插件隔离不受影响：`plugins.dispatch` 仍 catch 插件异常（铁律 2：插件绝不拖垮任务）；viggle 复制失败 → 抛 `LoraUnifiedError` → dispatcher 记 warning 并跳过 → 该次编辑退回 legacy 路径，但**不会**用目录外权重。
+
+### 验证（非 GPU）
+
+- `dotnet build src/ZIV.AI.sln -c Release` → 0 警告 / 0 错误。
+- C# 非 GPU `--filter "FullyQualifiedName!~Ipc"` → **819 / 0**（未改 C#）。
+- Python `unittest discover -p "test_*.py"`（cwd `python/server`）→ **302 / 0**（基线 295 + 新增 7）。
+- headless：viggle 复制前置（源在统一目录外 → 复制进 `LORA_ROOT` 后加载）；无 `LORA_ROOT` / 源缺失 / 复制失败 → `LoraUnifiedError`；handlers 非统一目录 → `ValueError`。
+- 三件套未动；未跑 GPU；未碰 IPC / contracts / 冻结签名 / 公开签名；未改官方 ComfyUI 源码。

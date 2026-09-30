@@ -178,19 +178,69 @@ class QwenPluginTests(unittest.TestCase):
     def test_declines_non_dict_context(self):
         self.assertIsNone(self.module.sampling_plan(None))
 
-    def test_declines_when_lora_missing(self):
+    def test_raises_when_lora_missing(self):
+        # Hard-fail (2026-09-30): a missing origin is an explicit error, never a silent
+        # fallback to the source path / a decline.
         missing = os.path.join("does", "not", "exist.safetensors")
         with mock.patch.object(loras, "resolve_path", return_value=missing):
-            self.assertIsNone(self.module.sampling_plan(self._context()))
+            with self.assertRaises(self.module.LoraUnifiedError):
+                self.module.sampling_plan(self._context())
+
+    def test_ensure_unified_copies_origin_into_unified_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = os.path.join(tmp, "loras")
+            origin = os.path.join(tmp, "origin.safetensors")
+            with open(origin, "wb") as handle:
+                handle.write(b"weight")
+            with mock.patch.object(config, "LORA_ROOT", root):
+                loaded = self.module._ensure_unified(origin)
+            dest = os.path.join(root, "origin.safetensors")
+            self.assertEqual(dest, loaded)
+            self.assertTrue(os.path.isfile(dest))
+
+    def test_ensure_unified_returns_existing_unified_copy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = os.path.join(tmp, "loras")
+            os.makedirs(root)
+            source = os.path.join(root, "already.safetensors")
+            with open(source, "wb") as handle:
+                handle.write(b"weight")
+            with mock.patch.object(config, "LORA_ROOT", root):
+                self.assertEqual(source, self.module._ensure_unified(source))
+
+    def test_ensure_unified_raises_without_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            origin = os.path.join(tmp, "origin.safetensors")
+            with open(origin, "wb") as handle:
+                handle.write(b"weight")
+            with mock.patch.object(config, "LORA_ROOT", ""):
+                with self.assertRaises(self.module.LoraUnifiedError):
+                    self.module._ensure_unified(origin)
+
+    def test_ensure_unified_raises_when_copy_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = os.path.join(tmp, "loras")
+            origin = os.path.join(tmp, "origin.safetensors")
+            with open(origin, "wb") as handle:
+                handle.write(b"weight")
+            with mock.patch.object(config, "LORA_ROOT", root), mock.patch.object(
+                self.module.shutil, "copyfile", side_effect=OSError("read-only")
+            ):
+                with self.assertRaises(self.module.LoraUnifiedError):
+                    self.module._ensure_unified(origin)
 
     def test_plan_for_maskless_edit(self):
         cleanup = mock.Mock()
         sentinel_sigmas = object()
         with tempfile.TemporaryDirectory() as tmp:
-            weight = os.path.join(tmp, "lora.safetensors")
+            root = os.path.join(tmp, "loras")
+            os.makedirs(root)
+            weight = os.path.join(root, "lora.safetensors")
             with open(weight, "wb") as handle:
                 handle.write(b"")
-            with mock.patch.object(loras, "resolve_path", return_value=weight), mock.patch.object(
+            with mock.patch.object(config, "LORA_ROOT", root), mock.patch.object(
+                loras, "resolve_path", return_value=weight
+            ), mock.patch.object(
                 self.module, "_load_lora", return_value={"layer": [1, 2]}
             ), mock.patch.object(
                 self.module, "_build_sigmas", return_value=sentinel_sigmas

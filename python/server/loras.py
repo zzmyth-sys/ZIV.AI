@@ -125,8 +125,12 @@ def resolve_path(id_or_path, registry=None, validate=False):
 def unified_violation(path):
     """Return a message when ``path`` is outside the unified dir, else ``None``.
 
-    Diagnostic-only (2026-09-30 strong-directory rule): callers log it; never raises, so a
-    legacy / fallback path degrades to a warning instead of failing the task.
+    A non-empty message means ``path`` violates the strong-directory rule (2026-09-30): the
+    weight must live under ``<comfy_root>/models/loras``. The function itself never raises —
+    it stays a pure predicate so it can also feed diagnostics — but callers are now expected
+    to **hard-fail** on a violation (``handlers._register_loras`` raises ``ValueError``), not
+    to log a warning and degrade. An unset ``LORA_ROOT`` means no unified dir is configured,
+    so there is nothing to violate (``None``).
     """
     root = (getattr(config, "LORA_ROOT", "") or "").strip()
     if not root or not path:
