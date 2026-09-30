@@ -6568,3 +6568,32 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 理由：本地 IPC，非网络攻击面；Python 已先实现 256 MiB；升是不降级。**未改 Python 侧，未改协议语义**。
 - 验证：新增 `FrameLengthTests`（3 例）：常量 == 256 MiB；65 MiB 头**过**长度守卫（仅因截断抛 `EndOfStream`）；256 MiB+1 仍拒（`InvalidDataException`）。
 - C# 非 GPU **797 / 0**；Python 279 / 0 / 11 skip（未改 Python）。本 commit 随帧长上限统一一并提交；不改既有冻结行。
+
+---
+
+## B7 undo 差量快照 + 字节预算（2026-09-30）
+
+> **追加（只增不改）**。依据审计对齐报告 B7：undo 从「整幅克隆」改为「每笔画脏矩形前像」，并加 64 MiB 总字节预算淘汰最旧。本 commit 见 `git log`。
+> **产品级裁决**：无损 / 保持 `MaxUndo=20` / 预算 64 MiB / 公开签名不变。
+
+### B7.1 结论核对（审计数字过时）
+- 原审计称「4K undo ≈320MB×20」。实测代码：mask 缓冲 = **显示尺寸**（长边≤2560，`ImagePreview.Mask.cs:265`），快照 1 B/px。
+- 故单张 = `W×H`（3.52–6.25 MiB）；×20 = **70–125 MiB**；审计 320MB 系按原图 ~4096² 估算，**高估约 2.6–4×**。
+
+### B7.2 实现（`src/ZivAiEditor.UI/Editing/MaskState.cs`）
+- 私有 `UndoSnapshot { x,y,w,h, byte[] pixels }`；`_undo` 由 `List<byte[]>` → `List<UndoSnapshot>` + `long _undoBytes`。
+- `BeginStroke`：仍取整幅 `_pendingSnapshot`（瞬态，仅笔画期间）；`EndStroke`：`FindChangedRect` 求变化像素的**最小包围矩形**，`CopyRect` 取该矩形前像入栈（**无变化不入栈**，不变）。
+- `Undo`：只把 `snapshot.Pixels` 回填到该矩形（逐像素精确）。
+- `Clear`：仍推**整幅**前像（`0,0,W,H`），与现状一致。
+- `PushUndo`：入栈后先按 `MaxUndo` 截深度，再按 `MaxUndoBytes=64 MiB` 从栈底淘汰最旧。
+- **公开签名 / 语义不变**（新增 `public const int MaxUndoBytes`，与 `MaxUndo` 同型；任务原写 `MaxUndoBytesBytes` 疑笔误，命名取 `MaxUndoBytes`，值/语义一致）。
+
+### B7.3 不采纳
+- B 降分辨率：二值 mask 边缘有损 → 拒绝。
+- C 减深度：`MaxUndo=20` 已验收（ACCEPTANCE 9C.7.3）→ 不改。
+- E 压缩/落盘：CPU/IO/复杂度不划算；差量已足够。
+
+### B7.4 验证
+- 新增 3 例（`MaskStateTests`）：① undo 逐像素精确 + 区域外不触碰；② Clear 后 undo 还原整幅；③ 2048² 大快照使超 64 MiB → 预算淘汰（保留数 < `MaxUndo`）+ 常量==64 MiB。
+- `MaskStateTests` **27/27**；C# 非 GPU **800/0**；Python 279/0/11 skip（未改 Python）。
+- 本 commit 随 B7 修复一并提交；不改既有冻结行。

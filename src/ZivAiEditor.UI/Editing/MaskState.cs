@@ -33,6 +33,12 @@ public sealed class MaskState
     /// <summary>Maximum number of undo snapshots kept (D4/R4).</summary>
     public const int MaxUndo = 20;
 
+    /// <summary>
+    /// B7: total undo-memory budget. After a push, the oldest snapshots are dropped until the
+    /// stack fits within this many bytes (applied on top of <see cref="MaxUndo"/>).
+    /// </summary>
+    public const int MaxUndoBytes = 64 * 1024 * 1024;
+
     /// <summary>Mask value of a painted pixel.</summary>
     public const byte On = 255;
 
@@ -46,8 +52,15 @@ public sealed class MaskState
     private int _brushDiameter = 40;
     private int _featherPx;
 
-    private readonly List<byte[]> _undo = new();
+    private readonly List<UndoSnapshot> _undo = new();
 
+    /// <summary>Running total of <see cref="UndoSnapshot.ByteCount"/> over the undo stack (B7).</summary>
+    private long _undoBytes;
+
+    /// <summary>
+    /// Full pre-stroke buffer, held only while a stroke is active; <see cref="EndStroke"/> reduces
+    /// it to the changed rectangle's pre-image (B7). Not retained after the stroke.
+    /// </summary>
     private byte[]? _pendingSnapshot;
     private bool _strokeActive;
     private bool _strokeChanged;
@@ -161,7 +174,7 @@ public sealed class MaskState
             return;
         }
 
-        PushUndo((byte[])_pixels.Clone());
+        PushUndo(0, 0, _width, _height, (byte[])_pixels.Clone());
         Array.Clear(_pixels, 0, _pixels.Length);
         _hasContent = false;
         MarkDirtyAll();
@@ -182,9 +195,22 @@ public sealed class MaskState
 
         var snapshot = _undo[^1];
         _undo.RemoveAt(_undo.Count - 1);
-        if (snapshot.Length == _pixels.Length)
+        _undoBytes -= snapshot.ByteCount;
+        if (_pixels is not null
+            && snapshot.Width > 0 && snapshot.Height > 0
+            && snapshot.X >= 0 && snapshot.Y >= 0
+            && snapshot.X + snapshot.Width <= _width
+            && snapshot.Y + snapshot.Height <= _height)
         {
-            Array.Copy(snapshot, _pixels, snapshot.Length);
+            for (var row = 0; row < snapshot.Height; row++)
+            {
+                Array.Copy(
+                    snapshot.Pixels,
+                    row * snapshot.Width,
+                    _pixels,
+                    (snapshot.Y + row) * _width + snapshot.X,
+                    snapshot.Width);
+            }
         }
 
         _hasContent = ComputeHasContent();
@@ -256,9 +282,11 @@ public sealed class MaskState
 
         _strokeActive = false;
         _hasContent = ComputeHasContent();
-        if (_strokeChanged && _pendingSnapshot is not null)
+        if (_strokeChanged && _pendingSnapshot is not null
+            && FindChangedRect(_pendingSnapshot) is { } rect)
         {
-            PushUndo(_pendingSnapshot);
+            PushUndo(rect.X, rect.Y, rect.W, rect.H,
+                CopyRect(_pendingSnapshot, rect.X, rect.Y, rect.W, rect.H));
         }
 
         _pendingSnapshot = null;
@@ -325,19 +353,116 @@ public sealed class MaskState
         _pixels = _width > 0 && _height > 0 ? new byte[_width * _height] : Array.Empty<byte>();
         _hasContent = false;
         _undo.Clear();
+        _undoBytes = 0;
         _pendingSnapshot = null;
         _strokeActive = false;
         _strokeChanged = false;
         MarkDirtyAll();
     }
 
-    private void PushUndo(byte[] snapshot)
+    /// <summary>
+    /// Pushes an undo snapshot for the rectangle <c>(x,y,width,height)</c> whose pre-image is
+    /// <paramref name="pixels"/> (B7). The oldest snapshots are then dropped until BOTH the depth
+    /// (<see cref="MaxUndo"/>) and the byte budget (<see cref="MaxUndoBytes"/>) hold.
+    /// </summary>
+    private void PushUndo(int x, int y, int width, int height, byte[] pixels)
     {
+        var snapshot = new UndoSnapshot(x, y, width, height, pixels);
         _undo.Add(snapshot);
+        _undoBytes += snapshot.ByteCount;
+
         while (_undo.Count > MaxUndo)
         {
-            _undo.RemoveAt(0);
+            RemoveOldestUndo();
         }
+
+        while (_undo.Count > 0 && _undoBytes > MaxUndoBytes)
+        {
+            RemoveOldestUndo();
+        }
+    }
+
+    private void RemoveOldestUndo()
+    {
+        _undoBytes -= _undo[0].ByteCount;
+        _undo.RemoveAt(0);
+    }
+
+    /// <summary>
+    /// The minimal bounding rectangle covering every pixel that differs between
+    /// <paramref name="before"/> and the live buffer, or <c>null</c> when they are identical.
+    /// </summary>
+    private (int X, int Y, int W, int H)? FindChangedRect(byte[] before)
+    {
+        if (_pixels is null || before.Length != _pixels.Length)
+        {
+            return null;
+        }
+
+        var minX = int.MaxValue;
+        var minY = int.MaxValue;
+        var maxX = -1;
+        var maxY = -1;
+        for (var y = 0; y < _height; y++)
+        {
+            var row = y * _width;
+            for (var x = 0; x < _width; x++)
+            {
+                if (before[row + x] == _pixels[row + x])
+                {
+                    continue;
+                }
+
+                if (x < minX) { minX = x; }
+                if (x > maxX) { maxX = x; }
+                if (y < minY) { minY = y; }
+                if (y > maxY) { maxY = y; }
+            }
+        }
+
+        return maxX < 0 ? null : (minX, minY, maxX - minX + 1, maxY - minY + 1);
+    }
+
+    /// <summary>Copies the <c>width×height</c> rectangle at <c>(x,y)</c> out of <paramref name="source"/>.</summary>
+    private byte[] CopyRect(byte[] source, int x, int y, int width, int height)
+    {
+        var region = new byte[width * height];
+        for (var row = 0; row < height; row++)
+        {
+            Array.Copy(source, (y + row) * _width + x, region, row * width, width);
+        }
+
+        return region;
+    }
+
+    /// <summary>
+    /// B7: one undo entry — either the whole canvas (a <see cref="Clear"/> pre-image) or the
+    /// pre-image of just the dirty rectangle a stroke touched. Undo copies
+    /// <see cref="Pixels"/> back into that rectangle only, so the retained bytes scale with the
+    /// edited region instead of the whole canvas.
+    /// </summary>
+    private readonly struct UndoSnapshot
+    {
+        public UndoSnapshot(int x, int y, int width, int height, byte[] pixels)
+        {
+            X = x;
+            Y = y;
+            Width = width;
+            Height = height;
+            Pixels = pixels;
+        }
+
+        public int X { get; }
+
+        public int Y { get; }
+
+        public int Width { get; }
+
+        public int Height { get; }
+
+        public byte[] Pixels { get; }
+
+        public int ByteCount => Pixels.Length;
     }
 
     /// <summary>

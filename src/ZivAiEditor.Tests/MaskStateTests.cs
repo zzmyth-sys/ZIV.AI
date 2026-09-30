@@ -410,4 +410,78 @@ public class MaskStateTests
             Assert.Equal(255, At(mask, x, 30));
         }
     }
+
+    [Fact]
+    public void Undo_Is_Pixel_Exact_And_Region_Scoped()
+    {
+        // B7: the undo snapshot stores only the stroke's dirty rectangle pre-image. Undo must
+        // restore the buffer to EXACTLY the pre-stroke state (whole-buffer equality catches any
+        // pixel outside the rectangle being touched).
+        var mask = Canvas(100, 100);
+
+        mask.BeginStroke(20, 20, erase: false);
+        mask.EndStroke();
+        var afterFirst = mask.CopyPixels();
+
+        mask.BeginStroke(80, 80, erase: false);
+        mask.EndStroke();
+        Assert.Equal(MaskState.On, At(mask, 80, 80));
+
+        mask.Undo();
+        Assert.Equal(afterFirst, mask.CopyPixels());
+        Assert.Equal(MaskState.On, At(mask, 20, 20));   // first stroke intact
+        Assert.Equal(MaskState.Off, At(mask, 80, 80));  // second stroke reverted
+
+        mask.Undo();
+        Assert.All(mask.CopyPixels(), value => Assert.Equal(MaskState.Off, value));
+        Assert.False(mask.CanUndo);
+        Assert.False(mask.HasContent);
+    }
+
+    [Fact]
+    public void Undo_After_Clear_Restores_The_Whole_Pre_Clear_Buffer()
+    {
+        var mask = Canvas(60, 60);
+        mask.BeginStroke(20, 20, erase: false);
+        mask.EndStroke();
+        mask.BeginStroke(40, 40, erase: false);
+        mask.EndStroke();
+        var beforeClear = mask.CopyPixels();
+
+        mask.Clear();
+        Assert.False(mask.HasContent);
+
+        mask.Undo();
+        Assert.Equal(beforeClear, mask.CopyPixels());
+        Assert.True(mask.HasContent);
+    }
+
+    [Fact]
+    public void Undo_Budget_Drops_Oldest_When_Over_MaxUndoBytes()
+    {
+        // 2048x2048 canvas -> every snapshot (the diagonal stroke's dirty rect + each Clear's
+        // whole-canvas pre-image) is ~4 MiB. 20 entries = ~80 MiB > the 64 MiB budget, so the
+        // byte budget (not the depth cap) must evict the oldest, leaving fewer than MaxUndo.
+        Assert.Equal(64 * 1024 * 1024, MaskState.MaxUndoBytes);
+
+        var mask = Canvas(2048, 2048);
+        for (var i = 0; i < 20; i++)
+        {
+            mask.BeginStroke(0, 0, erase: false);
+            mask.ContinueStroke(2047, 2047);
+            mask.EndStroke();
+            mask.Clear();
+        }
+
+        var undos = 0;
+        while (mask.CanUndo)
+        {
+            mask.Undo();
+            undos++;
+        }
+
+        Assert.True(undos < MaskState.MaxUndo,
+            $"byte budget should have evicted snapshots: kept {undos} (>= MaxUndo {MaskState.MaxUndo})");
+        Assert.True(undos >= 1);
+    }
 }
