@@ -168,7 +168,10 @@ public partial class MainWindow : Window
             context.CommandsReloaded += OnCommandsReloaded;
         }
 
-        _vm.Messages.CollectionChanged += (_, _) => RenderChat();
+        // B1: coalesce — a burst of Messages changes (e.g. RebuildContext's Clear + one Add per
+        // node) must produce ONE re-render, not one full rebuild per change (which was O(n^2)
+        // with a per-change bitmap dispose / re-decode).
+        _vm.Messages.CollectionChanged += (_, _) => QueueChatRender();
         _vm.History.CollectionChanged += (_, _) => RenderHistory();
         _vm.Start(launchOptions);
         InitProjects(launchOptions);
@@ -310,11 +313,17 @@ public partial class MainWindow : Window
 
     private void RenderChat()
     {
+        // B1: this render serves every change queued since the last one. Clear the flag FIRST
+        // so a change made *during* this rebuild still queues the next render (never dropped);
+        // the flag is only ever set by QueueChatRender.
+        _chatRenderQueued = false;
+
         if (_vm is null || this.FindControl<StackPanel>("PART_ChatStream") is not { } stream)
         {
             return;
         }
 
+        _chatRenderCount++;
         ReleaseBitmaps();
         _chatGeneration++;
         stream.Children.Clear();

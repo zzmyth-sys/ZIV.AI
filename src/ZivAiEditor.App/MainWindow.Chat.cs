@@ -8,6 +8,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using ZivAiEditor.App.Controls;
 using ZivAiEditor.App.Imaging;
 using ZivAiEditor.UI.Chat;
@@ -34,6 +35,41 @@ public partial class MainWindow
     /// exercise it directly via <c>ImagePreview</c>/<c>DisplayImageLoader</c>.
     /// </summary>
     private readonly IDisplayImageLoader _displayLoader = new DisplayImageLoader();
+
+    /// <summary>
+    /// B1: true while a coalesced chat re-render is queued on the dispatcher. A burst of
+    /// <c>Messages</c> changes (e.g. RebuildContext's Clear + one Add per node) must produce a
+    /// single full re-render, not one per change (which was O(n^2) with a per-change bitmap
+    /// dispose / re-decode). Cleared at the start of <see cref="RenderChat"/>, so a change made
+    /// during the render still queues the next one.
+    /// </summary>
+    private bool _chatRenderQueued;
+
+    /// <summary>Actual chat rebuild count (test-only observation; B1). Never reset.</summary>
+    private int _chatRenderCount;
+
+    /// <summary>Number of real chat rebuilds, for the B1 headless complexity guard (test-only).</summary>
+    internal int ChatRenderCount => _chatRenderCount;
+
+    /// <summary>The chat view model, so headless tests can drive a rebuild (test-only observation).</summary>
+    internal SessionViewModel ViewModel => _vm;
+
+    /// <summary>
+    /// B1: coalesce chat-stream rebuilds. Any <c>Messages</c> change requests one render; if one
+    /// is already queued the request is dropped, because the queued render reads the whole
+    /// collection and therefore reflects the change too. Posts a single Background render,
+    /// matching <see cref="ScrollToEnd"/>.
+    /// </summary>
+    private void QueueChatRender()
+    {
+        if (_chatRenderQueued)
+        {
+            return;
+        }
+
+        _chatRenderQueued = true;
+        Dispatcher.UIThread.Post(RenderChat, DispatcherPriority.Background);
+    }
 
     /// <summary>A row with the status text (fills) and the action button docked right.</summary>
     private static Control BuildActionRow(TextBlock? text, Button? action)

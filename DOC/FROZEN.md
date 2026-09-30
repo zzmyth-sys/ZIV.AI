@@ -6361,3 +6361,39 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
   `on_preview`，断言 `_stage_sample` 不抛且返回 samples）；`test_stage_exception_propagates_without_save`
   仍作反向守卫（非预览异常仍应失败）。
 - 本 commit 随 B10 修复一并提交；不改既有冻结行。
+
+---
+
+## B1 聊天流合并渲染（2026-09-30）
+
+> **追加（只增不改）**。本条登记审计报告 B1 的修复：把 `Messages.CollectionChanged → RenderChat` 改为
+> 「排队 + 单次延迟渲染」，消除 O(n²) 与位图抖动。依据 `DOC/全代码分析.md`（B1）。
+
+### B1.1 语义（合并，不丢变更）
+- 订阅处（`MainWindow.axaml.cs`）：任一 `Messages` 变更调用 `QueueChatRender()`：
+  `if (_chatRenderQueued) return; _chatRenderQueued = true; Dispatcher.UIThread.Post(RenderChat, DispatcherPriority.Background);`
+- `RenderChat` 开头**先清** `_chatRenderQueued = false;`，再执行重建；因此渲染期间发生的新变更
+  仍会排下一次渲染（**绝不「Post 时清标志」**，否则会丢变更）。
+- 优先级 `DispatcherPriority.Background`，与既有 `ScrollToEnd` 一致。
+
+### B1.2 实现
+- `MainWindow.axaml.cs`：订阅处改 `QueueChatRender()`；`RenderChat` 开头清标志 + 实际重建段
+  `_chatRenderCount++`（仅观测，不改行为）。
+- `MainWindow.Chat.cs`（现有 partial）：`_chatRenderQueued` / `_chatRenderCount` 字段、
+  `internal ChatRenderCount` 与 `internal ViewModel`（**仅测试观测**）、`QueueChatRender()`。
+- **不改** `ReleaseBitmaps`（保留）；位图抖动因合并自然降低。**不改** `SessionViewModel` /
+  `FlowRunner` / XAML / 控件类型（方案 A/C 未采纳）。
+
+### B1.3 异步路径实测结论（`FlowRunner.Submit`）
+- `FlowRunner.Submit.cs` 的重建触发点跨 `await`：用户气泡 `:56` 在首个 `await`（`:69 ParseAsync`）之前，
+  `:72` / `:95` / `:99` / `:103` 在同一后续同步段（合并为 1 次），`:126` / `:143` / `:162` / `:179` 的
+  `ReplacePending` 各在 `await RunWithOomRetryAsync` 之后。故一次成功提交的合并效果为
+  **≈3 次渲染**（原为每次变更各一次全量重建）；而 `RebuildContext()`（Clear + 逐条 Add 在**同一同步段**）
+  合并为 **1 次** —— 这是消除 O(n²) 的关键。
+
+### B1.4 验证
+- 新增 `MainWindowChatRenderTests`（headless）：行为（children == `Messages.Count`）、复杂度守卫
+  （一次 `RebuildContext` 后 `ChatRenderCount` 增量 == 1）、反向（两次独立变更 → 增量 == 2）。
+- `internal ChatRenderCount` / `internal ViewModel` 为**测试专用观测缝**（App 已
+  `InternalsVisibleTo ZivAiEditor.Tests`），不改变任何行为 / 公开签名。
+- 本 commit 随 B1 修复一并提交；不改既有冻结行。
