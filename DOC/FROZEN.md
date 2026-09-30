@@ -6490,3 +6490,31 @@ Task<TaskState> RerunAsync(string nodeId, IProgress<TaskProgress>? progress = nu
 - 新增 `MainWindowStatusTests`（headless）：① 瞬时修复——pending + `SetStatus("进度X")` + 旁路重建（`AddHint`）后
   `PendingStatusText == "进度X"`；② 永久修复——完成后 `PendingStatusText == null`，再 `SetStatus("已保存")` 仍为 null。
 - 零 GPU / 零 Python。本 commit 随 B14 修复一并提交；不改既有冻结行。
+
+---
+
+## ACCEPTANCE GPU 项 CLI 化盘点 + 批量取证（2026-09-30）
+
+> **追加（只增不改）**。依据审计对齐后的盘点任务；本段随本次 commit（见 `git log`）。
+
+### 事实
+- ACCEPTANCE 表格 **1485** 行；待认证 `⏳` **93**；GPU/真机待认证 **64**。
+  移交口径「12 条 GPU 项」实为 **G1 的 12 次 GPU 触碰**；「70 条真机必跑」= **Q4-C**。
+- CLI 可表达 = 既有 3 金标 **b3 / b4 / 1969**（`--op inpaint` 单次推理 + 断言 SHA）。
+- 批量取证（Z30 过）：b3/b4/1969 各 **3 次**，**SHA 3/3 一致且 = goldens**；9 次 exit 0、未 OOM / 未杀；
+  gpu-check 跑后回基线（901 MiB）。产物落 `tools/zivcli/runs/acceptance-*/`（gitignore）。
+
+### 可 CLI 回归
+- **b3 / b4 / 1969**：纳入 CLI 回归候选（SHA 见 ACCEPTANCE「批量取证」段；**未入 `goldens.json`**——
+  本轮不改 goldens，入册另立任务裁定）。
+- 日常回归：`python -m tools.zivcli verify b3|b4|1969 --yes`。
+
+### 仍必须 GUI（理由）
+- 画布遮罩类（9C.7.16 / 9C.7B.16 / 9C.7C.11-13）：需鼠标涂抹 + 预览窗叠加，CLI 无画布。
+- 取消 / 重跑 / 删除（9C.8A.18 / 9C.8A2.15 / 9C.8A3.8 / 9C.8B.11-12）：需 IPC + UI 状态机。
+- OOM 兜底（9C.6D.9）：需真实 OOM 条件，CLI 未暴露 `ZIV_AI_FORCE_OOM`。
+- 参考图三选一 / 多图拖入 / 设置窗 / 命令面板（9C.5D.15 / 9C.10P2.* / 9C.15-17 / T5S4*）：纯 UI 交互。
+- `/扩图`（outpaint）验收：harness 支持 `op=outpaint`，但 CLI 缺 `--w/--h/--anchor` → 需改 CLI 才能表达（未做）。
+
+### 未改
+- 未改 ACCEPTANCE 原行 / `goldens.json` / CLI / harness / 产品代码 / IPC / contracts / 冻结签名。

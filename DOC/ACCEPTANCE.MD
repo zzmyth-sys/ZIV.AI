@@ -4701,3 +4701,41 @@ B 组（取消引导）：导入图 → 裁切外扩 → 发送 `/扩图` → �
 - **产物落点**：ZIV `tools/zivcli/runs/single25/ziv.png`；官方 `Comfyui/ComfyUI/output/off_single25_00001_.png`（均 gitignore）。
 - **登记（可选后续）**：官方脚本缺 `nref/steps` 参数 → 单图/25 步变体只能临时构造；如需把单图对照纳入常规，另立任务给 `g1_workflow.py` 参数化。
 - 状态：**G1 对照收尾**；性能结果为准，**视觉签归用户**。原行不改，以本段为准。
+
+---
+
+## ACCEPTANCE GPU 项 CLI 化盘点 + 批量取证（2026-09-30，只增）
+
+> **追加（只增不改）**。盘点 ACCEPTANCE 的 GPU/真机项中哪些能经 `zivcli` CLI 表达，并对 CLI 可表达项做 ≥3 次批量取证。
+> 引：CLI 支持 commit `299d491`；金标 commit `bf15608`/`683bdd1`；本段随本次 commit（见 `git log`）。**原行一律不改**。
+
+### 盘点（实际数量）
+- ACCEPTANCE 表格行 **1485** 行；待认证 `⏳` **93** 行；其中涉及 GPU/真机的待认证 **64** 行。
+- 移交口径核对：**「12 条 GPU 项」= G1 的 12 次 GPU 触碰**（见本文件「正式 G1 对照执行」段），**非**独立 12 条清单；
+  **「70 条真机必跑」= FROZEN Q4-C**（按功能域 7 组）。
+- 待认证 GPU/真机项几乎全部为 **UI/交互型**（画布遮罩、多窗口、右键菜单、设置窗、取消/OOM 等）→ **必须 GUI**；
+  无「单次推理 + 断言输出」型的新待认证项。
+
+### CLI 可表达清单（3 条；= 既有 zivcli 金标）
+| ID | 场景 | CLI 参数 | golden |
+|---|---|---|---|
+| b3 | inpaint / side1536 / nref2 / steps40 / viggle0 | `run --op inpaint --side 1536 --nref 2 --steps 40 --viggle 0 --img1 fixtures/img1.jpg --img2 fixtures/img2.png --img3 fixtures/img2.png` | goldens.json b3 |
+| b4 | 同 b3 但 viggle1 | `… --viggle 1 …` | goldens.json b4 |
+| 1969 | 多图引用（img3=img3.png + 引用 prompt） | `run --op inpaint --side 1536 --nref 2 --steps 40 --viggle 0 --img1 fixtures/img1.jpg --img2 fixtures/img2.png --img3 fixtures/img3.png --prompt "Replace the background of <image1> …"` | goldens.json 1969 |
+
+- `--op outpaint` 存在（harness 支持），但 CLI **无 `--w/--h/--anchor`** → 无法表达 outpaint 验收（需改 CLI，未做）。
+- `--op t2i` 存在，但 ACCEPTANCE 无对应待认证 GPU 项。
+
+### 批量取证（每条 ≥3 次；Z30 逐条过）
+环境：RTX 4080 16GB / driver 591.86 / torch 2.13.0+cu130 / ComfyUI 0.37.0；同机同 HEAD `ad8d2a2`。
+gpu-check：跑前 free=true（used 860 MiB）；跑后 free=true（used 901 MiB）。**9 次全部 exit=0、未 OOM、未被杀**。
+
+| ID | SHA256（run1/2/3） | 3 次一致 | =golden | wall | peak VRAM | peak RSS |
+|---|---|---|---|---|---|---|
+| b3 | `53DF2DB71C76908394B354BEBDCC585CE0FE820524A2273D4C4AF058B396BBC9` | ✅ | ✅ | 51.9/51.8/51.8 s | 11465/11489/11479 MiB | 11.30/11.30/11.30 GB |
+| b4 | `5AD34D51D48779243CF6CEA99526584DA682C355C6FC09946C058C97976A26C8` | ✅ | ✅ | 26.5/26.5/26.3 s | 12428/12332/12434 MiB | 15.69/16.06/15.41 GB |
+| 1969 | `FA8CCF721104A5B1941A30FA714612762A01D46725BA68F7C83C7ECDD38EDCF1` | ✅ | ✅ | 50.3/50.3/50.2 s | 11451/11226/11265 MiB | 10.71/10.71/10.71 GB |
+
+- 产物：`tools/zivcli/runs/acceptance-{B3,B4,1969}/run{1,2,3}.png`（+ `.result.json`；均 gitignore，未入库）。
+- **SHA 复现 ≠ 视觉通过**：本段只证「同机同 HEAD 逐字节确定 + 输入被消费」；**视觉签仍归用户**。
+- 未写 `goldens.json`；未改 CLI / harness / 产品代码 / 原行。
